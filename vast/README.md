@@ -1,26 +1,82 @@
-# Observability Agent
+# VAST Observability Agent
+
+VAST Data observability integration for the [OpenTelemetry Demo](https://github.com/open-telemetry/opentelemetry-demo). Adds a web dashboard with diagnostic chat, predictive alerts, and automated root cause analysis backed by VastDB and Trino.
+
+## Architecture
+
+```
+otel-demo services → otel-collector → Kafka (3 topics)
+                                         ↓
+                              observability-ingester
+                                         ↓
+                                      VastDB
+                                         ↓
+                                   Trino (queries)
+                                         ↓
+                              observability-agent (web UI)
+```
 
 ## Prerequisites
 
-- VAST Kafka Broker with three topics
-  - otel-logs
-  - otel-traces
-  - otel-metrics
-- VAST DB bucket/schema access credentials
+- VAST Kafka broker with three topics: `otel-logs`, `otel-traces`, `otel-metrics`
+- VAST DB bucket/schema with access credentials
+- Trino connected to VAST DB
+- Anthropic API key (for diagnostic chat and automated investigations)
 
-## Instructions
+## Quick Start
 
-- Deploy [otel demo](https://opentelemetry.io/ecosystem/demo/)
-- Replace the otel demo src/otel-collector/otelcol-config.yml with [otelcol-config.yml](./otelcol-config.yml)
-- Modify the kafka broker name in `otelcol-config.yml`
-- Restart otel demo
-- Run the script [otel_ingester.py](./otel_ingester.py) using nohup/screen/tmux
+### 1. Configure environment variables
 
-## Connect Trino to VAST DB
+Copy the template and fill in your credentials:
 
-- Connect Trino to VAST DB
+```bash
+cp vast/.env-template .env.override
+# Edit .env.override with your VAST, Trino, Kafka, and Anthropic credentials
+```
 
-## Diagnostic Chat Tool
+The following variables must be set in `.env.override` (they are not in `.env` since they contain deployment-specific credentials):
+
+| Variable | Description |
+|----------|-------------|
+| `KAFKA_BOOTSTRAP_SERVERS` | Kafka broker address (e.g. `172.200.204.97:9092`) |
+| `VASTDB_ENDPOINT` | VastDB HTTP endpoint |
+| `VASTDB_ACCESS_KEY` | VastDB access key |
+| `VASTDB_SECRET_KEY` | VastDB secret key |
+| `VASTDB_BUCKET` | VastDB bucket name |
+| `VASTDB_SCHEMA` | VastDB schema name |
+| `TRINO_HOST` | Trino server hostname |
+| `TRINO_PORT` | Trino server port |
+| `TRINO_USER` | Trino username |
+| `TRINO_CATALOG` | Trino catalog (e.g. `vast`) |
+| `TRINO_SCHEMA` | Trino schema (e.g. `csnow-db\|otel`) |
+| `TRINO_VERIFY` | TLS verification (`true`/`false`) |
+| `ANTHROPIC_API_KEY` | Anthropic API key for LLM features |
+
+### 2. Build and start
+
+```bash
+# Build the VAST observability containers
+docker compose build observability-agent observability-ingester
+
+# Start everything
+docker compose up -d
+```
+
+### 3. Access the dashboard
+
+Open http://localhost:5001 in your browser.
+
+## Services
+
+This integration adds three services to the docker compose stack:
+
+| Service | Description | Port |
+|---------|-------------|------|
+| `observability-agent` | Web UI + predictive alerts + diagnostic chat | 5001 |
+| `observability-ingester` | Kafka consumer that writes OTEL data to VastDB | - |
+| `pg-latency-proxy` | PostgreSQL fault injection proxy (profile: `fault-injection`) | - |
+
+## Diagnostic Chat
 
 An interactive LLM-powered chat interface for support engineers to diagnose issues by querying observability data via Trino.
 
@@ -31,31 +87,6 @@ An interactive LLM-powered chat interface for support engineers to diagnose issu
 - Correlates logs, metrics, and traces automatically
 - Full SQL support via Trino (JOINs, GROUP BY, aggregations, etc.)
 
-### Setup
-
-Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-Set environment variables:
-
-```bash
-export ANTHROPIC_API_KEY=your_api_key
-export TRINO_HOST=trino.example.com
-export TRINO_PORT=443
-export TRINO_USER=your_user
-export TRINO_CATALOG=vast
-export TRINO_SCHEMA=otel
-```
-
-### Usage
-
-```bash
-python diagnostic_chat.py
-```
-
 ### Example Queries
 
 | Query | What it does |
@@ -65,30 +96,6 @@ python diagnostic_chat.py
 | "show me failed checkouts" | Finds checkout failures with traces |
 | "trace request abc123" | Shows full trace for a specific request |
 | "why is the frontend timing out?" | Diagnoses timeout issues |
-
-### Commands (CLI)
-
-- `/clear` - Clear conversation history
-- `/help` - Show help message
-- `/quit` - Exit the chat
-
-### Web UI
-
-A browser-based interface with real-time system status monitoring.
-
-```bash
-python web_ui.py
-```
-
-Then open http://localhost:5000 in your browser.
-
-**Features:**
-- Chat interface for diagnosing issues
-- Real-time service health dashboard
-- Database status monitoring
-- Recent errors feed
-- Query result visualization
-- Predictive alerts panel (see below)
 
 ## Predictive Maintenance Alerts
 
@@ -127,13 +134,9 @@ export TRINO_CATALOG=vast
 export TRINO_SCHEMA=otel
 ```
 
-### Running the Service
+### Running
 
-```bash
-python predictive_alerts.py
-```
-
-Run alongside `otel_ingester.py` using nohup, screen, or tmux for production use.
+The predictive alerts service runs automatically inside the `observability-agent` container. No separate process is needed.
 
 ### Configuration
 
@@ -203,58 +206,38 @@ When running, alerts appear in the sidebar:
 
 ## Testing with Simulated Failures
 
-To test the diagnostic capabilities, you can simulate infrastructure failures in the OpenTelemetry demo using the provided script.
-
-### Using the Simulation Script
+To test the diagnostic capabilities, you can simulate infrastructure failures using the provided script. Run from the repo root:
 
 ```bash
-# From the opentelemetry-demo directory:
-cd /path/to/opentelemetry-demo
-
-# Copy the script or run from the observability_agent directory
-./scripts/simulate_failure.sh <action> <target>
-
-# Actions: block, unblock, status
+# Actions: block, unblock, degrade, restore, inject, status
 # Targets: postgres, redis, kafka, or any docker compose service name
+vast/scripts/simulate_failure.sh <action> <target> [options]
 ```
 
 ### Examples
 
 ```bash
-# Block PostgreSQL (gracefully blocks connections)
-./scripts/simulate_failure.sh block postgres
+# Degrade PostgreSQL with latency proxy (uses docker compose fault-injection profile)
+vast/scripts/simulate_failure.sh degrade postgres slow
 
-# Check status
-./scripts/simulate_failure.sh status postgres
+# Check status (shows proxy state and measures query latency)
+vast/scripts/simulate_failure.sh status postgres
 
-# Restore PostgreSQL
-./scripts/simulate_failure.sh unblock postgres
+# Restore PostgreSQL to normal
+vast/scripts/simulate_failure.sh restore postgres
+
+# Block PostgreSQL connections (hard failure)
+vast/scripts/simulate_failure.sh block postgres
+vast/scripts/simulate_failure.sh unblock postgres
 
 # Pause Redis (simulates timeout/hang)
-./scripts/simulate_failure.sh block redis
+vast/scripts/simulate_failure.sh block redis
 
-# Stop any service completely
-./scripts/simulate_failure.sh block checkoutservice
-```
-
-### Manual Testing
-
-You can also manually simulate failures:
-
-```bash
-# PostgreSQL - block connections
-docker compose exec postgresql psql -U root -d otel -c "REVOKE CONNECT ON DATABASE otel FROM PUBLIC;"
-
-# PostgreSQL - restore
-docker compose exec postgresql psql -U root -d otel -c "GRANT CONNECT ON DATABASE otel TO PUBLIC;"
-
-# Any service - stop/start
-docker compose stop <service>
-docker compose start <service>
-
-# Any service - pause/unpause (simulates hang)
-docker compose pause <service>
-docker compose unpause <service>
+# Inject application failures via otel-demo API
+vast/scripts/simulate_failure.sh inject payment-failure 50%
+vast/scripts/simulate_failure.sh inject slow-images 5sec
+vast/scripts/simulate_failure.sh inject memory-leak 100x
+vast/scripts/simulate_failure.sh inject payment-failure off
 ```
 
 ### What to Look For
