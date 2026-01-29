@@ -669,6 +669,9 @@ services:
     restart: unless-stopped
     ports:
       - "${OBSERVABILITY_AGENT_PORT}"
+    env_file:
+      - .env
+      - .env.override
     environment:
       - TRINO_HOST
       - TRINO_PORT
@@ -713,6 +716,9 @@ services:
           memory: 256M
     restart: unless-stopped
     command: ["python", "otel_ingester.py"]
+    env_file:
+      - .env
+      - .env.override
     environment:
       - VASTDB_ENDPOINT
       - VASTDB_ACCESS_KEY
