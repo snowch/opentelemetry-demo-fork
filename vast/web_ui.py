@@ -885,7 +885,12 @@ def execute_query():
 
 @app.route('/api/service/<service_name>', methods=['GET'])
 def service_details(service_name):
-    """Get detailed metrics for a specific service."""
+    """Get detailed metrics for a specific service.
+
+    Reads from pre-aggregated service_metrics_1m table when available,
+    falling back to raw traces_otel_analytic queries if the rollup table
+    is empty or missing.
+    """
     executor = get_query_executor()
     time_range = request.args.get('range', '1')  # hours
 
@@ -898,41 +903,67 @@ def service_details(service_name):
         'top_operations': []
     }
 
-    # Latency over time (1-minute buckets)
-    latency_query = f"""
-    SELECT
-        date_trunc('minute', start_time) as time_bucket,
-        ROUND(AVG(duration_ns / 1000000.0), 2) as avg_latency_ms,
-        ROUND(MAX(duration_ns / 1000000.0), 2) as max_latency_ms,
-        COUNT(*) as request_count
-    FROM traces_otel_analytic
+    # Try pre-aggregated rollup table first
+    rollup_query = f"""
+    SELECT time_bucket, avg_latency_ms, max_latency_ms, p95_latency_ms,
+           request_count, error_count, error_pct
+    FROM service_metrics_1m
     WHERE service_name = '{service_name}'
-      AND start_time > NOW() - INTERVAL '{time_range}' HOUR
-    GROUP BY date_trunc('minute', start_time)
+      AND time_bucket > NOW() - INTERVAL '{time_range}' HOUR
     ORDER BY time_bucket
     """
-    result = executor.execute_query(latency_query)
-    if result['success']:
-        data['latency_history'] = result['rows']
+    result = executor.execute_query(rollup_query)
+    use_rollup = result['success'] and len(result.get('rows', [])) > 0
 
-    # Error rate over time
-    error_query = f"""
-    SELECT
-        date_trunc('minute', start_time) as time_bucket,
-        COUNT(*) as total,
-        SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) as errors,
-        ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) / COUNT(*), 2) as error_pct
-    FROM traces_otel_analytic
-    WHERE service_name = '{service_name}'
-      AND start_time > NOW() - INTERVAL '{time_range}' HOUR
-    GROUP BY date_trunc('minute', start_time)
-    ORDER BY time_bucket
-    """
-    result = executor.execute_query(error_query)
-    if result['success']:
-        data['error_history'] = result['rows']
+    if use_rollup:
+        rows = result['rows']
+        # Latency history from rollup
+        data['latency_history'] = [
+            {'time_bucket': r['time_bucket'], 'avg_latency_ms': r['avg_latency_ms'],
+             'max_latency_ms': r['max_latency_ms'], 'request_count': r['request_count']}
+            for r in rows
+        ]
+        # Error history from rollup
+        data['error_history'] = [
+            {'time_bucket': r['time_bucket'], 'total': r['request_count'],
+             'errors': r['error_count'], 'error_pct': r['error_pct']}
+            for r in rows
+        ]
+    else:
+        # Fallback: raw queries on traces_otel_analytic
+        latency_query = f"""
+        SELECT
+            date_trunc('minute', start_time) as time_bucket,
+            ROUND(AVG(duration_ns / 1000000.0), 2) as avg_latency_ms,
+            ROUND(MAX(duration_ns / 1000000.0), 2) as max_latency_ms,
+            COUNT(*) as request_count
+        FROM traces_otel_analytic
+        WHERE service_name = '{service_name}'
+          AND start_time > NOW() - INTERVAL '{time_range}' HOUR
+        GROUP BY date_trunc('minute', start_time)
+        ORDER BY time_bucket
+        """
+        result = executor.execute_query(latency_query)
+        if result['success']:
+            data['latency_history'] = result['rows']
 
-    # Recent errors for this service
+        error_query = f"""
+        SELECT
+            date_trunc('minute', start_time) as time_bucket,
+            COUNT(*) as total,
+            SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) as errors,
+            ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) / COUNT(*), 2) as error_pct
+        FROM traces_otel_analytic
+        WHERE service_name = '{service_name}'
+          AND start_time > NOW() - INTERVAL '{time_range}' HOUR
+        GROUP BY date_trunc('minute', start_time)
+        ORDER BY time_bucket
+        """
+        result = executor.execute_query(error_query)
+        if result['success']:
+            data['error_history'] = result['rows']
+
+    # Recent errors (always from raw traces — need individual span detail)
     recent_errors_query = f"""
     SELECT span_name, status_code, start_time,
            duration_ns / 1000000.0 as duration_ms
@@ -1110,7 +1141,11 @@ def service_dependencies(service_name):
 
 @app.route('/api/service/<service_name>/operations', methods=['GET'])
 def service_operations(service_name):
-    """Get top operations for a service with configurable time window."""
+    """Get top operations for a service with configurable time window.
+
+    Reads from pre-aggregated operation_metrics_5m when the requested
+    window is >= 5 minutes, falling back to raw traces otherwise.
+    """
     executor = get_query_executor()
     time_param = request.args.get('time', '5m')
 
@@ -1127,6 +1162,26 @@ def service_operations(service_name):
     else:
         interval = "'5' MINUTE"  # default
 
+    # Use rollup table for windows >= 5 minutes
+    use_rollup = (time_unit == 'h') or (time_unit == 'm' and time_value >= 5)
+    if use_rollup:
+        rollup_query = f"""
+        SELECT span_name,
+               CAST(SUM(call_count) AS BIGINT) as call_count,
+               ROUND(SUM(avg_latency_ms * call_count) / NULLIF(SUM(call_count), 0), 2) as avg_latency_ms,
+               ROUND(100.0 * SUM(error_count) / NULLIF(SUM(call_count), 0), 2) as error_pct
+        FROM operation_metrics_5m
+        WHERE service_name = '{service_name}'
+          AND time_bucket > NOW() - INTERVAL {interval}
+        GROUP BY span_name
+        ORDER BY call_count DESC
+        LIMIT 10
+        """
+        result = executor.execute_query(rollup_query)
+        if result['success'] and len(result.get('rows', [])) > 0:
+            return jsonify({'operations': result['rows']})
+
+    # Fallback: raw traces
     top_ops_query = f"""
     SELECT span_name,
            COUNT(*) as call_count,
@@ -1149,7 +1204,12 @@ def service_operations(service_name):
 
 @app.route('/api/database/<db_system>', methods=['GET'])
 def database_details(db_system):
-    """Get detailed metrics for a specific database system."""
+    """Get detailed metrics for a specific database system.
+
+    Reads from pre-aggregated db_metrics_1m table when available,
+    falling back to raw traces_otel_analytic queries if the rollup
+    table is empty or missing.
+    """
     executor = get_query_executor()
     time_range = request.args.get('range', '1')  # hours
 
@@ -1162,41 +1222,67 @@ def database_details(db_system):
         'size_history': []
     }
 
-    # Query latency and volume over time (1-minute buckets)
-    latency_query = f"""
-    SELECT
-        date_trunc('minute', start_time) as time_bucket,
-        ROUND(AVG(duration_ns / 1000000.0), 2) as avg_latency_ms,
-        ROUND(MAX(duration_ns / 1000000.0), 2) as max_latency_ms,
-        COUNT(*) as query_count
-    FROM traces_otel_analytic
+    # Try pre-aggregated rollup table first
+    rollup_query = f"""
+    SELECT time_bucket, avg_latency_ms, max_latency_ms,
+           query_count, error_count, error_pct
+    FROM db_metrics_1m
     WHERE db_system = '{db_system}'
-      AND start_time > NOW() - INTERVAL '{time_range}' HOUR
-    GROUP BY date_trunc('minute', start_time)
+      AND time_bucket > NOW() - INTERVAL '{time_range}' HOUR
     ORDER BY time_bucket
     """
-    result = executor.execute_query(latency_query)
-    if result['success']:
-        data['latency_history'] = result['rows']
+    result = executor.execute_query(rollup_query)
+    use_rollup = result['success'] and len(result.get('rows', [])) > 0
 
-    # Error rate over time
-    error_query = f"""
-    SELECT
-        date_trunc('minute', start_time) as time_bucket,
-        COUNT(*) as total,
-        SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) as errors,
-        ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) as error_pct
-    FROM traces_otel_analytic
-    WHERE db_system = '{db_system}'
-      AND start_time > NOW() - INTERVAL '{time_range}' HOUR
-    GROUP BY date_trunc('minute', start_time)
-    ORDER BY time_bucket
-    """
-    result = executor.execute_query(error_query)
-    if result['success']:
-        data['error_history'] = result['rows']
+    if use_rollup:
+        rows = result['rows']
+        # Latency history from rollup
+        data['latency_history'] = [
+            {'time_bucket': r['time_bucket'], 'avg_latency_ms': r['avg_latency_ms'],
+             'max_latency_ms': r['max_latency_ms'], 'query_count': r['query_count']}
+            for r in rows
+        ]
+        # Error history from rollup
+        data['error_history'] = [
+            {'time_bucket': r['time_bucket'], 'total': r['query_count'],
+             'errors': r['error_count'], 'error_pct': r['error_pct']}
+            for r in rows
+        ]
+    else:
+        # Fallback: raw queries on traces_otel_analytic
+        latency_query = f"""
+        SELECT
+            date_trunc('minute', start_time) as time_bucket,
+            ROUND(AVG(duration_ns / 1000000.0), 2) as avg_latency_ms,
+            ROUND(MAX(duration_ns / 1000000.0), 2) as max_latency_ms,
+            COUNT(*) as query_count
+        FROM traces_otel_analytic
+        WHERE db_system = '{db_system}'
+          AND start_time > NOW() - INTERVAL '{time_range}' HOUR
+        GROUP BY date_trunc('minute', start_time)
+        ORDER BY time_bucket
+        """
+        result = executor.execute_query(latency_query)
+        if result['success']:
+            data['latency_history'] = result['rows']
 
-    # Slowest queries by service/operation
+        error_query = f"""
+        SELECT
+            date_trunc('minute', start_time) as time_bucket,
+            COUNT(*) as total,
+            SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) as errors,
+            ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) as error_pct
+        FROM traces_otel_analytic
+        WHERE db_system = '{db_system}'
+          AND start_time > NOW() - INTERVAL '{time_range}' HOUR
+        GROUP BY date_trunc('minute', start_time)
+        ORDER BY time_bucket
+        """
+        result = executor.execute_query(error_query)
+        if result['success']:
+            data['error_history'] = result['rows']
+
+    # Slowest queries by service/operation (always raw — need per-operation detail)
     slow_queries_query = f"""
     SELECT service_name, span_name,
            COUNT(*) as call_count,

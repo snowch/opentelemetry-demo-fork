@@ -20,6 +20,9 @@ DROP TABLE IF EXISTS vast."csnow-db|otel".incident_context;
 DROP TABLE IF EXISTS vast."csnow-db|otel".resource_predictions;
 DROP TABLE IF EXISTS vast."csnow-db|otel".incident_patterns;
 DROP TABLE IF EXISTS vast."csnow-db|otel".simulation_runs;
+DROP TABLE IF EXISTS vast."csnow-db|otel".service_metrics_1m;
+DROP TABLE IF EXISTS vast."csnow-db|otel".db_metrics_1m;
+DROP TABLE IF EXISTS vast."csnow-db|otel".operation_metrics_5m;
 
 -- vast."csnow-db|otel".logs_otel_analytic definition
 
@@ -299,5 +302,43 @@ CREATE TABLE vast."csnow-db|otel".simulation_runs (
    steps_completed varchar,
    predicted_alerts varchar,
    actual_alerts varchar
+);
+
+-- =============================================================================
+-- Metric Aggregation Rollup Tables
+-- =============================================================================
+
+-- Pre-aggregated service metrics (1-minute buckets)
+CREATE TABLE vast."csnow-db|otel".service_metrics_1m (
+   time_bucket   timestamp(9),
+   service_name  varchar,
+   avg_latency_ms   double,
+   max_latency_ms   double,
+   p95_latency_ms   double,
+   request_count    bigint,
+   error_count      bigint,
+   error_pct        double
+);
+
+-- Pre-aggregated database metrics (1-minute buckets)
+CREATE TABLE vast."csnow-db|otel".db_metrics_1m (
+   time_bucket   timestamp(9),
+   db_system     varchar,
+   avg_latency_ms   double,
+   max_latency_ms   double,
+   query_count      bigint,
+   error_count      bigint,
+   error_pct        double
+);
+
+-- Pre-aggregated operation metrics (5-minute buckets)
+CREATE TABLE vast."csnow-db|otel".operation_metrics_5m (
+   time_bucket   timestamp(9),
+   service_name  varchar,
+   span_name     varchar,
+   call_count    bigint,
+   avg_latency_ms   double,
+   error_count      bigint,
+   error_pct        double
 );
 

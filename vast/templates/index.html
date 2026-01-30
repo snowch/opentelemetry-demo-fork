@@ -2994,7 +2994,8 @@
                 sidebarRenderer: 'renderContainerItem',
             },
         };
-        const REFRESH_INTERVAL = 15000; // 15 seconds for faster error detection
+        const REFRESH_INTERVAL = 15000; // 15 seconds for sidebar
+        const MODAL_REFRESH_INTERVAL = 30000; // 30 seconds for drill-down modal (reads pre-computed rollups)
 
         const chartColors = ['#00d9ff', '#7c3aed', '#10b981', '#f59e0b', '#ef4444', '#ec4899'];
 
@@ -4193,7 +4194,7 @@ Can you help me understand this issue further or suggest next steps?`;
         function startEntityModalAutoRefresh() {
             if (entityModalRefreshInterval) clearInterval(entityModalRefreshInterval);
             if (entityModalAutoRefresh && currentEntityName) {
-                entityModalRefreshInterval = setInterval(() => refreshEntityModal(), REFRESH_INTERVAL);
+                entityModalRefreshInterval = setInterval(() => refreshEntityModal(), MODAL_REFRESH_INTERVAL);
             }
         }
 
@@ -4227,51 +4228,73 @@ Can you help me understand this issue further or suggest next steps?`;
 
         async function loadEntityCharts() {
             if (!currentEntityType || !currentEntityName) return;
-            Object.values(modalCharts).forEach(chart => chart.destroy());
-            modalCharts = {};
-            const body = document.getElementById('entity-modal-body');
 
-            if (currentEntityType === 'service') {
-                body.innerHTML = `
-                    <div class="chart-row">
-                        <div class="chart-card"><h4>Latency Over Time</h4><canvas id="entity-latency-chart"></canvas></div>
-                        <div class="chart-card"><h4>Error Rate Over Time</h4><canvas id="entity-error-chart"></canvas></div>
-                    </div>
-                    <div class="chart-row">
-                        <div class="chart-card"><h4>Request Volume</h4><canvas id="entity-throughput-chart"></canvas></div>
-                        <div class="chart-card">
-                            <div class="chart-card-header">
-                                <h4>Top Operations</h4>
-                                <select class="time-selector" id="ops-time-selector" onchange="refreshTopOperations()">
-                                    <option value="10s">Last 10s</option><option value="30s">Last 30s</option>
-                                    <option value="1m">Last 1m</option><option value="5m" selected>Last 5m</option>
-                                    <option value="15m">Last 15m</option><option value="1h">Last 1h</option>
-                                </select>
-                            </div>
-                            <table class="ops-table" id="ops-table"><thead><tr><th>Operation</th><th>Calls</th><th>Avg Latency</th><th>Error %</th></tr></thead><tbody></tbody></table>
+            // On first load (no existing charts), build the HTML skeleton.
+            // On refresh, skip the rebuild so charts update in-place.
+            const hasCharts = Object.keys(modalCharts).length > 0;
+
+            if (!hasCharts) {
+                Object.values(modalCharts).forEach(chart => chart.destroy());
+                modalCharts = {};
+                const body = document.getElementById('entity-modal-body');
+
+                if (currentEntityType === 'service') {
+                    body.innerHTML = `
+                        <div class="chart-row">
+                            <div class="chart-card"><h4>Latency Over Time</h4><canvas id="entity-latency-chart"></canvas></div>
+                            <div class="chart-card"><h4>Error Rate Over Time</h4><canvas id="entity-error-chart"></canvas></div>
                         </div>
-                    </div>
-                `;
+                        <div class="chart-row">
+                            <div class="chart-card"><h4>Request Volume</h4><canvas id="entity-throughput-chart"></canvas></div>
+                            <div class="chart-card">
+                                <div class="chart-card-header">
+                                    <h4>Top Operations</h4>
+                                    <select class="time-selector" id="ops-time-selector" onchange="refreshTopOperations()">
+                                        <option value="10s">Last 10s</option><option value="30s">Last 30s</option>
+                                        <option value="1m">Last 1m</option><option value="5m" selected>Last 5m</option>
+                                        <option value="15m">Last 15m</option><option value="1h">Last 1h</option>
+                                    </select>
+                                </div>
+                                <table class="ops-table" id="ops-table"><thead><tr><th>Operation</th><th>Calls</th><th>Avg Latency</th><th>Error %</th></tr></thead><tbody></tbody></table>
+                            </div>
+                        </div>
+                    `;
+                } else if (currentEntityType === 'database') {
+                    body.innerHTML = `
+                        <div class="chart-row">
+                            <div class="chart-card"><h4>Query Latency Over Time</h4><canvas id="entity-latency-chart"></canvas></div>
+                            <div class="chart-card"><h4>Query Volume Over Time</h4><canvas id="entity-volume-chart"></canvas></div>
+                        </div>
+                        <div class="chart-row">
+                            <div class="chart-card"><h4>Error Rate Over Time</h4><canvas id="entity-error-chart"></canvas></div>
+                            <div class="chart-card"><h4>Slowest Queries</h4>
+                                <table class="ops-table" id="db-queries-table"><thead><tr><th>Service</th><th>Operation</th><th>Avg Latency</th><th>Error %</th></tr></thead><tbody></tbody></table>
+                            </div>
+                        </div>
+                        <div class="chart-row">
+                            <div class="chart-card"><h4>Deadlocks Over Time</h4><canvas id="entity-deadlocks-chart"></canvas></div>
+                            <div class="chart-card"><h4>Database Size Over Time</h4><canvas id="entity-size-chart"></canvas></div>
+                        </div>
+                    `;
+                }
+            }
+
+            // Load/refresh data (creates charts on first call, updates in-place on subsequent)
+            if (currentEntityType === 'service') {
                 await loadServiceChartsData();
             } else if (currentEntityType === 'database') {
-                body.innerHTML = `
-                    <div class="chart-row">
-                        <div class="chart-card"><h4>Query Latency Over Time</h4><canvas id="entity-latency-chart"></canvas></div>
-                        <div class="chart-card"><h4>Query Volume Over Time</h4><canvas id="entity-volume-chart"></canvas></div>
-                    </div>
-                    <div class="chart-row">
-                        <div class="chart-card"><h4>Error Rate Over Time</h4><canvas id="entity-error-chart"></canvas></div>
-                        <div class="chart-card"><h4>Slowest Queries</h4>
-                            <table class="ops-table" id="db-queries-table"><thead><tr><th>Service</th><th>Operation</th><th>Avg Latency</th><th>Error %</th></tr></thead><tbody></tbody></table>
-                        </div>
-                    </div>
-                    <div class="chart-row">
-                        <div class="chart-card"><h4>Deadlocks Over Time</h4><canvas id="entity-deadlocks-chart"></canvas></div>
-                        <div class="chart-card"><h4>Database Size Over Time</h4><canvas id="entity-size-chart"></canvas></div>
-                    </div>
-                `;
                 await loadDatabaseChartsData();
             }
+        }
+
+        function updateChartInPlace(chart, labels, datasets) {
+            chart.data.labels = labels;
+            datasets.forEach((ds, i) => {
+                if (chart.data.datasets[i]) {
+                    chart.data.datasets[i].data = ds.data;
+                }
+            });
+            chart.update('none'); // skip animations for smoother refresh
         }
 
         async function loadServiceChartsData() {
@@ -4281,25 +4304,43 @@ Can you help me understand this issue further or suggest next steps?`;
 
                 if (data.latency_history && data.latency_history.length > 0) {
                     const labels = data.latency_history.map(r => new Date(r.time_bucket).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
-                    modalCharts.latency = new Chart(document.getElementById('entity-latency-chart'), {
-                        type: 'line', data: { labels, datasets: [
-                            { label: 'Avg Latency (ms)', data: data.latency_history.map(r => r.avg_latency_ms), borderColor: '#00d9ff', tension: 0.4, fill: false, pointRadius: 2 },
-                            { label: 'Max Latency (ms)', data: data.latency_history.map(r => r.max_latency_ms), borderColor: '#ef4444', tension: 0.4, fill: false, pointRadius: 2 }
-                        ]}, options: chartOptions()
-                    });
-                    modalCharts.throughput = new Chart(document.getElementById('entity-throughput-chart'), {
-                        type: 'bar', data: { labels, datasets: [
-                            { label: 'Requests', data: data.latency_history.map(r => r.request_count), backgroundColor: 'rgba(0,217,255,0.4)', borderColor: '#00d9ff', borderWidth: 1 }
-                        ]}, options: chartOptions()
-                    });
+                    const avgData = data.latency_history.map(r => r.avg_latency_ms);
+                    const maxData = data.latency_history.map(r => r.max_latency_ms);
+                    const reqData = data.latency_history.map(r => r.request_count);
+
+                    if (modalCharts.latency) {
+                        updateChartInPlace(modalCharts.latency, labels, [{data: avgData}, {data: maxData}]);
+                    } else {
+                        modalCharts.latency = new Chart(document.getElementById('entity-latency-chart'), {
+                            type: 'line', data: { labels, datasets: [
+                                { label: 'Avg Latency (ms)', data: avgData, borderColor: '#00d9ff', tension: 0.4, fill: false, pointRadius: 2 },
+                                { label: 'Max Latency (ms)', data: maxData, borderColor: '#ef4444', tension: 0.4, fill: false, pointRadius: 2 }
+                            ]}, options: chartOptions()
+                        });
+                    }
+                    if (modalCharts.throughput) {
+                        updateChartInPlace(modalCharts.throughput, labels, [{data: reqData}]);
+                    } else {
+                        modalCharts.throughput = new Chart(document.getElementById('entity-throughput-chart'), {
+                            type: 'bar', data: { labels, datasets: [
+                                { label: 'Requests', data: reqData, backgroundColor: 'rgba(0,217,255,0.4)', borderColor: '#00d9ff', borderWidth: 1 }
+                            ]}, options: chartOptions()
+                        });
+                    }
                 }
                 if (data.error_history && data.error_history.length > 0) {
                     const labels = data.error_history.map(r => new Date(r.time_bucket).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
-                    modalCharts.errors = new Chart(document.getElementById('entity-error-chart'), {
-                        type: 'line', data: { labels, datasets: [
-                            { label: 'Error %', data: data.error_history.map(r => r.error_pct), borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
-                        ]}, options: chartOptions()
-                    });
+                    const errData = data.error_history.map(r => r.error_pct);
+
+                    if (modalCharts.errors) {
+                        updateChartInPlace(modalCharts.errors, labels, [{data: errData}]);
+                    } else {
+                        modalCharts.errors = new Chart(document.getElementById('entity-error-chart'), {
+                            type: 'line', data: { labels, datasets: [
+                                { label: 'Error %', data: errData, borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
+                            ]}, options: chartOptions()
+                        });
+                    }
                 }
             } catch (error) { console.error('Failed to load service charts:', error); }
             await refreshTopOperations();
@@ -4333,25 +4374,43 @@ Can you help me understand this issue further or suggest next steps?`;
 
                 if (data.latency_history && data.latency_history.length > 0) {
                     const labels = data.latency_history.map(r => new Date(r.time_bucket).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
-                    modalCharts.latency = new Chart(document.getElementById('entity-latency-chart'), {
-                        type: 'line', data: { labels, datasets: [
-                            { label: 'Avg Latency (ms)', data: data.latency_history.map(r => r.avg_latency_ms), borderColor: '#7c3aed', tension: 0.4, fill: false, pointRadius: 2 },
-                            { label: 'Max Latency (ms)', data: data.latency_history.map(r => r.max_latency_ms), borderColor: '#ef4444', tension: 0.4, fill: false, pointRadius: 2 }
-                        ]}, options: chartOptions()
-                    });
-                    modalCharts.volume = new Chart(document.getElementById('entity-volume-chart'), {
-                        type: 'bar', data: { labels, datasets: [
-                            { label: 'Queries', data: data.latency_history.map(r => r.query_count), backgroundColor: 'rgba(124,58,237,0.4)', borderColor: '#7c3aed', borderWidth: 1 }
-                        ]}, options: chartOptions()
-                    });
+                    const avgData = data.latency_history.map(r => r.avg_latency_ms);
+                    const maxData = data.latency_history.map(r => r.max_latency_ms);
+                    const volData = data.latency_history.map(r => r.query_count);
+
+                    if (modalCharts.latency) {
+                        updateChartInPlace(modalCharts.latency, labels, [{data: avgData}, {data: maxData}]);
+                    } else {
+                        modalCharts.latency = new Chart(document.getElementById('entity-latency-chart'), {
+                            type: 'line', data: { labels, datasets: [
+                                { label: 'Avg Latency (ms)', data: avgData, borderColor: '#7c3aed', tension: 0.4, fill: false, pointRadius: 2 },
+                                { label: 'Max Latency (ms)', data: maxData, borderColor: '#ef4444', tension: 0.4, fill: false, pointRadius: 2 }
+                            ]}, options: chartOptions()
+                        });
+                    }
+                    if (modalCharts.volume) {
+                        updateChartInPlace(modalCharts.volume, labels, [{data: volData}]);
+                    } else {
+                        modalCharts.volume = new Chart(document.getElementById('entity-volume-chart'), {
+                            type: 'bar', data: { labels, datasets: [
+                                { label: 'Queries', data: volData, backgroundColor: 'rgba(124,58,237,0.4)', borderColor: '#7c3aed', borderWidth: 1 }
+                            ]}, options: chartOptions()
+                        });
+                    }
                 }
                 if (data.error_history && data.error_history.length > 0) {
                     const labels = data.error_history.map(r => new Date(r.time_bucket).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
-                    modalCharts.errors = new Chart(document.getElementById('entity-error-chart'), {
-                        type: 'line', data: { labels, datasets: [
-                            { label: 'Error %', data: data.error_history.map(r => r.error_pct), borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
-                        ]}, options: chartOptions()
-                    });
+                    const errData = data.error_history.map(r => r.error_pct);
+
+                    if (modalCharts.errors) {
+                        updateChartInPlace(modalCharts.errors, labels, [{data: errData}]);
+                    } else {
+                        modalCharts.errors = new Chart(document.getElementById('entity-error-chart'), {
+                            type: 'line', data: { labels, datasets: [
+                                { label: 'Error %', data: errData, borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
+                            ]}, options: chartOptions()
+                        });
+                    }
                 }
                 const queriesTable = document.getElementById('db-queries-table')?.querySelector('tbody');
                 if (queriesTable && data.slow_queries && data.slow_queries.length > 0) {
@@ -4366,19 +4425,31 @@ Can you help me understand this issue further or suggest next steps?`;
                 }
                 if (data.deadlock_history && data.deadlock_history.length > 0) {
                     const dlLabels = data.deadlock_history.map(r => new Date(r.time_bucket).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
-                    modalCharts.deadlocks = new Chart(document.getElementById('entity-deadlocks-chart'), {
-                        type: 'bar', data: { labels: dlLabels, datasets: [
-                            { label: 'Deadlocks', data: data.deadlock_history.map(r => r.deadlock_count), backgroundColor: 'rgba(239,68,68,0.4)', borderColor: '#ef4444', borderWidth: 1 }
-                        ]}, options: chartOptions()
-                    });
+                    const dlData = data.deadlock_history.map(r => r.deadlock_count);
+
+                    if (modalCharts.deadlocks) {
+                        updateChartInPlace(modalCharts.deadlocks, dlLabels, [{data: dlData}]);
+                    } else {
+                        modalCharts.deadlocks = new Chart(document.getElementById('entity-deadlocks-chart'), {
+                            type: 'bar', data: { labels: dlLabels, datasets: [
+                                { label: 'Deadlocks', data: dlData, backgroundColor: 'rgba(239,68,68,0.4)', borderColor: '#ef4444', borderWidth: 1 }
+                            ]}, options: chartOptions()
+                        });
+                    }
                 }
                 if (data.size_history && data.size_history.length > 0) {
                     const szLabels = data.size_history.map(r => new Date(r.time_bucket).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
-                    modalCharts.dbSize = new Chart(document.getElementById('entity-size-chart'), {
-                        type: 'line', data: { labels: szLabels, datasets: [
-                            { label: 'Size (MB)', data: data.size_history.map(r => r.size_mb), borderColor: '#00d9ff', backgroundColor: 'rgba(0,217,255,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
-                        ]}, options: chartOptions()
-                    });
+                    const szData = data.size_history.map(r => r.size_mb);
+
+                    if (modalCharts.dbSize) {
+                        updateChartInPlace(modalCharts.dbSize, szLabels, [{data: szData}]);
+                    } else {
+                        modalCharts.dbSize = new Chart(document.getElementById('entity-size-chart'), {
+                            type: 'line', data: { labels: szLabels, datasets: [
+                                { label: 'Size (MB)', data: szData, borderColor: '#00d9ff', backgroundColor: 'rgba(0,217,255,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
+                            ]}, options: chartOptions()
+                        });
+                    }
                 }
             } catch (error) { console.error('Failed to load database charts:', error); }
         }

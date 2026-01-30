@@ -20,6 +20,14 @@ KAFKA_BIN="/opt/kafka/bin/kafka-topics.sh"
 
 echo "=== Resetting OTEL Data ==="
 
+# --- 0. Ensure observability-agent container is running ---
+if ! docker compose ps --status running --format '{{.Service}}' | grep -q '^observability-agent$'; then
+    echo "--- Starting observability-agent container ---"
+    docker compose up -d observability-agent
+    echo "Waiting for container to be ready..."
+    sleep 5
+fi
+
 # --- 1. Drop and recreate VastDB tables via Trino ---
 echo ""
 echo "--- Dropping and recreating VastDB tables via Trino ---"
@@ -59,12 +67,13 @@ for stmt in ddl.split(';'):
 print('VastDB tables reset complete.')
 "
 
-# --- 2. Delete and recreate Kafka topics ---
+# --- 2. Delete and recreate Kafka topics (via ephemeral container) ---
+KAFKA_IMAGE="apache/kafka:3.7.0"
 echo ""
 echo "--- Deleting Kafka topics ---"
 for topic in "${TOPICS[@]}"; do
     echo -n "  Deleting ${topic}... "
-    docker exec kafka ${KAFKA_BIN} --bootstrap-server "${KAFKA_BOOTSTRAP}" \
+    docker run --rm "${KAFKA_IMAGE}" ${KAFKA_BIN} --bootstrap-server "${KAFKA_BOOTSTRAP}" \
         --delete --topic "${topic}" 2>/dev/null && echo "OK" || echo "SKIP (not found)"
 done
 
@@ -72,7 +81,7 @@ echo ""
 echo "--- Creating Kafka topics ---"
 for topic in "${TOPICS[@]}"; do
     echo -n "  Creating ${topic}... "
-    docker exec kafka ${KAFKA_BIN} --bootstrap-server "${KAFKA_BOOTSTRAP}" \
+    docker run --rm "${KAFKA_IMAGE}" ${KAFKA_BIN} --bootstrap-server "${KAFKA_BOOTSTRAP}" \
         --create --topic "${topic}" --partitions 1 --replication-factor 1 2>/dev/null && echo "OK" || echo "FAILED"
 done
 

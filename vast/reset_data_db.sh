@@ -19,6 +19,14 @@ KAFKA_BIN="/opt/kafka/bin/kafka-topics.sh"
 
 echo "=== Resetting OTEL Data ==="
 
+# --- 0. Ensure observability-agent container is running ---
+if ! docker compose ps --status running --format '{{.Service}}' | grep -q '^observability-agent$'; then
+    echo "--- Starting observability-agent container ---"
+    docker compose up -d observability-agent
+    echo "Waiting for container to be ready..."
+    sleep 5
+fi
+
 # --- 1. Drop and recreate VastDB tables via Trino ---
 echo ""
 echo "--- Dropping and recreating VastDB tables via Trino ---"
