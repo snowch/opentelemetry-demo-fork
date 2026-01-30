@@ -1574,6 +1574,40 @@ def host_services(host_name):
     return jsonify(data)
 
 
+@app.route('/api/host/<host_name>/resource-history', methods=['GET'])
+def host_resource_history(host_name):
+    """Get 1-minute bucketed CPU, memory, disk utilization over the last hour."""
+    executor = get_query_executor()
+
+    query = f"""
+    SELECT date_trunc('minute', timestamp) as time_bucket,
+        MAX(CASE WHEN metric_name='system.cpu.utilization' AND value_double<=1
+            THEN ROUND(value_double*100,1) END) as cpu_pct,
+        MAX(CASE WHEN metric_name='system.memory.utilization'
+            AND attributes_flat LIKE '%state=used%' AND value_double<=1
+            THEN ROUND(value_double*100,1) END) as memory_pct,
+        MAX(CASE WHEN metric_name='system.filesystem.utilization' AND value_double<=1
+            THEN ROUND(value_double*100,1) END) as disk_pct
+    FROM metrics_otel_analytic
+    WHERE metric_name IN ('system.cpu.utilization','system.memory.utilization','system.filesystem.utilization')
+      AND timestamp > NOW() - INTERVAL '1' HOUR
+      AND attributes_flat LIKE '%host.name={host_name}%'
+    GROUP BY date_trunc('minute', timestamp)
+    ORDER BY time_bucket
+    """
+
+    result = executor.execute_query(query)
+    rows = []
+    if result['success'] and result['rows']:
+        for row in result['rows']:
+            rows.append({
+                'time_bucket': str(row.get('time_bucket', '')),
+                'cpu_pct': row.get('cpu_pct'),
+                'memory_pct': row.get('memory_pct'),
+                'disk_pct': row.get('disk_pct')
+            })
+
+    return jsonify({'history': rows})
 
 
 # =============================================================================

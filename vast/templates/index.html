@@ -4457,17 +4457,77 @@ Can you help me understand this issue further or suggest next steps?`;
         async function loadEntityOverview() {
             if (!currentEntityName) return;
             const body = document.getElementById('entity-modal-body');
-            body.innerHTML = `
-                <div class="chart-row">
-                    <div class="chart-card"><h4>Current Resource Usage</h4>
-                        <div class="host-detail-metrics" id="host-current-metrics"><div class="empty-state">Loading...</div></div>
+
+            // Only rebuild HTML skeleton if charts don't exist yet (for in-place refresh)
+            const hasHostCharts = modalCharts.hostCpu || modalCharts.hostMemory;
+            if (!hasHostCharts) {
+                // Destroy any leftover charts from a previous tab/entity
+                Object.values(modalCharts).forEach(c => c.destroy());
+                modalCharts = {};
+                body.innerHTML = `
+                    <div class="chart-row">
+                        <div class="chart-card"><h4>Current Resource Usage</h4>
+                            <div class="host-detail-metrics" id="host-current-metrics"><div class="empty-state">Loading...</div></div>
+                        </div>
+                        <div class="chart-card"><h4>Host Information</h4>
+                            <div class="host-info" id="host-info"><div class="empty-state">Loading...</div></div>
+                        </div>
                     </div>
-                    <div class="chart-card"><h4>Host Information</h4>
-                        <div class="host-info" id="host-info"><div class="empty-state">Loading...</div></div>
+                    <div class="chart-row">
+                        <div class="chart-card"><h4>CPU Over Time</h4><canvas id="host-cpu-history-chart"></canvas></div>
+                        <div class="chart-card"><h4>Memory Over Time</h4><canvas id="host-memory-history-chart"></canvas></div>
                     </div>
-                </div>
-            `;
+                    <div class="chart-row">
+                        <div class="chart-card"><h4>Disk Over Time</h4><canvas id="host-disk-history-chart"></canvas></div>
+                        <div class="chart-card"></div>
+                    </div>
+                `;
+            }
             await loadHostData(currentEntityName);
+            await loadHostResourceHistory(currentEntityName);
+        }
+
+        async function loadHostResourceHistory(hostName) {
+            try {
+                const response = await fetch(`/api/host/${encodeURIComponent(hostName)}/resource-history`);
+                const data = await response.json();
+                if (!data.history || data.history.length === 0) return;
+
+                const labels = data.history.map(r => new Date(r.time_bucket).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
+                const cpuData = data.history.map(r => r.cpu_pct);
+                const memData = data.history.map(r => r.memory_pct);
+                const diskData = data.history.map(r => r.disk_pct);
+
+                if (modalCharts.hostCpu) {
+                    updateChartInPlace(modalCharts.hostCpu, labels, [{data: cpuData}]);
+                } else {
+                    modalCharts.hostCpu = new Chart(document.getElementById('host-cpu-history-chart'), {
+                        type: 'line', data: { labels, datasets: [
+                            { label: 'CPU %', data: cpuData, borderColor: '#00d9ff', backgroundColor: 'rgba(0,217,255,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
+                        ]}, options: chartOptions()
+                    });
+                }
+
+                if (modalCharts.hostMemory) {
+                    updateChartInPlace(modalCharts.hostMemory, labels, [{data: memData}]);
+                } else {
+                    modalCharts.hostMemory = new Chart(document.getElementById('host-memory-history-chart'), {
+                        type: 'line', data: { labels, datasets: [
+                            { label: 'Memory %', data: memData, borderColor: '#7c3aed', backgroundColor: 'rgba(124,58,237,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
+                        ]}, options: chartOptions()
+                    });
+                }
+
+                if (modalCharts.hostDisk) {
+                    updateChartInPlace(modalCharts.hostDisk, labels, [{data: diskData}]);
+                } else {
+                    modalCharts.hostDisk = new Chart(document.getElementById('host-disk-history-chart'), {
+                        type: 'line', data: { labels, datasets: [
+                            { label: 'Disk %', data: diskData, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
+                        ]}, options: chartOptions()
+                    });
+                }
+            } catch (error) { console.error('Failed to load host resource history:', error); }
         }
 
         async function loadContainerOverview() {

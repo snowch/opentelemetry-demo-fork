@@ -265,16 +265,16 @@ curl -s -X POST http://localhost:5000/api/simulation/stop
 
 ## Scenario 4: Disk Fill Simulation
 
-Writes 50MB temp files into the postgresql container every 2 minutes (300MB total over 12 minutes).
+Writes 4.5GB temp files into the postgresql container every 2 minutes (27GB total over 12 minutes).
 
 | Time | Cumulative Disk Written |
 |------|------------------------|
-| 0:00 | 50MB |
-| 2:00 | 100MB |
-| 4:00 | 150MB |
-| 6:00 | 200MB |
-| 8:00 | 250MB |
-| 10:00 | 300MB |
+| 0:00 | 4.5GB |
+| 2:00 | 9.0GB |
+| 4:00 | 13.5GB |
+| 6:00 | 18.0GB |
+| 8:00 | 22.5GB |
+| 10:00 | 27.0GB |
 
 **Start:**
 ```bash
@@ -283,17 +283,17 @@ curl -s -X POST http://localhost:5000/api/simulation/start \
   -d '{"scenario": "disk_fill"}'
 ```
 
-**Note:** This scenario uses `docker compose exec` inside the container, which requires the Docker socket to be mounted. If step 0 reports `success: false`, the Docker CLI is not available inside the observability-agent container. This scenario works when the simulator is run directly on the host.
+**Note:** This scenario uses `docker exec` inside the container, which requires the Docker socket to be mounted (via `/var/run/docker.sock`). If step 0 reports `success: false`, check that the Docker socket volume and CLI binary are available in the observability-agent container.
 
 ### Expected UI Changes
 
 **Sidebar — Hosts:**
 - The host running the `postgresql` container shows **DISK** metric climbing:
   - Green -> yellow (at 75%) -> red (at 90%)
-  - The numeric percentage increases in ~50MB jumps every 2 minutes.
+  - The numeric percentage increases in ~4.5GB jumps every 2 minutes.
 
 **Entity Modal — Host drill-down (click the affected host):**
-- **Overview tab:** Disk utilization chart shows a clear upward staircase pattern with 50MB jumps.
+- **Overview tab:** Disk utilization chart shows a clear upward staircase pattern with ~~4% jumps per step.
 
 **Main Panel — Predictions:**
 - A disk prediction appears: "DISK - hostname — Currently N% -> 90% threshold in ~Xh" with trend slope showing the fill rate. Confidence increases as more data points confirm the linear trend.
@@ -307,6 +307,12 @@ curl -s -X POST http://localhost:5000/api/simulation/stop
 ```
 
 **After stopping:** Cleanup removes all `/tmp/sim_fill_*.dat` files. DISK metric drops back to pre-simulation levels.
+
+**Manual cleanup** (if the simulation was interrupted or cleanup didn't run):
+```bash
+docker exec postgresql rm -f /tmp/sim_fill_*.dat
+docker exec postgresql df -h /tmp   # verify disk usage dropped
+```
 
 ---
 
