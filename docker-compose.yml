@@ -672,33 +672,6 @@ services:
     env_file:
       - .env
       - .env.override
-    environment:
-      - TRINO_HOST
-      - TRINO_PORT
-      - TRINO_USER
-      - TRINO_CATALOG
-      - TRINO_SCHEMA
-      - TRINO_VERIFY
-      - ANTHROPIC_API_KEY
-      - VASTDB_ENDPOINT
-      - VASTDB_ACCESS_KEY
-      - VASTDB_SECRET_KEY
-      - VASTDB_BUCKET
-      - VASTDB_SCHEMA
-      - KAFKA_BOOTSTRAP_SERVERS
-      - POSTGRES_HOST
-      - POSTGRES_PORT
-      - POSTGRES_DB
-      - POSTGRES_PASSWORD
-      - DETECTION_INTERVAL
-      - BASELINE_INTERVAL
-      - BASELINE_WINDOW_HOURS
-      - ANOMALY_THRESHOLD
-      - ERROR_RATE_WARNING
-      - ERROR_RATE_CRITICAL
-      - MAX_INVESTIGATIONS_PER_HOUR
-      - INVESTIGATION_SERVICE_COOLDOWN_MINUTES
-      - INVESTIGATE_CRITICAL_ONLY
     depends_on:
       otel-collector:
         condition: service_started
@@ -719,13 +692,6 @@ services:
     env_file:
       - .env
       - .env.override
-    environment:
-      - VASTDB_ENDPOINT
-      - VASTDB_ACCESS_KEY
-      - VASTDB_SECRET_KEY
-      - VASTDB_BUCKET
-      - VASTDB_SCHEMA
-      - KAFKA_BOOTSTRAP_SERVERS
     depends_on:
       otel-collector:
         condition: service_started
