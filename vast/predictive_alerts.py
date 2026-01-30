@@ -1078,7 +1078,42 @@ class AnomalyDetector:
         return None
 
     def _detect_service_down(self, service: str) -> Optional[Dict]:
-        """Detect if a service has stopped sending data."""
+        """Detect if a service has stopped sending data.
+
+        Includes a data-age guard: if the oldest trace in the DB is less than
+        1 hour old (e.g. after a database reset), we don't have enough history
+        to reliably claim a service is down, so we skip the check.
+        """
+        # Guard: ensure we have at least 1 hour of data before firing this alert.
+        # After a DB reset the oldest row will be very recent, making "no data in
+        # the last hour" meaningless — every service would trigger.
+        age_sql = """
+            SELECT MIN(start_time) as oldest
+            FROM traces_otel_analytic
+        """
+        age_results = self.executor.execute(age_sql)
+        if age_results and age_results[0]["oldest"] is not None:
+            oldest = age_results[0]["oldest"]
+            try:
+                from datetime import datetime, timezone, timedelta
+                now_utc = datetime.now(timezone.utc)
+                one_hour_ago = now_utc - timedelta(hours=1)
+
+                if isinstance(oldest, datetime):
+                    # Normalize to UTC-aware for comparison
+                    if oldest.tzinfo is None:
+                        oldest = oldest.replace(tzinfo=timezone.utc)
+                    if oldest > one_hour_ago:
+                        return None  # Not enough history yet
+                elif isinstance(oldest, str):
+                    oldest_dt = datetime.fromisoformat(oldest.replace('Z', '+00:00'))
+                    if oldest_dt.tzinfo is None:
+                        oldest_dt = oldest_dt.replace(tzinfo=timezone.utc)
+                    if oldest_dt > one_hour_ago:
+                        return None
+            except (ValueError, TypeError):
+                pass  # If we can't parse, proceed with normal detection
+
         sql = f"""
             SELECT
                 MAX(start_time) as last_seen,
