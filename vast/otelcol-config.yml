@@ -43,6 +43,12 @@ receivers:
         enabled: true
       postgresql.deadlocks:
         enabled: true
+      postgresql.db_size:
+        enabled: true
+      postgresql.table.size:
+        enabled: true
+      postgresql.index.size:
+        enabled: true
     tls:
       insecure: true
   redis:

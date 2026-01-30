@@ -2582,17 +2582,35 @@
                             </table>
                         </div>
                     </div>
+                    <div class="chart-row">
+                        <div class="chart-card">
+                            <h4>Deadlocks Over Time</h4>
+                            <canvas id="db-deadlocks-chart"></canvas>
+                        </div>
+                        <div class="chart-card">
+                            <h4>Database Size Over Time</h4>
+                            <canvas id="db-size-chart"></canvas>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Dependencies Tab (bidirectional) -->
                 <div class="modal-tab-content" id="db-tab-deps">
                     <div class="chart-row">
                         <div class="chart-card">
+                            <h4>Host</h4>
+                            <div class="deps-list" id="db-host-dep">
+                                <div class="empty-state">Loading...</div>
+                            </div>
+                        </div>
+                        <div class="chart-card">
                             <h4>Upstream (Services Using This Database)</h4>
                             <div class="deps-list" id="db-upstream-deps">
                                 <div class="empty-state">Loading...</div>
                             </div>
                         </div>
+                    </div>
+                    <div class="chart-row">
                         <div class="chart-card">
                             <h4>Downstream (Called by This Database's Spans)</h4>
                             <div class="deps-list" id="db-downstream-deps">
@@ -4636,6 +4654,42 @@ Can you help me understand this issue further or suggest next steps?`;
                     queriesTable.innerHTML = '<tr><td colspan="4" class="empty-state">No data</td></tr>';
                 }
 
+                // Deadlocks chart
+                if (data.deadlock_history && data.deadlock_history.length > 0) {
+                    const dlLabels = data.deadlock_history.map(r => {
+                        const d = new Date(r.time_bucket);
+                        return d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                    });
+                    dbModalCharts.deadlocks = new Chart(document.getElementById('db-deadlocks-chart'), {
+                        type: 'bar',
+                        data: {
+                            labels: dlLabels,
+                            datasets: [
+                                { label: 'Deadlocks', data: data.deadlock_history.map(r => r.deadlock_count), backgroundColor: 'rgba(239,68,68,0.4)', borderColor: '#ef4444', borderWidth: 1 }
+                            ]
+                        },
+                        options: chartOptions()
+                    });
+                }
+
+                // Database size chart
+                if (data.size_history && data.size_history.length > 0) {
+                    const szLabels = data.size_history.map(r => {
+                        const d = new Date(r.time_bucket);
+                        return d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                    });
+                    dbModalCharts.dbSize = new Chart(document.getElementById('db-size-chart'), {
+                        type: 'line',
+                        data: {
+                            labels: szLabels,
+                            datasets: [
+                                { label: 'Size (MB)', data: data.size_history.map(r => r.size_mb), borderColor: '#00d9ff', backgroundColor: 'rgba(0,217,255,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
+                            ]
+                        },
+                        options: chartOptions()
+                    });
+                }
+
             } catch (error) {
                 console.error('Failed to load database details:', error);
             }
@@ -4720,14 +4774,30 @@ Can you help me understand this issue further or suggest next steps?`;
         async function loadDatabaseDependencies() {
             if (!currentModalDatabase) return;
 
+            const hostDiv = document.getElementById('db-host-dep');
             const upstreamDiv = document.getElementById('db-upstream-deps');
             const downstreamDiv = document.getElementById('db-downstream-deps');
+            hostDiv.innerHTML = '<div class="empty-state">Loading...</div>';
             upstreamDiv.innerHTML = '<div class="empty-state">Loading...</div>';
             downstreamDiv.innerHTML = '<div class="empty-state">Loading...</div>';
 
             try {
                 const response = await fetch(`/api/database/${encodeURIComponent(currentModalDatabase)}/dependencies?time=15m`);
                 const data = await response.json();
+
+                // Host running this database
+                if (data.host) {
+                    hostDiv.innerHTML = `
+                        <div class="dep-item" onclick="openHostModal('${escapeHtml(data.host)}')" style="cursor: pointer;">
+                            <div class="dep-name">
+                                <span class="dep-type-badge" style="background: rgba(16,185,129,0.15); color: #10b981;">host</span>
+                                ${escapeHtml(data.host)}
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    hostDiv.innerHTML = '<div class="empty-state">No host information available</div>';
+                }
 
                 // Upstream (services that use this database)
                 if (data.upstream && data.upstream.length > 0) {
@@ -4770,6 +4840,7 @@ Can you help me understand this issue further or suggest next steps?`;
                 }
             } catch (error) {
                 console.error('Failed to load database dependencies:', error);
+                hostDiv.innerHTML = '<div class="empty-state">Error loading dependencies</div>';
                 upstreamDiv.innerHTML = '<div class="empty-state">Error loading dependencies</div>';
                 downstreamDiv.innerHTML = '<div class="empty-state">Error loading dependencies</div>';
             }

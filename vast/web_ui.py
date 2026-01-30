@@ -1073,7 +1073,9 @@ def database_details(db_system):
         'db_system': db_system,
         'latency_history': [],
         'error_history': [],
-        'slow_queries': []
+        'slow_queries': [],
+        'deadlock_history': [],
+        'size_history': []
     }
 
     # Query latency and volume over time (1-minute buckets)
@@ -1126,6 +1128,36 @@ def database_details(db_system):
     result = executor.execute_query(slow_queries_query)
     if result['success']:
         data['slow_queries'] = result['rows']
+
+    # Deadlocks over time
+    deadlock_query = f"""
+    SELECT
+        date_trunc('minute', timestamp) as time_bucket,
+        MAX(value_double) as deadlock_count
+    FROM metrics_otel_analytic
+    WHERE metric_name = '{db_system}.deadlocks'
+      AND timestamp > NOW() - INTERVAL '{time_range}' HOUR
+    GROUP BY date_trunc('minute', timestamp)
+    ORDER BY time_bucket
+    """
+    result = executor.execute_query(deadlock_query)
+    if result['success']:
+        data['deadlock_history'] = result['rows']
+
+    # Database size over time
+    size_query = f"""
+    SELECT
+        date_trunc('minute', timestamp) as time_bucket,
+        ROUND(MAX(value_double) / 1048576.0, 2) as size_mb
+    FROM metrics_otel_analytic
+    WHERE metric_name = '{db_system}.db_size'
+      AND timestamp > NOW() - INTERVAL '{time_range}' HOUR
+    GROUP BY date_trunc('minute', timestamp)
+    ORDER BY time_bucket
+    """
+    result = executor.execute_query(size_query)
+    if result['success']:
+        data['size_history'] = result['rows']
 
     return jsonify(data)
 
@@ -1183,7 +1215,18 @@ def database_dependencies(db_system):
     LIMIT 20
     """
 
-    data = {'upstream': [], 'downstream': []}
+    # Find the host this database is running on (from metrics attributes)
+    host_query = f"""
+    SELECT DISTINCT
+        REGEXP_EXTRACT(attributes_flat, 'host\\.name=([^,]+)', 1) as host_name
+    FROM metrics_otel_analytic
+    WHERE metric_name LIKE '{db_system}.%'
+      AND timestamp > NOW() - INTERVAL {interval}
+      AND attributes_flat LIKE '%host.name=%'
+    LIMIT 1
+    """
+
+    data = {'upstream': [], 'downstream': [], 'host': None}
 
     result = executor.execute_query(dependents_query)
     if result['success']:
@@ -1192,6 +1235,10 @@ def database_dependencies(db_system):
     result = executor.execute_query(downstream_query)
     if result['success']:
         data['downstream'] = result['rows']
+
+    result = executor.execute_query(host_query)
+    if result['success'] and result['rows']:
+        data['host'] = result['rows'][0].get('host_name')
 
     return jsonify(data)
 
@@ -1349,6 +1396,28 @@ def host_services(host_name):
     result = executor.execute_query(services_query)
     if result['success']:
         data['services'] = result['rows']
+
+    # Fallback: discover services from metrics if no trace-based services found
+    if not data['services']:
+        metrics_services_query = f"""
+        SELECT
+            SUBSTR(metric_name, 1, POSITION('.' IN metric_name) - 1) as service_name,
+            COUNT(*) as span_count,
+            0.0 as error_pct
+        FROM metrics_otel_analytic
+        WHERE attributes_flat LIKE '%host.name={host_name}%'
+          AND timestamp > NOW() - INTERVAL {interval}
+          AND (metric_name LIKE 'postgresql.%'
+            OR metric_name LIKE 'redis.%'
+            OR metric_name LIKE 'nginx.%'
+            OR metric_name LIKE 'kafka.%'
+            OR metric_name LIKE 'docker.%')
+        GROUP BY SUBSTR(metric_name, 1, POSITION('.' IN metric_name) - 1)
+        ORDER BY span_count DESC
+        """
+        result = executor.execute_query(metrics_services_query)
+        if result['success']:
+            data['services'] = result['rows']
 
     # Get current host metrics
     host_metrics_query = f"""
