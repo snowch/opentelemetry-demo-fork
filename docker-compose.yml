@@ -668,7 +668,7 @@ services:
           memory: 512M
     restart: unless-stopped
     ports:
-      - "${OBSERVABILITY_AGENT_PORT}"
+      - "${OBSERVABILITY_AGENT_PORT}:5000"
     env_file:
       - .env
       - .env.override
@@ -939,6 +939,9 @@ services:
       opensearch:
         condition: service_healthy
     logging: *logging
+    env_file:
+      - .env
+      - .env.override
     environment:
       - FRONTEND_PROXY_ADDR
       - IMAGE_PROVIDER_HOST
@@ -950,7 +953,6 @@ services:
       - POSTGRES_HOST
       - POSTGRES_PORT
       - POSTGRES_PASSWORD
-      - KAFKA_BOOTSTRAP_SERVERS
       - GOMEMLIMIT=160MiB
 
   # Prometheus

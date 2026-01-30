@@ -12,6 +12,6 @@ COPY *.py .
 COPY ddl.sql .
 COPY templates/ templates/
 
-EXPOSE 5001
+EXPOSE 5000
 
 CMD ["python", "web_ui.py"]
