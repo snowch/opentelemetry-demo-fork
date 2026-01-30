@@ -56,6 +56,98 @@ MAX_QUERY_ROWS = 100
 
 app = Flask(__name__)
 
+# =============================================================================
+# Entity Type Registry
+# =============================================================================
+
+ENTITY_TYPES = {
+    'service': {
+        'display_name': 'Services',
+        'name_field': 'service_name',
+        'traces_table': 'traces_otel_analytic',
+        'traces_time_field': 'start_time',
+        'traces_filter': "service_name = '{name}'",
+        'logs_filter': "service_name = '{name}'",
+        'logs_join': None,
+        'metrics_filter': "service_name = '{name}'",
+        'has_latency_charts': True,
+        'has_error_charts': True,
+        'extra_charts': ['top_operations'],
+    },
+    'database': {
+        'display_name': 'Databases',
+        'name_field': 'db_system',
+        'traces_table': 'traces_otel_analytic',
+        'traces_time_field': 'start_time',
+        'traces_filter': "db_system = '{name}'",
+        'logs_filter': None,
+        'logs_join': "l.service_name IN (SELECT DISTINCT service_name FROM traces_otel_analytic WHERE db_system = '{name}' AND start_time > NOW() - INTERVAL {interval})",
+        'metrics_filter': "metric_name LIKE '{name}.%'",
+        'has_latency_charts': True,
+        'has_error_charts': True,
+        'extra_charts': ['slow_queries', 'deadlocks', 'db_size'],
+    },
+    'host': {
+        'display_name': 'Hosts',
+        'name_field': 'host_name',
+        'traces_table': 'spans_otel_analytic',
+        'traces_time_field': 'timestamp',
+        'traces_filter': "attributes_flat LIKE '%host.name={name}%'",
+        'logs_filter': None,
+        'logs_join': "l.service_name IN (SELECT DISTINCT service_name FROM spans_otel_analytic WHERE attributes_flat LIKE '%host.name={name}%' AND timestamp > NOW() - INTERVAL {interval} AND service_name IS NOT NULL AND service_name != '')",
+        'metrics_filter': "attributes_flat LIKE '%host.name={name}%'",
+        'has_latency_charts': False,
+        'has_error_charts': False,
+        'extra_charts': [],
+    },
+}
+
+
+def parse_time_interval(time_param, default="'5' MINUTE"):
+    """Parse time parameter like '5m' into SQL interval string."""
+    try:
+        time_value = int(time_param[:-1])
+        time_unit = time_param[-1]
+    except (ValueError, IndexError):
+        return default
+
+    if time_unit == 's':
+        return f"'{time_value}' SECOND"
+    elif time_unit == 'm':
+        return f"'{time_value}' MINUTE"
+    elif time_unit == 'h':
+        return f"'{time_value}' HOUR"
+    return default
+
+
+def build_trace_filters(req):
+    """Build extra WHERE clause fragments from request params for trace queries."""
+    extra = ''
+    status_filter = req.args.get('status', '')
+    search_filter = req.args.get('search', '')
+    min_duration = req.args.get('min_duration', '')
+    if status_filter:
+        extra += f" AND status_code = '{status_filter}'"
+    if search_filter:
+        extra += f" AND LOWER(span_name) LIKE LOWER('%{search_filter}%')"
+    if min_duration:
+        extra += f" AND duration_ns / 1000000.0 >= {float(min_duration)}"
+    return extra
+
+
+def build_log_filters(req, table_alias=''):
+    """Build extra WHERE clause fragments from request params for log queries."""
+    prefix = f"{table_alias}." if table_alias else ''
+    extra = ''
+    severity_filter = req.args.get('severity', '')
+    search_filter = req.args.get('search', '')
+    if severity_filter:
+        extra += f" AND {prefix}severity_text = '{severity_filter}'"
+    if search_filter:
+        extra += f" AND LOWER({prefix}body) LIKE LOWER('%{search_filter}%')"
+    return extra
+
+
 # Import the system prompt from diagnostic_chat
 from diagnostic_chat import SYSTEM_PROMPT
 
@@ -704,6 +796,28 @@ def system_status():
         if result['success']:
             status['hosts'] = result['rows']
 
+    # Build entity_categories for generic UI
+    status['entity_categories'] = [
+        {
+            'type': 'service',
+            'display_name': 'Services',
+            'name_field': 'service_name',
+            'entities': status['services'],
+        },
+        {
+            'type': 'database',
+            'display_name': 'Databases',
+            'name_field': 'db_system',
+            'entities': status['databases'],
+        },
+        {
+            'type': 'host',
+            'display_name': 'Hosts',
+            'name_field': 'host_name',
+            'entities': status['hosts'],
+        },
+    ]
+
     return jsonify(status)
 
 
@@ -857,148 +971,6 @@ def error_details(trace_id, span_id):
     return jsonify(data)
 
 
-@app.route('/api/service/<service_name>/logs', methods=['GET'])
-def service_logs(service_name):
-    """Get recent logs for a specific service."""
-    executor = get_query_executor()
-    limit = min(int(request.args.get('limit', '50')), 1000)
-    time_param = request.args.get('time', '5m')
-
-    # Parse time parameter
-    time_value = int(time_param[:-1])
-    time_unit = time_param[-1]
-    if time_unit == 's':
-        interval = f"'{time_value}' SECOND"
-    elif time_unit == 'm':
-        interval = f"'{time_value}' MINUTE"
-    elif time_unit == 'h':
-        interval = f"'{time_value}' HOUR"
-    else:
-        interval = "'5' MINUTE"
-
-    # Build extra filters
-    extra_where = ''
-    severity_filter = request.args.get('severity', '')
-    search_filter = request.args.get('search', '')
-    if severity_filter:
-        extra_where += f" AND severity_text = '{severity_filter}'"
-    if search_filter:
-        extra_where += f" AND LOWER(body) LIKE LOWER('%{search_filter}%')"
-
-    logs_query = f"""
-    SELECT timestamp, severity_text, body, trace_id, span_id
-    FROM logs_otel_analytic
-    WHERE service_name = '{service_name}'
-      AND timestamp > NOW() - INTERVAL {interval}
-      {extra_where}
-    ORDER BY timestamp DESC
-    LIMIT {limit}
-    """
-    result = executor.execute_query(logs_query)
-
-    if result['success']:
-        return jsonify({'logs': result['rows']})
-    else:
-        return jsonify({'logs': [], 'error': result.get('error')})
-
-
-@app.route('/api/service/<service_name>/traces', methods=['GET'])
-def service_traces(service_name):
-    """Get recent traces for a specific service."""
-    executor = get_query_executor()
-    limit = min(int(request.args.get('limit', '50')), 1000)
-    time_param = request.args.get('time', '5m')
-
-    # Parse time parameter
-    time_value = int(time_param[:-1])
-    time_unit = time_param[-1]
-    if time_unit == 's':
-        interval = f"'{time_value}' SECOND"
-    elif time_unit == 'm':
-        interval = f"'{time_value}' MINUTE"
-    elif time_unit == 'h':
-        interval = f"'{time_value}' HOUR"
-    else:
-        interval = "'5' MINUTE"
-
-    # Build extra filters
-    extra_where = ''
-    status_filter = request.args.get('status', '')
-    search_filter = request.args.get('search', '')
-    min_duration = request.args.get('min_duration', '')
-    if status_filter:
-        extra_where += f" AND status_code = '{status_filter}'"
-    if search_filter:
-        extra_where += f" AND LOWER(span_name) LIKE LOWER('%{search_filter}%')"
-    if min_duration:
-        extra_where += f" AND duration_ns / 1000000.0 >= {float(min_duration)}"
-
-    traces_query = f"""
-    SELECT trace_id, span_id, span_name, span_kind, status_code,
-           ROUND(duration_ns / 1000000.0, 2) as duration_ms,
-           start_time, db_system
-    FROM traces_otel_analytic
-    WHERE service_name = '{service_name}'
-      AND start_time > NOW() - INTERVAL {interval}
-      {extra_where}
-    ORDER BY start_time DESC
-    LIMIT {limit}
-    """
-    result = executor.execute_query(traces_query)
-
-    if result['success']:
-        return jsonify({'traces': result['rows']})
-    else:
-        return jsonify({'traces': [], 'error': result.get('error')})
-
-
-@app.route('/api/service/<service_name>/metrics', methods=['GET'])
-def service_metrics(service_name):
-    """Get recent metrics for a specific service."""
-    executor = get_query_executor()
-    limit = min(int(request.args.get('limit', '50')), 1000)
-    time_param = request.args.get('time', '5m')
-
-    # Parse time parameter
-    time_value = int(time_param[:-1])
-    time_unit = time_param[-1]
-    if time_unit == 's':
-        interval = f"'{time_value}' SECOND"
-    elif time_unit == 'm':
-        interval = f"'{time_value}' MINUTE"
-    elif time_unit == 'h':
-        interval = f"'{time_value}' HOUR"
-    else:
-        interval = "'5' MINUTE"
-
-    # Build extra filters
-    extra_where = ''
-    search_filter = request.args.get('search', '')
-    if search_filter:
-        extra_where += f" AND LOWER(metric_name) LIKE LOWER('%{search_filter}%')"
-
-    # Get metrics summary by metric name for this service
-    metrics_query = f"""
-    SELECT metric_name,
-           COUNT(*) as data_points,
-           ROUND(AVG(value_double), 4) as avg_value,
-           ROUND(MIN(value_double), 4) as min_value,
-           ROUND(MAX(value_double), 4) as max_value,
-           MAX(timestamp) as last_seen
-    FROM metrics_otel_analytic
-    WHERE service_name = '{service_name}'
-      AND timestamp > NOW() - INTERVAL {interval}
-      {extra_where}
-    GROUP BY metric_name
-    ORDER BY data_points DESC
-    LIMIT {limit}
-    """
-    result = executor.execute_query(metrics_query)
-
-    if result['success']:
-        return jsonify({'metrics': result['rows']})
-    else:
-        return jsonify({'metrics': [], 'error': result.get('error')})
 
 
 @app.route('/api/service/<service_name>/dependencies', methods=['GET'])
@@ -1325,150 +1297,6 @@ def database_dependencies(db_system):
     return jsonify(data)
 
 
-@app.route('/api/database/<db_system>/traces', methods=['GET'])
-def database_traces(db_system):
-    """Get recent traces for a specific database."""
-    executor = get_query_executor()
-    limit = min(int(request.args.get('limit', '50')), 1000)
-    time_param = request.args.get('time', '5m')
-
-    time_value = int(time_param[:-1])
-    time_unit = time_param[-1]
-    if time_unit == 's':
-        interval = f"'{time_value}' SECOND"
-    elif time_unit == 'm':
-        interval = f"'{time_value}' MINUTE"
-    elif time_unit == 'h':
-        interval = f"'{time_value}' HOUR"
-    else:
-        interval = "'5' MINUTE"
-
-    # Build extra filters
-    extra_where = ''
-    status_filter = request.args.get('status', '')
-    search_filter = request.args.get('search', '')
-    min_duration = request.args.get('min_duration', '')
-    if status_filter:
-        extra_where += f" AND status_code = '{status_filter}'"
-    if search_filter:
-        extra_where += f" AND LOWER(span_name) LIKE LOWER('%{search_filter}%')"
-    if min_duration:
-        extra_where += f" AND duration_ns / 1000000.0 >= {float(min_duration)}"
-
-    traces_query = f"""
-    SELECT trace_id, span_id, service_name, span_name, span_kind, status_code,
-           ROUND(duration_ns / 1000000.0, 2) as duration_ms,
-           start_time
-    FROM traces_otel_analytic
-    WHERE db_system = '{db_system}'
-      AND start_time > NOW() - INTERVAL {interval}
-      {extra_where}
-    ORDER BY start_time DESC
-    LIMIT {limit}
-    """
-    result = executor.execute_query(traces_query)
-
-    if result['success']:
-        return jsonify({'traces': result['rows']})
-    else:
-        return jsonify({'traces': [], 'error': result.get('error')})
-
-
-@app.route('/api/database/<db_system>/logs', methods=['GET'])
-def database_logs(db_system):
-    """Get recent logs from services that use this database."""
-    executor = get_query_executor()
-    limit = min(int(request.args.get('limit', '50')), 1000)
-    time_param = request.args.get('time', '5m')
-
-    time_value = int(time_param[:-1])
-    time_unit = time_param[-1]
-    if time_unit == 's':
-        interval = f"'{time_value}' SECOND"
-    elif time_unit == 'm':
-        interval = f"'{time_value}' MINUTE"
-    elif time_unit == 'h':
-        interval = f"'{time_value}' HOUR"
-    else:
-        interval = "'5' MINUTE"
-
-    # Build extra filters
-    extra_where = ''
-    severity_filter = request.args.get('severity', '')
-    search_filter = request.args.get('search', '')
-    if severity_filter:
-        extra_where += f" AND l.severity_text = '{severity_filter}'"
-    if search_filter:
-        extra_where += f" AND LOWER(l.body) LIKE LOWER('%{search_filter}%')"
-
-    # Get logs from services that have DB spans for this db_system
-    logs_query = f"""
-    SELECT l.timestamp, l.service_name, l.severity_text, l.body, l.trace_id, l.span_id
-    FROM logs_otel_analytic l
-    WHERE l.service_name IN (
-        SELECT DISTINCT service_name
-        FROM traces_otel_analytic
-        WHERE db_system = '{db_system}'
-          AND start_time > NOW() - INTERVAL {interval}
-    )
-      AND l.timestamp > NOW() - INTERVAL {interval}
-      {extra_where}
-    ORDER BY l.timestamp DESC
-    LIMIT {limit}
-    """
-    result = executor.execute_query(logs_query)
-
-    if result['success']:
-        return jsonify({'logs': result['rows']})
-    else:
-        return jsonify({'logs': [], 'error': result.get('error')})
-
-
-@app.route('/api/database/<db_system>/metrics', methods=['GET'])
-def database_metrics(db_system):
-    """Get database-specific metrics (e.g. postgresql.*)."""
-    executor = get_query_executor()
-    limit = min(int(request.args.get('limit', '50')), 1000)
-    time_param = request.args.get('time', '5m')
-
-    time_value = int(time_param[:-1])
-    time_unit = time_param[-1]
-    if time_unit == 's':
-        interval = f"'{time_value}' SECOND"
-    elif time_unit == 'm':
-        interval = f"'{time_value}' MINUTE"
-    elif time_unit == 'h':
-        interval = f"'{time_value}' HOUR"
-    else:
-        interval = "'5' MINUTE"
-
-    # Build extra filters
-    extra_where = ''
-    search_filter = request.args.get('search', '')
-    if search_filter:
-        extra_where += f" AND LOWER(metric_name) LIKE LOWER('%{search_filter}%')"
-
-    metrics_query = f"""
-    SELECT metric_name,
-           COUNT(*) as data_points,
-           ROUND(AVG(value_double), 4) as avg_value,
-           ROUND(MIN(value_double), 4) as min_value,
-           ROUND(MAX(value_double), 4) as max_value,
-           MAX(timestamp) as last_seen
-    FROM metrics_otel_analytic
-    WHERE metric_name LIKE '{db_system}.%'
-      AND timestamp > NOW() - INTERVAL {interval}
-      {extra_where}
-    GROUP BY metric_name
-    ORDER BY data_points DESC
-    LIMIT {limit}
-    """
-    result = executor.execute_query(metrics_query)
-
-    if result['success']:
-        return jsonify({'metrics': result['rows']})
-    else:
-        return jsonify({'metrics': [], 'error': result.get('error')})
 
 
 @app.route('/api/host/<host_name>/services', methods=['GET'])
@@ -1608,151 +1436,6 @@ def host_services(host_name):
     return jsonify(data)
 
 
-@app.route('/api/host/<host_name>/traces', methods=['GET'])
-def host_traces(host_name):
-    """Get recent traces from services running on this host."""
-    executor = get_query_executor()
-    limit = min(int(request.args.get('limit', '50')), 1000)
-    time_param = request.args.get('time', '5m')
-
-    time_value = int(time_param[:-1])
-    time_unit = time_param[-1]
-    if time_unit == 's':
-        interval = f"'{time_value}' SECOND"
-    elif time_unit == 'm':
-        interval = f"'{time_value}' MINUTE"
-    elif time_unit == 'h':
-        interval = f"'{time_value}' HOUR"
-    else:
-        interval = "'5' MINUTE"
-
-    # Build extra filters
-    extra_where = ''
-    status_filter = request.args.get('status', '')
-    search_filter = request.args.get('search', '')
-    min_duration = request.args.get('min_duration', '')
-    if status_filter:
-        extra_where += f" AND status_code = '{status_filter}'"
-    if search_filter:
-        extra_where += f" AND LOWER(span_name) LIKE LOWER('%{search_filter}%')"
-    if min_duration:
-        extra_where += f" AND duration_ns / 1000000.0 >= {float(min_duration)}"
-
-    traces_query = f"""
-    SELECT trace_id, span_id, service_name, span_name, span_kind, status_code,
-           ROUND(duration_ns / 1000000.0, 2) as duration_ms,
-           start_time
-    FROM spans_otel_analytic
-    WHERE attributes_flat LIKE '%host.name={host_name}%'
-      AND timestamp > NOW() - INTERVAL {interval}
-      {extra_where}
-    ORDER BY timestamp DESC
-    LIMIT {limit}
-    """
-    result = executor.execute_query(traces_query)
-
-    if result['success']:
-        return jsonify({'traces': result['rows']})
-    else:
-        return jsonify({'traces': [], 'error': result.get('error')})
-
-
-@app.route('/api/host/<host_name>/logs', methods=['GET'])
-def host_logs(host_name):
-    """Get recent logs from services running on this host."""
-    executor = get_query_executor()
-    limit = min(int(request.args.get('limit', '50')), 1000)
-    time_param = request.args.get('time', '5m')
-
-    time_value = int(time_param[:-1])
-    time_unit = time_param[-1]
-    if time_unit == 's':
-        interval = f"'{time_value}' SECOND"
-    elif time_unit == 'm':
-        interval = f"'{time_value}' MINUTE"
-    elif time_unit == 'h':
-        interval = f"'{time_value}' HOUR"
-    else:
-        interval = "'5' MINUTE"
-
-    # Build extra filters
-    extra_where = ''
-    severity_filter = request.args.get('severity', '')
-    search_filter = request.args.get('search', '')
-    if severity_filter:
-        extra_where += f" AND l.severity_text = '{severity_filter}'"
-    if search_filter:
-        extra_where += f" AND LOWER(l.body) LIKE LOWER('%{search_filter}%')"
-
-    # Get logs from services known to run on this host
-    logs_query = f"""
-    SELECT l.timestamp, l.service_name, l.severity_text, l.body, l.trace_id, l.span_id
-    FROM logs_otel_analytic l
-    WHERE l.service_name IN (
-        SELECT DISTINCT service_name
-        FROM spans_otel_analytic
-        WHERE attributes_flat LIKE '%host.name={host_name}%'
-          AND timestamp > NOW() - INTERVAL {interval}
-          AND service_name IS NOT NULL AND service_name != ''
-    )
-      AND l.timestamp > NOW() - INTERVAL {interval}
-      {extra_where}
-    ORDER BY l.timestamp DESC
-    LIMIT {limit}
-    """
-    result = executor.execute_query(logs_query)
-
-    if result['success']:
-        return jsonify({'logs': result['rows']})
-    else:
-        return jsonify({'logs': [], 'error': result.get('error')})
-
-
-@app.route('/api/host/<host_name>/metrics', methods=['GET'])
-def host_metrics_detail(host_name):
-    """Get detailed metrics for a specific host."""
-    executor = get_query_executor()
-    limit = min(int(request.args.get('limit', '50')), 1000)
-    time_param = request.args.get('time', '5m')
-
-    time_value = int(time_param[:-1])
-    time_unit = time_param[-1]
-    if time_unit == 's':
-        interval = f"'{time_value}' SECOND"
-    elif time_unit == 'm':
-        interval = f"'{time_value}' MINUTE"
-    elif time_unit == 'h':
-        interval = f"'{time_value}' HOUR"
-    else:
-        interval = "'5' MINUTE"
-
-    # Build extra filters
-    extra_where = ''
-    search_filter = request.args.get('search', '')
-    if search_filter:
-        extra_where += f" AND LOWER(metric_name) LIKE LOWER('%{search_filter}%')"
-
-    metrics_query = f"""
-    SELECT metric_name,
-           COUNT(*) as data_points,
-           ROUND(AVG(value_double), 4) as avg_value,
-           ROUND(MIN(value_double), 4) as min_value,
-           ROUND(MAX(value_double), 4) as max_value,
-           MAX(timestamp) as last_seen
-    FROM metrics_otel_analytic
-    WHERE attributes_flat LIKE '%host.name={host_name}%'
-      AND timestamp > NOW() - INTERVAL {interval}
-      {extra_where}
-    GROUP BY metric_name
-    ORDER BY data_points DESC
-    LIMIT {limit}
-    """
-    result = executor.execute_query(metrics_query)
-
-    if result['success']:
-        return jsonify({'metrics': result['rows']})
-    else:
-        return jsonify({'metrics': [], 'error': result.get('error')})
 
 
 # =============================================================================
@@ -2024,6 +1707,216 @@ def topology_graph(entity_name):
         'root': entity_name,
         'depth': depth
     })
+
+
+# =============================================================================
+# Generic Entity API
+# =============================================================================
+
+@app.route('/api/entity/<entity_type>/<name>', methods=['GET'])
+def entity_details(entity_type, name):
+    """Get detailed metrics for any entity type."""
+    if entity_type not in ENTITY_TYPES:
+        return jsonify({'error': f'Unknown entity type: {entity_type}'}), 400
+
+    config = ENTITY_TYPES[entity_type]
+    executor = get_query_executor()
+    time_range = request.args.get('range', '1')
+
+    if entity_type == 'service':
+        return service_details(name)
+    elif entity_type == 'database':
+        return database_details(name)
+    elif entity_type == 'host':
+        return host_services(name)
+    return jsonify({'error': 'Not implemented'}), 501
+
+
+@app.route('/api/entity/<entity_type>/<name>/traces', methods=['GET'])
+def entity_traces(entity_type, name):
+    """Get traces for any entity type."""
+    if entity_type not in ENTITY_TYPES:
+        return jsonify({'error': f'Unknown entity type: {entity_type}'}), 400
+
+    config = ENTITY_TYPES[entity_type]
+    executor = get_query_executor()
+    limit = min(int(request.args.get('limit', '50')), 1000)
+    interval = parse_time_interval(request.args.get('time', '5m'))
+    extra_where = build_trace_filters(request)
+
+    traces_filter = config['traces_filter'].format(name=name, interval=interval)
+    table = config['traces_table']
+    time_field = config['traces_time_field']
+
+    # For service, we don't need service_name in SELECT since it's the filter
+    if entity_type == 'service':
+        traces_query = f"""
+        SELECT trace_id, span_id, span_name, span_kind, status_code,
+               ROUND(duration_ns / 1000000.0, 2) as duration_ms,
+               start_time, db_system
+        FROM {table}
+        WHERE {traces_filter}
+          AND {time_field} > NOW() - INTERVAL {interval}
+          {extra_where}
+        ORDER BY {time_field} DESC
+        LIMIT {limit}
+        """
+    else:
+        traces_query = f"""
+        SELECT trace_id, span_id, service_name, span_name, span_kind, status_code,
+               ROUND(duration_ns / 1000000.0, 2) as duration_ms,
+               {time_field} as start_time
+        FROM {table}
+        WHERE {traces_filter}
+          AND {time_field} > NOW() - INTERVAL {interval}
+          {extra_where}
+        ORDER BY {time_field} DESC
+        LIMIT {limit}
+        """
+
+    result = executor.execute_query(traces_query)
+    if result['success']:
+        return jsonify({'traces': result['rows']})
+    return jsonify({'traces': [], 'error': result.get('error')})
+
+
+@app.route('/api/entity/<entity_type>/<name>/logs', methods=['GET'])
+def entity_logs(entity_type, name):
+    """Get logs for any entity type."""
+    if entity_type not in ENTITY_TYPES:
+        return jsonify({'error': f'Unknown entity type: {entity_type}'}), 400
+
+    config = ENTITY_TYPES[entity_type]
+    executor = get_query_executor()
+    limit = min(int(request.args.get('limit', '50')), 1000)
+    interval = parse_time_interval(request.args.get('time', '5m'))
+
+    if config['logs_filter']:
+        # Direct filter (service)
+        extra_where = build_log_filters(request)
+        logs_filter = config['logs_filter'].format(name=name, interval=interval)
+        logs_query = f"""
+        SELECT timestamp, severity_text, body, trace_id, span_id
+        FROM logs_otel_analytic
+        WHERE {logs_filter}
+          AND timestamp > NOW() - INTERVAL {interval}
+          {extra_where}
+        ORDER BY timestamp DESC
+        LIMIT {limit}
+        """
+    elif config['logs_join']:
+        # Subquery join (database, host)
+        extra_where = build_log_filters(request, 'l')
+        join_filter = config['logs_join'].format(name=name, interval=interval)
+        logs_query = f"""
+        SELECT l.timestamp, l.service_name, l.severity_text, l.body, l.trace_id, l.span_id
+        FROM logs_otel_analytic l
+        WHERE {join_filter}
+          AND l.timestamp > NOW() - INTERVAL {interval}
+          {extra_where}
+        ORDER BY l.timestamp DESC
+        LIMIT {limit}
+        """
+    else:
+        return jsonify({'logs': []})
+
+    result = executor.execute_query(logs_query)
+    if result['success']:
+        return jsonify({'logs': result['rows']})
+    return jsonify({'logs': [], 'error': result.get('error')})
+
+
+@app.route('/api/entity/<entity_type>/<name>/metrics', methods=['GET'])
+def entity_metrics(entity_type, name):
+    """Get metrics for any entity type."""
+    if entity_type not in ENTITY_TYPES:
+        return jsonify({'error': f'Unknown entity type: {entity_type}'}), 400
+
+    config = ENTITY_TYPES[entity_type]
+    executor = get_query_executor()
+    limit = min(int(request.args.get('limit', '50')), 1000)
+    interval = parse_time_interval(request.args.get('time', '5m'))
+
+    extra_where = ''
+    search_filter = request.args.get('search', '')
+    if search_filter:
+        extra_where += f" AND LOWER(metric_name) LIKE LOWER('%{search_filter}%')"
+
+    metrics_filter = config['metrics_filter'].format(name=name, interval=interval)
+
+    metrics_query = f"""
+    SELECT metric_name,
+           COUNT(*) as data_points,
+           ROUND(AVG(value_double), 4) as avg_value,
+           ROUND(MIN(value_double), 4) as min_value,
+           ROUND(MAX(value_double), 4) as max_value,
+           MAX(timestamp) as last_seen
+    FROM metrics_otel_analytic
+    WHERE {metrics_filter}
+      AND timestamp > NOW() - INTERVAL {interval}
+      {extra_where}
+    GROUP BY metric_name
+    ORDER BY data_points DESC
+    LIMIT {limit}
+    """
+
+    result = executor.execute_query(metrics_query)
+    if result['success']:
+        return jsonify({'metrics': result['rows']})
+    return jsonify({'metrics': [], 'error': result.get('error')})
+
+
+@app.route('/api/entity/<entity_type>/<name>/dependencies', methods=['GET'])
+def entity_dependencies(entity_type, name):
+    """Get dependencies for any entity type."""
+    if entity_type not in ENTITY_TYPES:
+        return jsonify({'error': f'Unknown entity type: {entity_type}'}), 400
+
+    if entity_type == 'service':
+        return service_dependencies(name)
+    elif entity_type == 'database':
+        return database_dependencies(name)
+    elif entity_type == 'host':
+        return host_services(name)
+    return jsonify({'error': 'Not implemented'}), 501
+
+
+# Legacy aliases - keep old routes working
+@app.route('/api/service/<name>/traces')
+def service_traces_legacy(name):
+    return entity_traces('service', name)
+
+@app.route('/api/service/<name>/logs')
+def service_logs_legacy(name):
+    return entity_logs('service', name)
+
+@app.route('/api/service/<name>/metrics')
+def service_metrics_legacy(name):
+    return entity_metrics('service', name)
+
+@app.route('/api/database/<name>/traces')
+def database_traces_legacy(name):
+    return entity_traces('database', name)
+
+@app.route('/api/database/<name>/logs')
+def database_logs_legacy(name):
+    return entity_logs('database', name)
+
+@app.route('/api/database/<name>/metrics')
+def database_metrics_legacy(name):
+    return entity_metrics('database', name)
+
+@app.route('/api/host/<name>/traces')
+def host_traces_legacy(name):
+    return entity_traces('host', name)
+
+@app.route('/api/host/<name>/logs')
+def host_logs_legacy(name):
+    return entity_logs('host', name)
+
+@app.route('/api/host/<name>/metrics')
+def host_metrics_legacy(name):
+    return entity_metrics('host', name)
 
 
 # =============================================================================
@@ -2617,6 +2510,191 @@ def get_alert_activity():
         data['events'] = result['rows']
 
     return jsonify(data)
+
+
+# =============================================================================
+# Predictions, Incident Context, Patterns, Simulation
+# =============================================================================
+
+# Simulation manager singleton (lazy-init with executor)
+_simulation_manager = None
+
+def get_simulation_manager():
+    global _simulation_manager
+    if _simulation_manager is None:
+        try:
+            from failure_simulator import SimulationManager
+            # Create a lightweight executor for the simulation manager
+            from predictive_alerts import TrinoExecutor, Config
+            config = Config()
+            executor = TrinoExecutor(config)
+            _simulation_manager = SimulationManager(executor=executor)
+        except Exception as e:
+            print(f"[WebUI] Could not init SimulationManager: {e}")
+            from failure_simulator import SimulationManager
+            _simulation_manager = SimulationManager(executor=None)
+    return _simulation_manager
+
+
+@app.route('/api/predictions', methods=['GET'])
+def get_predictions():
+    """Get active resource predictions."""
+    executor = get_query_executor()
+
+    data = {'predictions': []}
+
+    query = """
+    SELECT prediction_id, created_at, host_name, resource_type, service_name,
+           current_value, trend_slope, trend_r_squared, predicted_exhaustion_at,
+           threshold_value, hours_until_exhaustion, confidence, status
+    FROM resource_predictions
+    WHERE status = 'active'
+    ORDER BY hours_until_exhaustion ASC
+    LIMIT 50
+    """
+    result = executor.execute_query(query)
+    if result['success']:
+        data['predictions'] = result['rows']
+
+    return jsonify(data)
+
+
+@app.route('/api/incidents/context/<alert_id>', methods=['GET'])
+def get_incident_context(alert_id):
+    """Get incident context snapshot for an alert."""
+    executor = get_query_executor()
+
+    data = {'context': None, 'pattern': None}
+
+    # Sanitize alert_id
+    alert_id = alert_id.replace("'", "")[:20]
+
+    context_query = f"""
+    SELECT context_id, alert_id, captured_at, service_name, alert_type,
+           severity, fingerprint, metrics_snapshot, error_traces,
+           log_snapshot, topology_snapshot, baseline_values, anomaly_scores
+    FROM incident_context
+    WHERE alert_id = '{alert_id}'
+    ORDER BY captured_at DESC
+    LIMIT 1
+    """
+    result = executor.execute_query(context_query)
+    if result['success'] and result['rows']:
+        ctx = result['rows'][0]
+        # Parse JSON fields
+        for field in ('metrics_snapshot', 'error_traces', 'log_snapshot',
+                      'topology_snapshot', 'baseline_values', 'anomaly_scores'):
+            if ctx.get(field):
+                try:
+                    ctx[field] = json.loads(ctx[field])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        data['context'] = ctx
+
+        # Look up matching pattern
+        fingerprint = ctx.get('fingerprint', '')
+        if fingerprint:
+            pattern_query = f"""
+            SELECT pattern_id, occurrence_count, first_seen, last_seen,
+                   avg_duration_minutes, common_root_cause, precursor_signals
+            FROM incident_patterns
+            WHERE fingerprint = '{fingerprint}'
+            LIMIT 1
+            """
+            pat_result = executor.execute_query(pattern_query)
+            if pat_result['success'] and pat_result['rows']:
+                pat = pat_result['rows'][0]
+                if pat.get('precursor_signals'):
+                    try:
+                        pat['precursor_signals'] = json.loads(pat['precursor_signals'])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                data['pattern'] = pat
+
+    return jsonify(data)
+
+
+@app.route('/api/incidents/patterns', methods=['GET'])
+def get_incident_patterns():
+    """Get recurring incident patterns."""
+    executor = get_query_executor()
+
+    data = {'patterns': []}
+
+    query = """
+    SELECT pattern_id, fingerprint, service_name, alert_type,
+           occurrence_count, first_seen, last_seen,
+           avg_duration_minutes, common_root_cause, precursor_signals, updated_at
+    FROM incident_patterns
+    ORDER BY occurrence_count DESC
+    LIMIT 50
+    """
+    result = executor.execute_query(query)
+    if result['success']:
+        for pat in result['rows']:
+            if pat.get('precursor_signals'):
+                try:
+                    pat['precursor_signals'] = json.loads(pat['precursor_signals'])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        data['patterns'] = result['rows']
+
+    return jsonify(data)
+
+
+@app.route('/api/simulation/scenarios', methods=['GET'])
+def list_simulation_scenarios():
+    """List available simulation scenarios."""
+    mgr = get_simulation_manager()
+    return jsonify({'scenarios': mgr.list_scenarios()})
+
+
+@app.route('/api/simulation/start', methods=['POST'])
+def start_simulation():
+    """Start a simulation scenario."""
+    mgr = get_simulation_manager()
+    body = request.get_json(silent=True) or {}
+    scenario = body.get('scenario', '')
+    config = body.get('config', {})
+
+    if not scenario:
+        return jsonify({'success': False, 'error': 'Missing scenario name'}), 400
+
+    run_id = mgr.start_scenario(scenario, config)
+    if run_id is None:
+        return jsonify({'success': False, 'error': 'Scenario already running or invalid name'}), 409
+
+    return jsonify({'success': True, 'run_id': run_id})
+
+
+@app.route('/api/simulation/stop', methods=['POST'])
+def stop_simulation():
+    """Stop the running simulation."""
+    mgr = get_simulation_manager()
+    body = request.get_json(silent=True) or {}
+    run_id = body.get('run_id')
+
+    success = mgr.stop_scenario(run_id)
+    return jsonify({'success': success})
+
+
+@app.route('/api/simulation/status', methods=['GET'])
+def simulation_status():
+    """Get current simulation status."""
+    mgr = get_simulation_manager()
+    status = mgr.get_status()
+    return jsonify({'status': status})
+
+
+@app.route('/api/simulation/results/<run_id>', methods=['GET'])
+def simulation_results(run_id):
+    """Get results for a completed simulation run."""
+    mgr = get_simulation_manager()
+    run_id = run_id.replace("'", "")[:20]
+    results = mgr.get_results(run_id)
+    if results is None:
+        return jsonify({'success': False, 'error': 'Run not found'}), 404
+    return jsonify({'success': True, 'results': results})
 
 
 # =============================================================================

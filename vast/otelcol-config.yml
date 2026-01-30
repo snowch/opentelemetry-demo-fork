@@ -55,6 +55,16 @@ receivers:
     endpoint: "valkey-cart:6379"
     username: "valkey"
     collection_interval: 10s
+  # Kafka broker metrics (consumer lag, partitions, offsets)
+  kafkametrics:
+    brokers:
+      - "${env:KAFKA_HOST}:${env:KAFKA_PORT}"
+    protocol_version: 2.0.0
+    collection_interval: 30s
+    scrapers:
+      - brokers
+      - topics
+      - consumers
   # Host metrics
   hostmetrics:
     root_path: /hostfs
@@ -215,7 +225,7 @@ service:
       processors: [resourcedetection, memory_limiter, transform, batch]
       exporters: [otlp, debug, spanmetrics, kafka/traces]
     metrics:
-      receivers: [docker_stats, httpcheck/frontend-proxy, hostmetrics, nginx, otlp, postgresql, redis, spanmetrics]
+      receivers: [docker_stats, httpcheck/frontend-proxy, hostmetrics, kafkametrics, nginx, otlp, postgresql, redis, spanmetrics]
       processors: [resourcedetection, resource/add-host, memory_limiter, batch]
       exporters: [otlphttp/prometheus, debug, kafka/metrics]
     logs:

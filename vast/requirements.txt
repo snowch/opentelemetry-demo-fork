@@ -10,6 +10,9 @@ trino>=0.330.0
 # Web UI
 flask>=3.0.0
 
+# Failure simulator (direct PostgreSQL connection for config changes)
+psycopg2-binary>=2.9.0
+
 # Predictive maintenance (optional - statistical methods used if not available)
 scikit-learn>=1.3.0
 numpy>=1.24.0

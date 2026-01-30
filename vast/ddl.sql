@@ -15,6 +15,10 @@ DROP TABLE IF EXISTS vast."csnow-db|otel".topology_dependencies;
 DROP TABLE IF EXISTS vast."csnow-db|otel".topology_host_services;
 DROP TABLE IF EXISTS vast."csnow-db|otel".topology_hosts;
 DROP TABLE IF EXISTS vast."csnow-db|otel".topology_database_hosts;
+DROP TABLE IF EXISTS vast."csnow-db|otel".incident_context;
+DROP TABLE IF EXISTS vast."csnow-db|otel".resource_predictions;
+DROP TABLE IF EXISTS vast."csnow-db|otel".incident_patterns;
+DROP TABLE IF EXISTS vast."csnow-db|otel".simulation_runs;
 
 -- vast."csnow-db|otel".logs_otel_analytic definition
 
@@ -217,5 +221,71 @@ CREATE TABLE vast."csnow-db|otel".topology_database_hosts (
    host_name varchar,
    last_seen timestamp(9),
    updated_at timestamp(9)
+);
+
+-- =============================================================================
+-- Predictive Alerts: Incident Context, Predictions, Patterns, Simulations
+-- =============================================================================
+
+-- Incident context: snapshot of surrounding telemetry when an alert fires
+CREATE TABLE vast."csnow-db|otel".incident_context (
+   context_id varchar,
+   alert_id varchar,
+   captured_at timestamp(9),
+   service_name varchar,
+   alert_type varchar,
+   severity varchar,
+   fingerprint varchar,
+   metrics_snapshot varchar,
+   error_traces varchar,
+   log_snapshot varchar,
+   topology_snapshot varchar,
+   baseline_values varchar,
+   anomaly_scores varchar
+);
+
+-- Resource predictions: linear regression predictions for resource exhaustion
+CREATE TABLE vast."csnow-db|otel".resource_predictions (
+   prediction_id varchar,
+   created_at timestamp(9),
+   host_name varchar,
+   resource_type varchar,
+   service_name varchar,
+   current_value double,
+   trend_slope double,
+   trend_r_squared double,
+   predicted_exhaustion_at timestamp(9),
+   threshold_value double,
+   hours_until_exhaustion double,
+   confidence varchar,
+   status varchar
+);
+
+-- Incident patterns: aggregated patterns from recurring incidents
+CREATE TABLE vast."csnow-db|otel".incident_patterns (
+   pattern_id varchar,
+   fingerprint varchar,
+   service_name varchar,
+   alert_type varchar,
+   occurrence_count integer,
+   first_seen timestamp(9),
+   last_seen timestamp(9),
+   avg_duration_minutes double,
+   common_root_cause varchar,
+   precursor_signals varchar,
+   updated_at timestamp(9)
+);
+
+-- Simulation runs: tracks simulation scenarios for correlation with predictions
+CREATE TABLE vast."csnow-db|otel".simulation_runs (
+   run_id varchar,
+   started_at timestamp(9),
+   ended_at timestamp(9),
+   scenario_name varchar,
+   scenario_config varchar,
+   status varchar,
+   steps_completed varchar,
+   predicted_alerts varchar,
+   actual_alerts varchar
 );
 

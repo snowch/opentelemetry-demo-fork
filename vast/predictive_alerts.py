@@ -45,6 +45,7 @@ from enum import Enum
 from collections import deque
 import statistics
 import math
+import hashlib
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
@@ -1429,9 +1430,10 @@ class AnomalyDetector:
 class AlertManager:
     """Manages alert lifecycle: creation, deduplication, and resolution."""
 
-    def __init__(self, executor: TrinoExecutor, config: Config):
+    def __init__(self, executor: TrinoExecutor, config: Config, context_capture: 'IncidentContextCapture' = None):
         self.executor = executor
         self.config = config
+        self.context_capture = context_capture
         self.active_alerts: Dict[str, Dict] = {}  # key -> alert
         self._load_active_alerts()
 
@@ -1547,6 +1549,30 @@ class AlertManager:
             }
             self.active_alerts[key] = alert_info
             print(f"[Alert] CREATED [{severity.upper()}] {title}: {description}")
+
+            # Capture incident context
+            if self.context_capture:
+                try:
+                    anomaly_scores_data = {
+                        metric_type: {
+                            "current_value": anomaly["current_value"],
+                            "z_score": anomaly["z_score"],
+                            "baseline_value": anomaly["baseline_value"],
+                        }
+                    }
+                    baselines_data = {
+                        metric_type: {
+                            "mean": anomaly["baseline_value"],
+                        }
+                    }
+                    self.context_capture.capture_context(
+                        alert_id, service, alert_type, severity,
+                        anomaly_scores=anomaly_scores_data,
+                        baselines=baselines_data
+                    )
+                except Exception as e:
+                    print(f"[Alert] Context capture failed: {e}")
+
             return alert_info
         return None
 
@@ -1591,6 +1617,569 @@ class AlertManager:
             del self.active_alerts[key]
 
         return resolved
+
+
+# =============================================================================
+# Incident Context Capture
+# =============================================================================
+
+class IncidentContextCapture:
+    """Captures a snapshot of surrounding telemetry when an alert fires."""
+
+    def __init__(self, executor: TrinoExecutor):
+        self.executor = executor
+
+    def capture_context(
+        self, alert_id: str, service: str, alert_type: str, severity: str,
+        anomaly_scores: Optional[Dict] = None, baselines: Optional[Dict] = None
+    ) -> Optional[str]:
+        """Capture full incident context and store it. Returns context_id."""
+        context_id = str(uuid.uuid4())[:8]
+        now = datetime.now(timezone.utc)
+        now_str = now.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+        metrics_snapshot = self._capture_metrics_window(service)
+        error_traces = self._capture_error_traces(service)
+        log_snapshot = self._capture_logs(service)
+        topology_snapshot = self._capture_topology(service)
+
+        # Determine metric types for fingerprint
+        metric_types = []
+        if anomaly_scores:
+            metric_types = list(anomaly_scores.keys()) if isinstance(anomaly_scores, dict) else []
+        fingerprint = self._compute_fingerprint(service, alert_type, metric_types)
+
+        baselines_json = json.dumps(baselines or {}).replace("'", "''")
+        anomaly_json = json.dumps(anomaly_scores or {}).replace("'", "''")
+
+        sql = f"""
+            INSERT INTO incident_context (
+                context_id, alert_id, captured_at, service_name, alert_type,
+                severity, fingerprint, metrics_snapshot, error_traces,
+                log_snapshot, topology_snapshot, baseline_values, anomaly_scores
+            ) VALUES (
+                '{context_id}', '{alert_id}', TIMESTAMP '{now_str}', '{service}',
+                '{alert_type}', '{severity}', '{fingerprint}',
+                '{metrics_snapshot}', '{error_traces}', '{log_snapshot}',
+                '{topology_snapshot}', '{baselines_json}', '{anomaly_json}'
+            )
+        """
+
+        if self.executor.execute_write(sql):
+            print(f"[Context] Captured incident context {context_id} for alert {alert_id}")
+            return context_id
+        return None
+
+    def _capture_metrics_window(self, service: str) -> str:
+        """Query last 10 min of metrics for the service."""
+        rows = self.executor.execute(f"""
+            SELECT metric_name,
+                   COUNT(*) as data_points,
+                   AVG(value_double) as avg_val,
+                   MIN(value_double) as min_val,
+                   MAX(value_double) as max_val
+            FROM metrics_otel_analytic
+            WHERE service_name = '{service}'
+              AND timestamp > current_timestamp - INTERVAL '10' MINUTE
+            GROUP BY metric_name
+            ORDER BY metric_name
+            LIMIT 50
+        """)
+        result = []
+        for r in rows:
+            result.append({
+                "metric": r.get("metric_name", ""),
+                "data_points": r.get("data_points", 0),
+                "avg": round(r.get("avg_val", 0) or 0, 6),
+                "min": round(r.get("min_val", 0) or 0, 6),
+                "max": round(r.get("max_val", 0) or 0, 6),
+            })
+        return json.dumps(result).replace("'", "''")
+
+    def _capture_error_traces(self, service: str) -> str:
+        """Query last 10 min of error traces."""
+        rows = self.executor.execute(f"""
+            SELECT trace_id, span_id, span_name, duration_ns, start_time
+            FROM traces_otel_analytic
+            WHERE service_name = '{service}'
+              AND status_code = 'ERROR'
+              AND start_time > current_timestamp - INTERVAL '10' MINUTE
+            ORDER BY start_time DESC
+            LIMIT 20
+        """)
+        result = []
+        for r in rows:
+            result.append({
+                "trace_id": r.get("trace_id", ""),
+                "span_name": r.get("span_name", ""),
+                "duration_ms": round((r.get("duration_ns", 0) or 0) / 1e6, 2),
+            })
+        return json.dumps(result).replace("'", "''")
+
+    def _capture_logs(self, service: str) -> str:
+        """Query last 10 min of WARN/ERROR logs."""
+        rows = self.executor.execute(f"""
+            SELECT severity_text, body_text, timestamp
+            FROM logs_otel_analytic
+            WHERE service_name = '{service}'
+              AND severity_number >= 9
+              AND timestamp > current_timestamp - INTERVAL '10' MINUTE
+            ORDER BY timestamp DESC
+            LIMIT 50
+        """)
+        result = []
+        for r in rows:
+            body = r.get("body_text", "") or ""
+            result.append({
+                "severity": r.get("severity_text", ""),
+                "message": body[:500],
+            })
+        return json.dumps(result).replace("'", "''")
+
+    def _capture_topology(self, service: str) -> str:
+        """Query topology dependencies for the service."""
+        rows = self.executor.execute(f"""
+            SELECT target_service, dependency_type, call_count, avg_latency_ms, error_pct
+            FROM topology_dependencies
+            WHERE source_service = '{service}'
+            LIMIT 20
+        """)
+        result = []
+        for r in rows:
+            result.append({
+                "target": r.get("target_service", ""),
+                "type": r.get("dependency_type", ""),
+                "calls": r.get("call_count", 0),
+                "latency_ms": round(r.get("avg_latency_ms", 0) or 0, 2),
+                "error_pct": round(r.get("error_pct", 0) or 0, 4),
+            })
+        return json.dumps(result).replace("'", "''")
+
+    def _compute_fingerprint(self, service: str, alert_type: str, metric_types: List[str]) -> str:
+        """SHA256 hash for pattern matching."""
+        key = f"{service}|{alert_type}|{','.join(sorted(metric_types))}"
+        return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+# =============================================================================
+# Resource Trend Predictor
+# =============================================================================
+
+class ResourceTrendPredictor:
+    """Linear regression predictor for resource exhaustion."""
+
+    # Resource metric mappings and thresholds
+    RESOURCE_METRICS = {
+        "disk": {"metric": "system.filesystem.utilization", "threshold": 0.95},
+        "memory": {"metric": "system.memory.utilization", "threshold": 0.95},
+        "cpu": {"metric": "system.cpu.utilization", "threshold": 0.95},
+    }
+
+    def __init__(self, executor: TrinoExecutor):
+        self.executor = executor
+
+    def predict_all(self) -> List[Dict]:
+        """Run predictions for all known hosts. Returns list of prediction dicts."""
+        # Expire stale predictions first
+        self._expire_stale_predictions()
+
+        # Get known hosts
+        hosts = self.executor.execute("""
+            SELECT DISTINCT host_name FROM topology_hosts
+            WHERE last_seen > current_timestamp - INTERVAL '1' HOUR
+            LIMIT 50
+        """)
+
+        predictions = []
+        for h in hosts:
+            host_name = h.get("host_name", "")
+            if not host_name:
+                continue
+            preds = self._predict_host_resources(host_name)
+            predictions.extend(preds)
+
+        return predictions
+
+    def _predict_host_resources(self, host: str) -> List[Dict]:
+        """Check all resource types for a given host."""
+        predictions = []
+
+        for resource_type, info in self.RESOURCE_METRICS.items():
+            metric_name = info["metric"]
+            threshold = info["threshold"]
+
+            ts = self._query_resource_timeseries(host, metric_name, hours=2)
+            if len(ts) < 5:
+                continue
+
+            x = [p[0] for p in ts]  # timestamps as hours from first point
+            y = [p[1] for p in ts]  # values
+
+            slope, intercept, r_squared = self._linear_regression(x, y)
+
+            # Only predict if trending up with decent fit and exhaustion within 24h
+            if slope <= 0 or r_squared < 0.7:
+                continue
+
+            current_value = y[-1]
+            if current_value >= threshold:
+                continue  # Already exhausted
+
+            hours_to_threshold = (threshold - current_value) / slope
+            if hours_to_threshold > 24 or hours_to_threshold <= 0:
+                continue
+
+            # Confidence based on R²
+            if r_squared > 0.9:
+                confidence = "high"
+            elif r_squared > 0.7:
+                confidence = "medium"
+            else:
+                confidence = "low"
+
+            now = datetime.now(timezone.utc)
+            exhaustion_at = now + timedelta(hours=hours_to_threshold)
+
+            prediction = {
+                "host_name": host,
+                "resource_type": resource_type,
+                "service_name": None,
+                "current_value": round(current_value, 4),
+                "trend_slope": round(slope, 6),
+                "trend_r_squared": round(r_squared, 4),
+                "predicted_exhaustion_at": exhaustion_at,
+                "threshold_value": threshold,
+                "hours_until_exhaustion": round(hours_to_threshold, 2),
+                "confidence": confidence,
+            }
+
+            self._store_prediction(prediction)
+            predictions.append(prediction)
+            print(f"[Predictor] {resource_type} on {host}: {current_value:.1%} → {threshold:.0%} in {hours_to_threshold:.1f}h (r²={r_squared:.3f})")
+
+        return predictions
+
+    def _query_resource_timeseries(self, host: str, metric_name: str, hours: int = 2) -> List[Tuple[float, float]]:
+        """Get time-series from metrics_otel_analytic. Returns [(hours_offset, value), ...]."""
+        rows = self.executor.execute(f"""
+            SELECT timestamp, value_double
+            FROM metrics_otel_analytic
+            WHERE attributes_flat LIKE '%{host}%'
+              AND metric_name = '{metric_name}'
+              AND timestamp > current_timestamp - INTERVAL '{hours}' HOUR
+            ORDER BY timestamp
+            LIMIT 500
+        """)
+
+        if not rows:
+            return []
+
+        points = []
+        first_ts = None
+        for r in rows:
+            ts = r.get("timestamp")
+            val = r.get("value_double")
+            if ts is None or val is None:
+                continue
+            if isinstance(ts, str):
+                try:
+                    ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+            if first_ts is None:
+                first_ts = ts
+            hours_offset = (ts - first_ts).total_seconds() / 3600.0
+            points.append((hours_offset, float(val)))
+
+        return points
+
+    @staticmethod
+    def _linear_regression(x: List[float], y: List[float]) -> Tuple[float, float, float]:
+        """Pure Python linear regression. Returns (slope, intercept, r_squared)."""
+        n = len(x)
+        if n < 2:
+            return 0.0, 0.0, 0.0
+
+        sum_x = sum(x)
+        sum_y = sum(y)
+        sum_xy = sum(xi * yi for xi, yi in zip(x, y))
+        sum_x2 = sum(xi * xi for xi in x)
+        sum_y2 = sum(yi * yi for yi in y)
+
+        denom = n * sum_x2 - sum_x * sum_x
+        if abs(denom) < 1e-12:
+            return 0.0, sum_y / n if n else 0.0, 0.0
+
+        slope = (n * sum_xy - sum_x * sum_y) / denom
+        intercept = (sum_y - slope * sum_x) / n
+
+        # R-squared
+        ss_res = sum((yi - (slope * xi + intercept)) ** 2 for xi, yi in zip(x, y))
+        mean_y = sum_y / n
+        ss_tot = sum((yi - mean_y) ** 2 for yi in y)
+
+        if abs(ss_tot) < 1e-12:
+            r_squared = 0.0
+        else:
+            r_squared = 1.0 - ss_res / ss_tot
+
+        return slope, intercept, max(0.0, r_squared)
+
+    def _store_prediction(self, prediction: Dict):
+        """INSERT into resource_predictions."""
+        prediction_id = str(uuid.uuid4())[:8]
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+        exhaustion_str = prediction["predicted_exhaustion_at"]
+        if isinstance(exhaustion_str, datetime):
+            exhaustion_str = exhaustion_str.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+        service_val = f"'{prediction['service_name']}'" if prediction.get("service_name") else "NULL"
+
+        sql = f"""
+            INSERT INTO resource_predictions (
+                prediction_id, created_at, host_name, resource_type, service_name,
+                current_value, trend_slope, trend_r_squared, predicted_exhaustion_at,
+                threshold_value, hours_until_exhaustion, confidence, status
+            ) VALUES (
+                '{prediction_id}', TIMESTAMP '{now}', '{prediction["host_name"]}',
+                '{prediction["resource_type"]}', {service_val},
+                {prediction["current_value"]}, {prediction["trend_slope"]},
+                {prediction["trend_r_squared"]}, TIMESTAMP '{exhaustion_str}',
+                {prediction["threshold_value"]}, {prediction["hours_until_exhaustion"]},
+                '{prediction["confidence"]}', 'active'
+            )
+        """
+        self.executor.execute_write(sql)
+
+    def _expire_stale_predictions(self):
+        """Mark old predictions as 'expired'."""
+        self.executor.execute_write("""
+            UPDATE resource_predictions
+            SET status = 'expired'
+            WHERE status = 'active'
+              AND predicted_exhaustion_at < current_timestamp
+        """)
+
+
+# =============================================================================
+# Pattern Matcher
+# =============================================================================
+
+class PatternMatcher:
+    """Identifies recurring incident fingerprints from incident_context data."""
+
+    def __init__(self, executor: TrinoExecutor):
+        self.executor = executor
+
+    def match_pattern(self, fingerprint: str, service: str, alert_type: str) -> Optional[Dict]:
+        """Check if this fingerprint matches a known pattern."""
+        rows = self.executor.execute(f"""
+            SELECT pattern_id, occurrence_count, first_seen, last_seen,
+                   avg_duration_minutes, common_root_cause, precursor_signals
+            FROM incident_patterns
+            WHERE fingerprint = '{fingerprint}'
+            LIMIT 1
+        """)
+        if rows:
+            r = rows[0]
+            precursors = r.get("precursor_signals")
+            if precursors:
+                try:
+                    precursors = json.loads(precursors)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            return {
+                "pattern_id": r.get("pattern_id"),
+                "occurrence_count": r.get("occurrence_count", 0),
+                "first_seen": str(r.get("first_seen", "")),
+                "last_seen": str(r.get("last_seen", "")),
+                "avg_duration_minutes": r.get("avg_duration_minutes"),
+                "common_root_cause": r.get("common_root_cause"),
+                "precursor_signals": precursors,
+            }
+        return None
+
+    def update_patterns(self):
+        """Aggregate incident_context data into incident_patterns."""
+        print("[PatternMatcher] Updating patterns from incident context data...")
+
+        # Group by fingerprint in incident_context
+        rows = self.executor.execute("""
+            SELECT fingerprint, service_name, alert_type,
+                   COUNT(*) as occurrence_count,
+                   MIN(captured_at) as first_seen,
+                   MAX(captured_at) as last_seen
+            FROM incident_context
+            GROUP BY fingerprint, service_name, alert_type
+            HAVING COUNT(*) >= 2
+            LIMIT 100
+        """)
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        updated = 0
+
+        for r in rows:
+            fingerprint = r.get("fingerprint", "")
+            service = r.get("service_name", "")
+            alert_type = r.get("alert_type", "")
+            occ_count = r.get("occurrence_count", 0)
+            first_seen = r.get("first_seen")
+            last_seen = r.get("last_seen")
+
+            if isinstance(first_seen, datetime):
+                first_seen_str = first_seen.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            else:
+                first_seen_str = str(first_seen)[:23] if first_seen else now
+
+            if isinstance(last_seen, datetime):
+                last_seen_str = last_seen.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            else:
+                last_seen_str = str(last_seen)[:23] if last_seen else now
+
+            # Compute average duration from resolved alerts with matching fingerprint
+            avg_duration = self._compute_avg_duration(fingerprint)
+
+            # Get common root cause from investigations
+            common_root_cause = self._get_common_root_cause(service, alert_type)
+
+            # Compute precursor signals
+            precursors = self._compute_precursors(service, alert_type)
+            precursors_json = json.dumps(precursors).replace("'", "''")
+
+            # Check if pattern already exists
+            existing = self.executor.execute(
+                f"SELECT pattern_id FROM incident_patterns WHERE fingerprint = '{fingerprint}' LIMIT 1"
+            )
+
+            if existing:
+                # Update existing pattern
+                pattern_id = existing[0].get("pattern_id", "")
+                root_cause_escaped = (common_root_cause or "").replace("'", "''")[:2000]
+                sql = f"""
+                    UPDATE incident_patterns
+                    SET occurrence_count = {occ_count},
+                        last_seen = TIMESTAMP '{last_seen_str}',
+                        avg_duration_minutes = {avg_duration},
+                        common_root_cause = '{root_cause_escaped}',
+                        precursor_signals = '{precursors_json}',
+                        updated_at = TIMESTAMP '{now}'
+                    WHERE pattern_id = '{pattern_id}'
+                """
+            else:
+                # Insert new pattern
+                pattern_id = str(uuid.uuid4())[:8]
+                root_cause_escaped = (common_root_cause or "").replace("'", "''")[:2000]
+                sql = f"""
+                    INSERT INTO incident_patterns (
+                        pattern_id, fingerprint, service_name, alert_type,
+                        occurrence_count, first_seen, last_seen,
+                        avg_duration_minutes, common_root_cause,
+                        precursor_signals, updated_at
+                    ) VALUES (
+                        '{pattern_id}', '{fingerprint}', '{service}', '{alert_type}',
+                        {occ_count}, TIMESTAMP '{first_seen_str}', TIMESTAMP '{last_seen_str}',
+                        {avg_duration}, '{root_cause_escaped}',
+                        '{precursors_json}', TIMESTAMP '{now}'
+                    )
+                """
+
+            if self.executor.execute_write(sql):
+                updated += 1
+
+        print(f"[PatternMatcher] Updated {updated} patterns")
+
+    def predict_cascade(self, service: str) -> List[Dict]:
+        """Use topology to find downstream services that may be affected."""
+        deps = self.executor.execute(f"""
+            SELECT target_service, dependency_type
+            FROM topology_dependencies
+            WHERE source_service = '{service}'
+            LIMIT 20
+        """)
+
+        at_risk = []
+        for dep in deps:
+            target = dep.get("target_service", "")
+            if not target:
+                continue
+
+            # Check if historical incidents on this service correlated with
+            # downstream incidents within 15 min
+            correlated = self.executor.execute(f"""
+                SELECT COUNT(*) as cnt
+                FROM incident_context ic1
+                JOIN incident_context ic2
+                  ON ic2.captured_at BETWEEN ic1.captured_at AND ic1.captured_at + INTERVAL '15' MINUTE
+                WHERE ic1.service_name = '{service}'
+                  AND ic2.service_name = '{target}'
+                LIMIT 1
+            """)
+
+            count = correlated[0].get("cnt", 0) if correlated else 0
+            if count > 0:
+                at_risk.append({
+                    "service": target,
+                    "dependency_type": dep.get("dependency_type", ""),
+                    "historical_cascades": count,
+                })
+
+        return at_risk
+
+    def _compute_avg_duration(self, fingerprint: str) -> float:
+        """Compute average alert duration for alerts matching this fingerprint."""
+        rows = self.executor.execute(f"""
+            SELECT AVG(
+                CAST(
+                    date_diff('second', a.created_at, a.resolved_at) AS double
+                ) / 60.0
+            ) as avg_mins
+            FROM alerts a
+            JOIN incident_context ic ON a.alert_id = ic.alert_id
+            WHERE ic.fingerprint = '{fingerprint}'
+              AND a.resolved_at IS NOT NULL
+            LIMIT 1
+        """)
+        if rows and rows[0].get("avg_mins"):
+            return round(rows[0]["avg_mins"], 2)
+        return 0.0
+
+    def _get_common_root_cause(self, service: str, alert_type: str) -> str:
+        """Get the most common root cause summary from investigations."""
+        rows = self.executor.execute(f"""
+            SELECT root_cause_summary, COUNT(*) as cnt
+            FROM alert_investigations
+            WHERE service_name = '{service}'
+              AND alert_type = '{alert_type}'
+              AND root_cause_summary IS NOT NULL
+            GROUP BY root_cause_summary
+            ORDER BY cnt DESC
+            LIMIT 1
+        """)
+        if rows:
+            return rows[0].get("root_cause_summary", "") or ""
+        return ""
+
+    def _compute_precursors(self, service: str, alert_type: str) -> List[Dict]:
+        """Find metrics that degraded before incidents of this type."""
+        rows = self.executor.execute(f"""
+            SELECT metric_type, AVG(z_score) as avg_zscore, COUNT(*) as cnt
+            FROM anomaly_scores asc2
+            WHERE service_name = '{service}'
+              AND is_anomaly = true
+              AND timestamp > current_timestamp - INTERVAL '24' HOUR
+            GROUP BY metric_type
+            ORDER BY avg_zscore DESC
+            LIMIT 5
+        """)
+        result = []
+        for r in rows:
+            result.append({
+                "metric": r.get("metric_type", ""),
+                "avg_zscore": round(r.get("avg_zscore", 0) or 0, 2),
+                "count": r.get("cnt", 0),
+            })
+        return result
 
 
 # =============================================================================
@@ -1954,11 +2543,16 @@ class PredictiveAlertsService:
         self.executor = TrinoExecutor(config)
         self.baseline_computer = BaselineComputer(self.executor, config)
         self.anomaly_detector = AnomalyDetector(self.executor, config, self.baseline_computer)
-        self.alert_manager = AlertManager(self.executor, config)
+        self.context_capture = IncidentContextCapture(self.executor)
+        self.alert_manager = AlertManager(self.executor, config, context_capture=self.context_capture)
         self.investigator = AlertInvestigator(self.executor, config)
+        self.trend_predictor = ResourceTrendPredictor(self.executor)
+        self.pattern_matcher = PatternMatcher(self.executor)
 
         self.running = True
         self.last_baseline_update = 0
+        self.last_trend_prediction = 0
+        self.last_pattern_update = 0
 
         # Setup graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -1972,7 +2566,8 @@ class PredictiveAlertsService:
     def _ensure_tables(self):
         """Ensure required tables exist (creates them if not)."""
         # Check if tables exist by querying
-        tables = ["service_baselines", "anomaly_scores", "alerts"]
+        tables = ["service_baselines", "anomaly_scores", "alerts",
+                  "incident_context", "resource_predictions", "incident_patterns", "simulation_runs"]
 
         for table in tables:
             sql = f"SELECT 1 FROM {table} LIMIT 1"
@@ -2054,6 +2649,24 @@ class PredictiveAlertsService:
                 # Investigate new alerts (with rate limiting)
                 for alert in new_alerts:
                     self.investigator.investigate(alert)
+
+                # Resource trend predictions (every 5 minutes)
+                if time.time() - self.last_trend_prediction > 300:
+                    try:
+                        predictions = self.trend_predictor.predict_all()
+                        if predictions:
+                            print(f"[Service] Generated {len(predictions)} resource prediction(s)")
+                    except Exception as e:
+                        print(f"[Service] Trend prediction error: {e}")
+                    self.last_trend_prediction = time.time()
+
+                # Pattern matching (every 30 minutes)
+                if time.time() - self.last_pattern_update > 1800:
+                    try:
+                        self.pattern_matcher.update_patterns()
+                    except Exception as e:
+                        print(f"[Service] Pattern update error: {e}")
+                    self.last_pattern_update = time.time()
 
                 # Sleep for remaining interval time
                 elapsed = time.time() - loop_start

@@ -719,6 +719,28 @@ services:
         condition: service_started
     logging: *logging
 
+  # Predictive alerts: anomaly detection, trend prediction, pattern matching
+  observability-predictive:
+    build:
+      context: ./vast
+      dockerfile: Dockerfile
+    container_name: observability-predictive
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: unless-stopped
+    command: ["python", "-u", "predictive_alerts.py"]
+    environment:
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+      - .env.override
+    depends_on:
+      otel-collector:
+        condition: service_started
+    logging: *logging
+
   # PostgreSQL latency proxy for fault injection testing
   pg-latency-proxy:
     image: alpine/socat
@@ -972,6 +994,8 @@ services:
       - OTEL_COLLECTOR_HOST
       - OTEL_COLLECTOR_PORT_GRPC
       - OTEL_COLLECTOR_PORT_HTTP
+      - KAFKA_HOST
+      - KAFKA_PORT
       - POSTGRES_HOST
       - POSTGRES_PORT
       - POSTGRES_PASSWORD
