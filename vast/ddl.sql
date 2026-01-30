@@ -15,6 +15,7 @@ DROP TABLE IF EXISTS vast."csnow-db|otel".topology_dependencies;
 DROP TABLE IF EXISTS vast."csnow-db|otel".topology_host_services;
 DROP TABLE IF EXISTS vast."csnow-db|otel".topology_hosts;
 DROP TABLE IF EXISTS vast."csnow-db|otel".topology_database_hosts;
+DROP TABLE IF EXISTS vast."csnow-db|otel".topology_containers;
 DROP TABLE IF EXISTS vast."csnow-db|otel".incident_context;
 DROP TABLE IF EXISTS vast."csnow-db|otel".resource_predictions;
 DROP TABLE IF EXISTS vast."csnow-db|otel".incident_patterns;
@@ -220,6 +221,16 @@ CREATE TABLE vast."csnow-db|otel".topology_hosts (
 CREATE TABLE vast."csnow-db|otel".topology_database_hosts (
    db_system varchar,
    host_name varchar,
+   last_seen timestamp(9),
+   updated_at timestamp(9)
+);
+
+-- Container registry with resource metrics
+CREATE TABLE vast."csnow-db|otel".topology_containers (
+   container_name varchar,
+   cpu_pct double,
+   memory_pct double,
+   memory_usage_mb double,
    last_seen timestamp(9),
    updated_at timestamp(9)
 );

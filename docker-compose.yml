@@ -949,8 +949,8 @@ services:
         limits:
           memory: 175M
     restart: unless-stopped
-    environment:
-      - "GF_INSTALL_PLUGINS=grafana-opensearch-datasource"
+    # environment:
+    #   - "GF_INSTALL_PLUGINS=grafana-opensearch-datasource"
     volumes:
       - ./src/grafana/grafana.ini:/etc/grafana/grafana.ini
       - ./src/grafana/provisioning/:/etc/grafana/provisioning/
@@ -980,8 +980,8 @@ services:
     depends_on:
       jaeger:
         condition: service_started
-      opensearch:
-        condition: service_healthy
+      # opensearch:
+      #   condition: service_healthy
     logging: *logging
     env_file:
       - .env
@@ -1026,42 +1026,42 @@ services:
       - "${PROMETHEUS_PORT}:${PROMETHEUS_PORT}"
     logging: *logging
 
-  # OpenSearch
-  opensearch:
-    container_name: opensearch
-    build:
-      context: ./
-      dockerfile: ${OPENSEARCH_DOCKERFILE}
-      cache_from:
-        - ${IMAGE_NAME}:${IMAGE_VERSION}-opensearch
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-    restart: unless-stopped
-    environment:
-      - cluster.name=demo-cluster
-      - node.name=demo-node
-      - bootstrap.memory_lock=true
-      - discovery.type=single-node
-      - OPENSEARCH_JAVA_OPTS=-Xms400m -Xmx400m
-      - DISABLE_INSTALL_DEMO_CONFIG=true
-      - DISABLE_SECURITY_PLUGIN=true
-      # Workaround on OSX for https://bugs.openjdk.org/browse/JDK-8345296
-      - _JAVA_OPTIONS
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-      nofile:
-        soft: 65536
-        hard: 65536
-    ports:
-      - "9200"
-    healthcheck:
-      test: curl -s http://localhost:9200/_cluster/health | grep -E '"status":"(green|yellow)"'
-      start_period: 10s
-      interval: 5s
-      timeout: 10s
-      retries: 10
-    logging: *logging
+  # # OpenSearch (disabled – logs go to VastDB via Kafka ingester)
+  # opensearch:
+  #   container_name: opensearch
+  #   build:
+  #     context: ./
+  #     dockerfile: ${OPENSEARCH_DOCKERFILE}
+  #     cache_from:
+  #       - ${IMAGE_NAME}:${IMAGE_VERSION}-opensearch
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 1G
+  #   restart: unless-stopped
+  #   environment:
+  #     - cluster.name=demo-cluster
+  #     - node.name=demo-node
+  #     - bootstrap.memory_lock=true
+  #     - discovery.type=single-node
+  #     - OPENSEARCH_JAVA_OPTS=-Xms400m -Xmx400m
+  #     - DISABLE_INSTALL_DEMO_CONFIG=true
+  #     - DISABLE_SECURITY_PLUGIN=true
+  #     # Workaround on OSX for https://bugs.openjdk.org/browse/JDK-8345296
+  #     - _JAVA_OPTIONS
+  #   ulimits:
+  #     memlock:
+  #       soft: -1
+  #       hard: -1
+  #     nofile:
+  #       soft: 65536
+  #       hard: 65536
+  #   ports:
+  #     - "9200"
+  #   healthcheck:
+  #     test: curl -s http://localhost:9200/_cluster/health | grep -E '"status":"(green|yellow)"'
+  #     start_period: 10s
+  #     interval: 5s
+  #     timeout: 10s
+  #     retries: 10
+  #   logging: *logging

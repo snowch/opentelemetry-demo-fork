@@ -1235,6 +1235,12 @@
             border: 1px solid rgba(124, 58, 237, 0.3);
         }
 
+        .modal-type-badge.container {
+            background: rgba(245, 158, 11, 0.15);
+            color: #f59e0b;
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+
         /* Time window selector */
         .chart-card-header {
             display: flex;
@@ -2974,6 +2980,19 @@
                 chartsConfig: {},
                 sidebarRenderer: 'renderHostItem',
             },
+            container: {
+                displayName: 'Container',
+                nameField: 'container_name',
+                badgeClass: 'container',
+                tabs: [
+                    { id: 'overview', label: 'Metrics', loader: 'loadContainerOverview' },
+                    { id: 'logs', label: 'Logs', loader: 'loadEntityLogs', hasBadge: true },
+                    { id: 'metrics', label: 'All Metrics', loader: 'loadEntityMetrics', hasBadge: true },
+                ],
+                defaultTab: 'overview',
+                chartsConfig: {},
+                sidebarRenderer: 'renderContainerItem',
+            },
         };
         const REFRESH_INTERVAL = 15000; // 15 seconds for faster error detection
 
@@ -4078,6 +4097,8 @@ Can you help me understand this issue further or suggest next steps?`;
             badge.className = `modal-type-badge ${config.badgeClass || ''}`;
             if (type === 'host') {
                 badge.style.background = 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)';
+            } else if (type === 'container') {
+                badge.style.background = 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)';
             } else {
                 badge.style.background = '';
             }
@@ -4085,8 +4106,8 @@ Can you help me understand this issue further or suggest next steps?`;
             // Populate selector
             const selector = document.getElementById('entity-selector');
             const entities = availableEntities[type] || [];
-            if (type === 'host') {
-                // Host uses a title instead of dropdown
+            if (type === 'host' || type === 'container') {
+                // Host/container uses a title instead of dropdown
                 selector.innerHTML = `<option value="${escapeHtml(name)}" selected>${escapeHtml(name)}</option>`;
             } else {
                 selector.innerHTML = entities.map(e =>
@@ -4376,6 +4397,56 @@ Can you help me understand this issue further or suggest next steps?`;
                 </div>
             `;
             await loadHostData(currentEntityName);
+        }
+
+        async function loadContainerOverview() {
+            if (!currentEntityName) return;
+            const body = document.getElementById('entity-modal-body');
+            body.innerHTML = `
+                <div class="chart-row">
+                    <div class="chart-card"><h4>Container Resource Usage</h4>
+                        <div class="host-detail-metrics" id="container-current-metrics"><div class="empty-state">Loading...</div></div>
+                    </div>
+                </div>
+            `;
+            try {
+                const response = await fetch(`/api/entity/container/${encodeURIComponent(currentEntityName)}/metrics?time=5m`);
+                const data = await response.json();
+                const metricsDiv = document.getElementById('container-current-metrics');
+                if (data.success && data.rows && data.rows.length > 0) {
+                    const metricsByName = {};
+                    data.rows.forEach(r => { metricsByName[r.metric_name] = r; });
+                    const cpu = metricsByName['container.cpu.percent'];
+                    const memPct = metricsByName['container.memory.percent'];
+                    const memUsage = metricsByName['container.memory.usage.total'];
+                    const cpuVal = cpu ? cpu.latest_value?.toFixed(1) : '-';
+                    const memPctVal = memPct ? memPct.latest_value?.toFixed(1) : '-';
+                    const memMB = memUsage ? (memUsage.latest_value / 1048576.0).toFixed(1) : '-';
+                    const cpuClass = cpuVal === '-' ? '' : (parseFloat(cpuVal) > 80 ? 'metric-error' : parseFloat(cpuVal) > 60 ? 'metric-warn' : 'metric-ok');
+                    const memClass = memPctVal === '-' ? '' : (parseFloat(memPctVal) > 85 ? 'metric-error' : parseFloat(memPctVal) > 70 ? 'metric-warn' : 'metric-ok');
+                    metricsDiv.innerHTML = `
+                        <div class="host-metrics" style="justify-content: flex-start; gap: 32px;">
+                            <div class="host-metric">
+                                <div class="host-metric-value ${cpuClass}">${cpuVal}%</div>
+                                <div class="host-metric-label">CPU</div>
+                            </div>
+                            <div class="host-metric">
+                                <div class="host-metric-value ${memClass}">${memPctVal}%</div>
+                                <div class="host-metric-label">MEM %</div>
+                            </div>
+                            <div class="host-metric">
+                                <div class="host-metric-value">${memMB} MB</div>
+                                <div class="host-metric-label">MEM Usage</div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    metricsDiv.innerHTML = '<div class="empty-state">No container metrics found</div>';
+                }
+            } catch (error) {
+                console.error('Failed to load container overview:', error);
+                document.getElementById('container-current-metrics').innerHTML = '<div class="empty-state">Failed to load metrics</div>';
+            }
         }
 
         async function loadEntityServices() {
@@ -4754,6 +4825,33 @@ Can you help me understand this issue further or suggest next steps?`;
             `;
         }
 
+        function renderContainerItem(c, type, nameField) {
+            const cpu = c.cpu_pct !== null && c.cpu_pct !== undefined ? c.cpu_pct : '-';
+            const mem = c.memory_pct !== null && c.memory_pct !== undefined ? c.memory_pct : '-';
+            const memMB = c.memory_usage_mb !== null && c.memory_usage_mb !== undefined ? c.memory_usage_mb : '-';
+            const cpuClass = cpu === '-' ? '' : (cpu > 80 ? 'metric-error' : cpu > 60 ? 'metric-warn' : 'metric-ok');
+            const memClass = mem === '-' ? '' : (mem > 85 ? 'metric-error' : mem > 70 ? 'metric-warn' : 'metric-ok');
+            return `
+                <div class="host-item" onclick="openEntityModal('container', '${escapeHtml(c[nameField])}')" style="cursor: pointer;">
+                    <div class="host-name">${escapeHtml(c[nameField])}</div>
+                    <div class="host-metrics">
+                        <div class="host-metric">
+                            <div class="host-metric-value ${cpuClass}">${cpu}%</div>
+                            <div class="host-metric-label">CPU</div>
+                        </div>
+                        <div class="host-metric">
+                            <div class="host-metric-value ${memClass}">${mem}%</div>
+                            <div class="host-metric-label">MEM</div>
+                        </div>
+                        <div class="host-metric">
+                            <div class="host-metric-value">${memMB} MB</div>
+                            <div class="host-metric-label">MEM</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
         function renderGenericItem(entity, type, nameField) {
             return `
                 <div class="service-item" onclick="openEntityModal('${type}', '${escapeHtml(entity[nameField])}')">
@@ -4772,7 +4870,8 @@ Can you help me understand this issue further or suggest next steps?`;
             const prompts = {
                 service: `Investigate the ${entityName} service. Check for recent errors, latency issues, and anomalies. Summarize its current health.`,
                 database: `Investigate the ${entityName} database. Check for slow queries, error rates, and connection issues. Summarize its current health.`,
-                host: `Investigate host ${entityName}. Check CPU, memory, disk usage and any services running on it with issues. Summarize its current health.`
+                host: `Investigate host ${entityName}. Check CPU, memory, disk usage and any services running on it with issues. Summarize its current health.`,
+                container: `Investigate container ${entityName}. Check CPU and memory usage. Summarize its current health.`
             };
             input.value = prompts[entityType] || `Tell me about ${entityName}`;
             input.focus();

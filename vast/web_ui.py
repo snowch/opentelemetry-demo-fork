@@ -100,6 +100,19 @@ ENTITY_TYPES = {
         'has_error_charts': False,
         'extra_charts': [],
     },
+    'container': {
+        'display_name': 'Containers',
+        'name_field': 'container_name',
+        'traces_table': 'traces_otel_analytic',
+        'traces_time_field': 'start_time',
+        'traces_filter': None,
+        'logs_filter': None,
+        'logs_join': None,
+        'metrics_filter': "attributes_flat LIKE '%container.name={name}%'",
+        'has_latency_charts': False,
+        'has_error_charts': False,
+        'extra_charts': [],
+    },
 }
 
 
@@ -796,6 +809,35 @@ def system_status():
         if result['success']:
             status['hosts'] = result['rows']
 
+    # Get container status
+    container_result = executor.execute_query("""
+    SELECT container_name, cpu_pct, memory_pct, memory_usage_mb, last_seen
+    FROM topology_containers
+    ORDER BY container_name
+    """)
+    if container_result['success'] and container_result['rows']:
+        status['containers'] = container_result['rows']
+    else:
+        # Fallback: query metrics directly
+        container_query = """
+        SELECT
+            REGEXP_EXTRACT(attributes_flat, 'container\\.name=([^,]+)', 1) as container_name,
+            MAX(CASE WHEN metric_name = 'container.cpu.percent' THEN ROUND(value_double, 1) END) as cpu_pct,
+            MAX(CASE WHEN metric_name = 'container.memory.percent' THEN ROUND(value_double, 1) END) as memory_pct,
+            MAX(CASE WHEN metric_name = 'container.memory.usage.total' THEN ROUND(value_double / 1048576.0, 1) END) as memory_usage_mb,
+            MAX(timestamp) as last_seen
+        FROM metrics_otel_analytic
+        WHERE metric_name IN ('container.cpu.percent', 'container.memory.percent', 'container.memory.usage.total')
+          AND timestamp > NOW() - INTERVAL '5' MINUTE
+          AND attributes_flat LIKE '%container.name=%'
+        GROUP BY REGEXP_EXTRACT(attributes_flat, 'container\\.name=([^,]+)', 1)
+        HAVING REGEXP_EXTRACT(attributes_flat, 'container\\.name=([^,]+)', 1) IS NOT NULL
+        ORDER BY 1
+        """
+        result = executor.execute_query(container_query)
+        if result['success']:
+            status['containers'] = result['rows']
+
     # Build entity_categories for generic UI
     status['entity_categories'] = [
         {
@@ -815,6 +857,12 @@ def system_status():
             'display_name': 'Hosts',
             'name_field': 'host_name',
             'entities': status['hosts'],
+        },
+        {
+            'type': 'container',
+            'display_name': 'Containers',
+            'name_field': 'container_name',
+            'entities': status.get('containers', []),
         },
     ]
 

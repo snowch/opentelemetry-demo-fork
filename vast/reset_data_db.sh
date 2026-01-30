@@ -8,7 +8,6 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-
 # Load config from .env.override
 source .env.override 2>/dev/null || true
 KAFKA_BOOTSTRAP="${KAFKA_BOOTSTRAP_SERVERS:-172.200.204.97:9092}"
@@ -25,12 +24,6 @@ echo ""
 echo "--- Dropping and recreating VastDB tables via Trino ---"
 docker compose exec -T observability-agent python3 -u -c "
 import trino, sys
-
-import requests
-import urllib3
-
-# This line silences the specific InsecureRequestWarning
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 conn = trino.dbapi.connect(
     host='${TRINO_HOST}', port=${TRINO_PORT},
@@ -59,27 +52,6 @@ for stmt in ddl.split(';'):
 print('VastDB tables reset complete.')
 "
 
-# --- 2. Delete and recreate Kafka topics ---
-echo ""
-echo "--- Deleting Kafka topics ---"
-for topic in "${TOPICS[@]}"; do
-    echo -n "  Deleting ${topic}... "
-    docker exec kafka ${KAFKA_BIN} --bootstrap-server "${KAFKA_BOOTSTRAP}" \
-        --delete --topic "${topic}" 2>/dev/null && echo "OK" || echo "SKIP (not found)"
-done
-
-echo ""
-echo "--- Creating Kafka topics ---"
-for topic in "${TOPICS[@]}"; do
-    echo -n "  Creating ${topic}... "
-    docker exec kafka ${KAFKA_BIN} --bootstrap-server "${KAFKA_BOOTSTRAP}" \
-        --create --topic "${topic}" --partitions 1 --replication-factor 1 2>/dev/null && echo "OK" || echo "FAILED"
-done
-
-# --- 3. Restart services ---
-echo ""
-echo "--- Restarting otel-collector and observability-ingester ---"
-docker compose restart otel-collector observability-ingester
 
 echo ""
 echo "=== Reset complete. New data will start flowing shortly. ==="

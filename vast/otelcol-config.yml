@@ -65,6 +65,23 @@ receivers:
       - brokers
       - topics
       - consumers
+  # Docker container logs (json-file driver)
+  filelog/docker:
+    include:
+      - /hostfs/var/lib/docker/containers/*/*.log
+    start_at: end
+    operators:
+      - type: json_parser
+        parse_from: body
+        timestamp:
+          parse_from: attributes.time
+          layout: '%Y-%m-%dT%H:%M:%S.%sZ'
+      - type: move
+        from: attributes.log
+        to: body
+      - type: move
+        from: attributes.stream
+        to: attributes["log.iostream"]
   # Host metrics
   hostmetrics:
     root_path: /hostfs
@@ -167,18 +184,19 @@ exporters:
       insecure: true
     sending_queue:
       batch:
-  opensearch:
-    logs_index: otel-logs
-    logs_index_time_format: "yyyy-MM-dd"
-    http:
-      endpoint: "http://opensearch:9200"
-      tls:
-        insecure: true
-    sending_queue:
-      # Explicitly set due to bug: https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/45016
-      num_consumers: 10
-      queue_size: 1000
-      batch:
+  # opensearch (disabled – logs go to VastDB via Kafka ingester):
+  # opensearch:
+  #   logs_index: otel-logs
+  #   logs_index_time_format: "yyyy-MM-dd"
+  #   http:
+  #     endpoint: "http://opensearch:9200"
+  #     tls:
+  #       insecure: true
+  #   sending_queue:
+  #     # Explicitly set due to bug: https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/45016
+  #     num_consumers: 10
+  #     queue_size: 1000
+  #     batch:
 processors:
   memory_limiter:
     check_interval: 5s
@@ -200,6 +218,11 @@ processors:
     attributes:
       - key: host.name
         value: ${env:HOSTNAME}
+        action: upsert
+  resource/container-logs:
+    attributes:
+      - key: service.name
+        value: "container-logs"
         action: upsert
   transform:
     error_mode: ignore
@@ -231,7 +254,11 @@ service:
     logs:
       receivers: [otlp]
       processors: [resourcedetection, memory_limiter, batch]
-      exporters: [opensearch, debug, kafka/logs]
+      exporters: [debug, kafka/logs]
+    logs/containers:
+      receivers: [filelog/docker]
+      processors: [resource/container-logs, memory_limiter, batch]
+      exporters: [debug, kafka/logs]
   telemetry:
     metrics:
       readers:

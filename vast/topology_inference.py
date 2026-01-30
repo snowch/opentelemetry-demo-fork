@@ -168,6 +168,7 @@ class TopologyInferenceService:
             "topology_host_services",
             "topology_hosts",
             "topology_database_hosts",
+            "topology_containers",
         ]
         for table in tables:
             try:
@@ -372,6 +373,36 @@ class TopologyInferenceService:
         else:
             print("[Topology]   -> FAILED to materialize database-hosts")
 
+    def _materialize_containers(self):
+        """Materialize container registry with resource metrics from docker_stats."""
+        lookback = self.config.hosts_lookback_minutes
+        print(f"[Topology] Materializing containers (lookback: {lookback}m)...")
+
+        self.executor.execute_write("DELETE FROM topology_containers WHERE 1=1")
+
+        sql = f"""
+        INSERT INTO topology_containers
+        SELECT
+            REGEXP_EXTRACT(attributes_flat, 'container\\.name=([^,]+)', 1) as container_name,
+            MAX(CASE WHEN metric_name = 'container.cpu.percent' THEN ROUND(value_double, 1) END) as cpu_pct,
+            MAX(CASE WHEN metric_name = 'container.memory.percent' THEN ROUND(value_double, 1) END) as memory_pct,
+            MAX(CASE WHEN metric_name = 'container.memory.usage.total' THEN ROUND(value_double / 1048576.0, 1) END) as memory_usage_mb,
+            MAX(timestamp) as last_seen,
+            NOW() as updated_at
+        FROM metrics_otel_analytic
+        WHERE metric_name IN ('container.cpu.percent', 'container.memory.percent', 'container.memory.usage.total')
+          AND timestamp > NOW() - INTERVAL '{lookback}' MINUTE
+          AND attributes_flat LIKE '%container.name=%'
+        GROUP BY REGEXP_EXTRACT(attributes_flat, 'container\\.name=([^,]+)', 1)
+        HAVING REGEXP_EXTRACT(attributes_flat, 'container\\.name=([^,]+)', 1) IS NOT NULL
+        """
+        if self.executor.execute_write(sql):
+            rows = self.executor.execute("SELECT COUNT(*) as cnt FROM topology_containers")
+            count = rows[0]['cnt'] if rows else 0
+            print(f"[Topology]   -> {count} containers materialized")
+        else:
+            print("[Topology]   -> FAILED to materialize containers")
+
     # -------------------------------------------------------------------------
     # Main Loop
     # -------------------------------------------------------------------------
@@ -401,6 +432,7 @@ class TopologyInferenceService:
                 self._materialize_host_services()
                 self._materialize_hosts()
                 self._materialize_database_hosts()
+                self._materialize_containers()
 
                 elapsed = time.time() - loop_start
                 print(f"[Service] Cycle complete in {elapsed:.1f}s\n")
