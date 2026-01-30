@@ -627,6 +627,60 @@
             padding: 0 4px;
         }
 
+        .filter-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 0;
+            flex-wrap: wrap;
+        }
+
+        .filter-bar input[type="text"],
+        .filter-bar input[type="number"] {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 6px 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-family: inherit;
+            min-width: 150px;
+        }
+
+        .filter-bar input[type="number"] {
+            min-width: 100px;
+        }
+
+        .filter-bar input:hover {
+            border-color: var(--accent-primary);
+        }
+
+        .filter-bar input:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.1);
+        }
+
+        .filter-bar select {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 6px 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .filter-bar select:hover {
+            border-color: var(--accent-primary);
+        }
+
+        .filter-bar select:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.1);
+        }
+
         .time-selector {
             display: flex;
             align-items: center;
@@ -2364,12 +2418,19 @@
                         </svg>
                         Refresh
                     </button>
+                    <button class="modal-refresh-btn" onclick="askAboutEntity('service', currentModalService)" title="Ask about this service">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+                        </svg>
+                        Ask
+                    </button>
                     <button class="modal-close" onclick="closeModal()">&times;</button>
                 </div>
             </div>
             <div class="modal-tabs">
                 <div class="modal-tab active" onclick="switchModalTab('charts')">Charts</div>
                 <div class="modal-tab" onclick="switchModalTab('deps')">Dependencies</div>
+                <div class="modal-tab" onclick="switchModalTab('topology')">Topology</div>
                 <div class="modal-tab" onclick="switchModalTab('traces')">Traces <span class="tab-badge" id="traces-count">-</span></div>
                 <div class="modal-tab" onclick="switchModalTab('logs')">Logs <span class="tab-badge" id="logs-count">-</span></div>
                 <div class="modal-tab" onclick="switchModalTab('metrics')">Metrics <span class="tab-badge" id="metrics-count">-</span></div>
@@ -2412,6 +2473,20 @@
                     </div>
                 </div>
 
+                <!-- Topology Tab -->
+                <div class="modal-tab-content" id="tab-topology">
+                    <div class="tab-controls">
+                        <span class="tab-title">Service Topology</span>
+                        <select class="time-selector" id="topology-depth" onchange="loadServiceTopology()">
+                            <option value="1">1 Level</option>
+                            <option value="2" selected>2 Levels</option>
+                            <option value="3">3 Levels</option>
+                            <option value="4">4 Levels</option>
+                        </select>
+                    </div>
+                    <div class="topology-container" id="service-topology-graph" style="height: 450px; border: 1px solid var(--border-color); border-radius: 12px;"></div>
+                </div>
+
                 <!-- Traces Tab -->
                 <div class="modal-tab-content" id="tab-traces">
                     <div class="tab-controls">
@@ -2421,6 +2496,22 @@
                             <option value="5m" selected>Last 5m</option>
                             <option value="15m">Last 15m</option>
                             <option value="1h">Last 1h</option>
+                        </select>
+                    </div>
+                    <div class="filter-bar">
+                        <input type="text" id="traces-search" placeholder="Search span name..." onkeydown="if(event.key==='Enter') loadServiceTraces()">
+                        <select id="traces-status-filter" onchange="loadServiceTraces()">
+                            <option value="">All Status</option>
+                            <option value="ERROR">ERROR</option>
+                            <option value="OK">OK</option>
+                        </select>
+                        <input type="number" id="traces-min-duration" placeholder="Min duration (ms)" onkeydown="if(event.key==='Enter') loadServiceTraces()">
+                        <select id="traces-limit" onchange="loadServiceTraces()">
+                            <option value="50" selected>50 rows</option>
+                            <option value="100">100 rows</option>
+                            <option value="250">250 rows</option>
+                            <option value="500">500 rows</option>
+                            <option value="1000">1000 rows</option>
                         </select>
                     </div>
                     <div class="data-table-container">
@@ -2453,6 +2544,23 @@
                             <option value="1h">Last 1h</option>
                         </select>
                     </div>
+                    <div class="filter-bar">
+                        <input type="text" id="logs-search" placeholder="Search log body..." onkeydown="if(event.key==='Enter') loadServiceLogs()">
+                        <select id="logs-severity-filter" onchange="loadServiceLogs()">
+                            <option value="">All Severity</option>
+                            <option value="ERROR">ERROR</option>
+                            <option value="WARN">WARN</option>
+                            <option value="INFO">INFO</option>
+                            <option value="DEBUG">DEBUG</option>
+                        </select>
+                        <select id="logs-limit" onchange="loadServiceLogs()">
+                            <option value="50" selected>50 rows</option>
+                            <option value="100">100 rows</option>
+                            <option value="250">250 rows</option>
+                            <option value="500">500 rows</option>
+                            <option value="1000">1000 rows</option>
+                        </select>
+                    </div>
                     <div class="data-table-container">
                         <div class="data-table-wrapper">
                             <table class="data-table" id="logs-table">
@@ -2479,6 +2587,16 @@
                             <option value="5m" selected>Last 5m</option>
                             <option value="15m">Last 15m</option>
                             <option value="1h">Last 1h</option>
+                        </select>
+                    </div>
+                    <div class="filter-bar">
+                        <input type="text" id="metrics-search" placeholder="Search metric name..." onkeydown="if(event.key==='Enter') loadServiceMetrics()">
+                        <select id="metrics-limit" onchange="loadServiceMetrics()">
+                            <option value="50" selected>50 rows</option>
+                            <option value="100">100 rows</option>
+                            <option value="250">250 rows</option>
+                            <option value="500">500 rows</option>
+                            <option value="1000">1000 rows</option>
                         </select>
                     </div>
                     <div class="data-table-container">
@@ -2546,12 +2664,19 @@
                         </svg>
                         Refresh
                     </button>
+                    <button class="modal-refresh-btn" onclick="askAboutEntity('database', currentModalDatabase)" title="Ask about this database">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+                        </svg>
+                        Ask
+                    </button>
                     <button class="modal-close" onclick="closeDatabaseModal()">&times;</button>
                 </div>
             </div>
             <div class="modal-tabs" id="db-modal-tabs">
                 <div class="modal-tab active" onclick="switchDbModalTab('charts')">Charts</div>
                 <div class="modal-tab" onclick="switchDbModalTab('deps')">Dependencies</div>
+                <div class="modal-tab" onclick="switchDbModalTab('db-topology')">Topology</div>
                 <div class="modal-tab" onclick="switchDbModalTab('db-traces')">Traces <span class="tab-badge" id="db-traces-count">-</span></div>
                 <div class="modal-tab" onclick="switchDbModalTab('db-logs')">Logs <span class="tab-badge" id="db-logs-count">-</span></div>
                 <div class="modal-tab" onclick="switchDbModalTab('db-metrics')">Metrics <span class="tab-badge" id="db-metrics-count">-</span></div>
@@ -2620,6 +2745,20 @@
                     </div>
                 </div>
 
+                <!-- Topology Tab -->
+                <div class="modal-tab-content" id="db-tab-db-topology">
+                    <div class="tab-controls">
+                        <span class="tab-title">Database Topology</span>
+                        <select class="time-selector" id="db-topology-depth" onchange="loadDatabaseTopology()">
+                            <option value="1">1 Level</option>
+                            <option value="2" selected>2 Levels</option>
+                            <option value="3">3 Levels</option>
+                            <option value="4">4 Levels</option>
+                        </select>
+                    </div>
+                    <div class="topology-container" id="db-topology-graph" style="height: 450px; border: 1px solid var(--border-color); border-radius: 12px;"></div>
+                </div>
+
                 <!-- Traces Tab -->
                 <div class="modal-tab-content" id="db-tab-db-traces">
                     <div class="tab-controls">
@@ -2629,6 +2768,22 @@
                             <option value="5m" selected>Last 5m</option>
                             <option value="15m">Last 15m</option>
                             <option value="1h">Last 1h</option>
+                        </select>
+                    </div>
+                    <div class="filter-bar">
+                        <input type="text" id="db-traces-search" placeholder="Search span name..." onkeydown="if(event.key==='Enter') loadDatabaseTraces()">
+                        <select id="db-traces-status-filter" onchange="loadDatabaseTraces()">
+                            <option value="">All Status</option>
+                            <option value="ERROR">ERROR</option>
+                            <option value="OK">OK</option>
+                        </select>
+                        <input type="number" id="db-traces-min-duration" placeholder="Min duration (ms)" onkeydown="if(event.key==='Enter') loadDatabaseTraces()">
+                        <select id="db-traces-limit" onchange="loadDatabaseTraces()">
+                            <option value="50" selected>50 rows</option>
+                            <option value="100">100 rows</option>
+                            <option value="250">250 rows</option>
+                            <option value="500">500 rows</option>
+                            <option value="1000">1000 rows</option>
                         </select>
                     </div>
                     <div class="data-table-container">
@@ -2661,6 +2816,23 @@
                             <option value="1h">Last 1h</option>
                         </select>
                     </div>
+                    <div class="filter-bar">
+                        <input type="text" id="db-logs-search" placeholder="Search log body..." onkeydown="if(event.key==='Enter') loadDatabaseLogs()">
+                        <select id="db-logs-severity-filter" onchange="loadDatabaseLogs()">
+                            <option value="">All Severity</option>
+                            <option value="ERROR">ERROR</option>
+                            <option value="WARN">WARN</option>
+                            <option value="INFO">INFO</option>
+                            <option value="DEBUG">DEBUG</option>
+                        </select>
+                        <select id="db-logs-limit" onchange="loadDatabaseLogs()">
+                            <option value="50" selected>50 rows</option>
+                            <option value="100">100 rows</option>
+                            <option value="250">250 rows</option>
+                            <option value="500">500 rows</option>
+                            <option value="1000">1000 rows</option>
+                        </select>
+                    </div>
                     <div class="data-table-container">
                         <div class="data-table-wrapper">
                             <table class="data-table" id="db-logs-table">
@@ -2690,6 +2862,16 @@
                             <option value="1h">Last 1h</option>
                         </select>
                     </div>
+                    <div class="filter-bar">
+                        <input type="text" id="db-metrics-search" placeholder="Search metric name..." onkeydown="if(event.key==='Enter') loadDatabaseMetrics()">
+                        <select id="db-metrics-limit" onchange="loadDatabaseMetrics()">
+                            <option value="50" selected>50 rows</option>
+                            <option value="100">100 rows</option>
+                            <option value="250">250 rows</option>
+                            <option value="500">500 rows</option>
+                            <option value="1000">1000 rows</option>
+                        </select>
+                    </div>
                     <div class="data-table-container">
                         <div class="data-table-wrapper">
                             <table class="data-table" id="db-metrics-table">
@@ -2717,8 +2899,8 @@
         <div class="modal">
             <div class="modal-header">
                 <div class="modal-title-row">
-                    <span class="modal-type-badge error">Error</span>
-                    <h2 id="error-modal-title">Error Details</h2>
+                    <span class="modal-type-badge" id="trace-detail-badge" style="background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);">Trace</span>
+                    <h2 id="error-modal-title">Span Details</h2>
                 </div>
                 <div class="modal-refresh-controls">
                     <button class="modal-close" onclick="closeErrorModal()">&times;</button>
@@ -2726,7 +2908,7 @@
             </div>
             <div class="modal-body" id="error-modal-body">
                 <div class="error-detail-card">
-                    <h4>Error Information</h4>
+                    <h4>Span Information</h4>
                     <div class="error-detail-row">
                         <span class="error-detail-label">Service:</span>
                         <span class="error-detail-value" id="error-service">-</span>
@@ -2804,12 +2986,19 @@
                         </svg>
                         Refresh
                     </button>
+                    <button class="modal-refresh-btn" onclick="askAboutEntity('host', currentModalHost)" title="Ask about this host">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+                        </svg>
+                        Ask
+                    </button>
                     <button class="modal-close" onclick="closeHostModal()">&times;</button>
                 </div>
             </div>
             <div class="modal-tabs" id="host-modal-tabs">
                 <div class="modal-tab active" onclick="switchHostModalTab('metrics')">Metrics</div>
                 <div class="modal-tab" onclick="switchHostModalTab('services')">Services</div>
+                <div class="modal-tab" onclick="switchHostModalTab('host-topology')">Topology</div>
                 <div class="modal-tab" onclick="switchHostModalTab('host-traces')">Traces <span class="tab-badge" id="host-traces-count">-</span></div>
                 <div class="modal-tab" onclick="switchHostModalTab('host-logs')">Logs <span class="tab-badge" id="host-logs-count">-</span></div>
                 <div class="modal-tab" onclick="switchHostModalTab('host-metrics-detail')">All Metrics <span class="tab-badge" id="host-metrics-detail-count">-</span></div>
@@ -2843,6 +3032,20 @@
                     </div>
                 </div>
 
+                <!-- Topology Tab -->
+                <div class="modal-tab-content" id="host-tab-host-topology">
+                    <div class="tab-controls">
+                        <span class="tab-title">Host Topology</span>
+                        <select class="time-selector" id="host-topology-depth" onchange="loadHostTopology()">
+                            <option value="1">1 Level</option>
+                            <option value="2" selected>2 Levels</option>
+                            <option value="3">3 Levels</option>
+                            <option value="4">4 Levels</option>
+                        </select>
+                    </div>
+                    <div class="topology-container" id="host-topology-graph" style="height: 450px; border: 1px solid var(--border-color); border-radius: 12px;"></div>
+                </div>
+
                 <!-- Traces Tab -->
                 <div class="modal-tab-content" id="host-tab-host-traces">
                     <div class="tab-controls">
@@ -2852,6 +3055,22 @@
                             <option value="5m" selected>Last 5m</option>
                             <option value="15m">Last 15m</option>
                             <option value="1h">Last 1h</option>
+                        </select>
+                    </div>
+                    <div class="filter-bar">
+                        <input type="text" id="host-traces-search" placeholder="Search span name..." onkeydown="if(event.key==='Enter') loadHostTraces()">
+                        <select id="host-traces-status-filter" onchange="loadHostTraces()">
+                            <option value="">All Status</option>
+                            <option value="ERROR">ERROR</option>
+                            <option value="OK">OK</option>
+                        </select>
+                        <input type="number" id="host-traces-min-duration" placeholder="Min duration (ms)" onkeydown="if(event.key==='Enter') loadHostTraces()">
+                        <select id="host-traces-limit" onchange="loadHostTraces()">
+                            <option value="50" selected>50 rows</option>
+                            <option value="100">100 rows</option>
+                            <option value="250">250 rows</option>
+                            <option value="500">500 rows</option>
+                            <option value="1000">1000 rows</option>
                         </select>
                     </div>
                     <div class="data-table-container">
@@ -2884,6 +3103,23 @@
                             <option value="1h">Last 1h</option>
                         </select>
                     </div>
+                    <div class="filter-bar">
+                        <input type="text" id="host-logs-search" placeholder="Search log body..." onkeydown="if(event.key==='Enter') loadHostLogs()">
+                        <select id="host-logs-severity-filter" onchange="loadHostLogs()">
+                            <option value="">All Severity</option>
+                            <option value="ERROR">ERROR</option>
+                            <option value="WARN">WARN</option>
+                            <option value="INFO">INFO</option>
+                            <option value="DEBUG">DEBUG</option>
+                        </select>
+                        <select id="host-logs-limit" onchange="loadHostLogs()">
+                            <option value="50" selected>50 rows</option>
+                            <option value="100">100 rows</option>
+                            <option value="250">250 rows</option>
+                            <option value="500">500 rows</option>
+                            <option value="1000">1000 rows</option>
+                        </select>
+                    </div>
                     <div class="data-table-container">
                         <div class="data-table-wrapper">
                             <table class="data-table" id="host-logs-table">
@@ -2911,6 +3147,16 @@
                             <option value="5m" selected>Last 5m</option>
                             <option value="15m">Last 15m</option>
                             <option value="1h">Last 1h</option>
+                        </select>
+                    </div>
+                    <div class="filter-bar">
+                        <input type="text" id="host-metrics-detail-search" placeholder="Search metric name..." onkeydown="if(event.key==='Enter') loadHostMetricsDetail()">
+                        <select id="host-metrics-detail-limit" onchange="loadHostMetricsDetail()">
+                            <option value="50" selected>50 rows</option>
+                            <option value="100">100 rows</option>
+                            <option value="250">250 rows</option>
+                            <option value="500">500 rows</option>
+                            <option value="1000">1000 rows</option>
                         </select>
                     </div>
                     <div class="data-table-container">
@@ -3551,7 +3797,7 @@
                 html += '<tr>';
                 columns.forEach(col => {
                     const val = row[col] !== null ? String(row[col]) : '';
-                    html += `<td title="${escapeHtml(val)}">${escapeHtml(val.substring(0, 50))}</td>`;
+                    html += `<td title="${escapeHtml(val)}">${escapeHtml(val)}</td>`;
                 });
                 html += '</tr>';
             });
@@ -4212,6 +4458,14 @@ Can you help me understand this issue further or suggest next steps?`;
             currentModalService = serviceName;
             document.getElementById('service-modal').classList.add('active');
 
+            // Clear filter inputs
+            ['traces-search', 'traces-min-duration', 'logs-search', 'metrics-search'].forEach(id => {
+                const el = document.getElementById(id); if (el) el.value = '';
+            });
+            ['traces-status-filter', 'logs-severity-filter'].forEach(id => {
+                const el = document.getElementById(id); if (el) el.value = '';
+            });
+
             // Populate service selector dropdown
             const selector = document.getElementById('service-selector');
             selector.innerHTML = availableServices.map(s =>
@@ -4320,7 +4574,7 @@ Can you help me understand this issue further or suggest next steps?`;
                 if (data.operations && data.operations.length > 0) {
                     opsTable.innerHTML = data.operations.map(op => `
                         <tr>
-                            <td title="${escapeHtml(op.span_name)}">${escapeHtml(op.span_name.substring(0, 30))}</td>
+                            <td title="${escapeHtml(op.span_name)}">${escapeHtml(op.span_name)}</td>
                             <td>${op.call_count}</td>
                             <td>${op.avg_latency_ms}ms</td>
                             <td style="color: ${op.error_pct > 5 ? 'var(--accent-error)' : 'inherit'}">${op.error_pct}%</td>
@@ -4344,6 +4598,23 @@ Can you help me understand this issue further or suggest next steps?`;
                     y: { ticks: { color: '#606070', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } }
                 }
             };
+        }
+
+        function askAboutEntity(entityType, entityName) {
+            if (!entityName) return;
+            // Close all modals
+            document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('active'));
+            stopModalAutoRefresh();
+            // Pre-fill and focus chat input
+            const input = document.getElementById('message-input');
+            const prompts = {
+                service: `Investigate the ${entityName} service. Check for recent errors, latency issues, and anomalies. Summarize its current health.`,
+                database: `Investigate the ${entityName} database. Check for slow queries, error rates, and connection issues. Summarize its current health.`,
+                host: `Investigate host ${entityName}. Check CPU, memory, disk usage and any services running on it with issues. Summarize its current health.`
+            };
+            input.value = prompts[entityType] || `Tell me about ${entityName}`;
+            input.focus();
+            input.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
 
         function closeModal() {
@@ -4378,6 +4649,8 @@ Can you help me understand this issue further or suggest next steps?`;
                 loadServiceMetrics();
             } else if (tabName === 'deps' && currentModalService) {
                 loadServiceDependencies();
+            } else if (tabName === 'topology' && currentModalService) {
+                loadServiceTopology();
             }
         }
 
@@ -4436,8 +4709,17 @@ Can you help me understand this issue further or suggest next steps?`;
             const timeSelector = document.getElementById('traces-time-selector');
             const timeWindow = timeSelector ? timeSelector.value : '5m';
 
+            let filterParams = '';
+            const searchVal = document.getElementById('traces-search')?.value?.trim();
+            const statusVal = document.getElementById('traces-status-filter')?.value;
+            const minDurVal = document.getElementById('traces-min-duration')?.value?.trim();
+            if (searchVal) filterParams += `&search=${encodeURIComponent(searchVal)}`;
+            if (statusVal) filterParams += `&status=${encodeURIComponent(statusVal)}`;
+            if (minDurVal) filterParams += `&min_duration=${encodeURIComponent(minDurVal)}`;
+            const limitVal = document.getElementById('traces-limit')?.value || '50';
+
             try {
-                const response = await fetch(`/api/service/${encodeURIComponent(currentModalService)}/traces?time=${timeWindow}&limit=50`);
+                const response = await fetch(`/api/service/${encodeURIComponent(currentModalService)}/traces?time=${timeWindow}&limit=${limitVal}${filterParams}`);
                 const data = await response.json();
 
                 const tbody = document.getElementById('traces-table').querySelector('tbody');
@@ -4451,11 +4733,11 @@ Can you help me understand this issue further or suggest next steps?`;
                         return `
                             <tr class="${isError ? 'error-row' : ''}" onclick="openErrorModal('${t.trace_id}', '${t.span_id}')" style="cursor: pointer;">
                                 <td>${time}</td>
-                                <td title="${escapeHtml(t.span_name)}">${escapeHtml((t.span_name || '-').substring(0, 40))}</td>
+                                <td title="${escapeHtml(t.span_name)}">${escapeHtml(t.span_name || '-')}</td>
                                 <td>${t.span_kind || '-'}</td>
                                 <td>${t.duration_ms}ms</td>
                                 <td style="color: ${isError ? 'var(--accent-error)' : 'var(--accent-success)'}">${t.status_code || 'OK'}</td>
-                                <td title="${t.trace_id}">${(t.trace_id || '').substring(0, 12)}...</td>
+                                <td title="${t.trace_id}">${t.trace_id || '-'}</td>
                             </tr>
                         `;
                     }).join('');
@@ -4474,8 +4756,15 @@ Can you help me understand this issue further or suggest next steps?`;
             const timeSelector = document.getElementById('logs-time-selector');
             const timeWindow = timeSelector ? timeSelector.value : '5m';
 
+            let filterParams = '';
+            const searchVal = document.getElementById('logs-search')?.value?.trim();
+            const severityVal = document.getElementById('logs-severity-filter')?.value;
+            if (searchVal) filterParams += `&search=${encodeURIComponent(searchVal)}`;
+            if (severityVal) filterParams += `&severity=${encodeURIComponent(severityVal)}`;
+            const limitVal = document.getElementById('logs-limit')?.value || '50';
+
             try {
-                const response = await fetch(`/api/service/${encodeURIComponent(currentModalService)}/logs?time=${timeWindow}&limit=50`);
+                const response = await fetch(`/api/service/${encodeURIComponent(currentModalService)}/logs?time=${timeWindow}&limit=${limitVal}${filterParams}`);
                 const data = await response.json();
 
                 const tbody = document.getElementById('logs-table').querySelector('tbody');
@@ -4494,8 +4783,8 @@ Can you help me understand this issue further or suggest next steps?`;
                             <tr class="${isError ? 'error-row' : ''}">
                                 <td>${time}</td>
                                 <td class="${severityClass}">${severity}</td>
-                                <td class="log-body" title="${escapeHtml(log.body || '')}">${escapeHtml((log.body || '-').substring(0, 100))}</td>
-                                <td title="${log.trace_id || ''}">${log.trace_id ? (log.trace_id.substring(0, 12) + '...') : '-'}</td>
+                                <td class="log-body" title="${escapeHtml(log.body || '')}">${escapeHtml(log.body || '-')}</td>
+                                <td title="${log.trace_id || ''}">${log.trace_id || '-'}</td>
                             </tr>
                         `;
                     }).join('');
@@ -4514,8 +4803,13 @@ Can you help me understand this issue further or suggest next steps?`;
             const timeSelector = document.getElementById('metrics-time-selector');
             const timeWindow = timeSelector ? timeSelector.value : '5m';
 
+            let filterParams = '';
+            const searchVal = document.getElementById('metrics-search')?.value?.trim();
+            if (searchVal) filterParams += `&search=${encodeURIComponent(searchVal)}`;
+            const limitVal = document.getElementById('metrics-limit')?.value || '50';
+
             try {
-                const response = await fetch(`/api/service/${encodeURIComponent(currentModalService)}/metrics?time=${timeWindow}&limit=50`);
+                const response = await fetch(`/api/service/${encodeURIComponent(currentModalService)}/metrics?time=${timeWindow}&limit=${limitVal}${filterParams}`);
                 const data = await response.json();
 
                 const tbody = document.getElementById('metrics-table').querySelector('tbody');
@@ -4527,7 +4821,7 @@ Can you help me understand this issue further or suggest next steps?`;
                         const lastSeen = m.last_seen ? new Date(m.last_seen).toLocaleTimeString() : '-';
                         return `
                             <tr>
-                                <td title="${escapeHtml(m.metric_name)}">${escapeHtml((m.metric_name || '-').substring(0, 40))}</td>
+                                <td title="${escapeHtml(m.metric_name)}">${escapeHtml(m.metric_name || '-')}</td>
                                 <td>${m.data_points}</td>
                                 <td>${m.avg_value !== null ? m.avg_value : '-'}</td>
                                 <td>${m.min_value !== null ? m.min_value : '-'}</td>
@@ -4551,6 +4845,14 @@ Can you help me understand this issue further or suggest next steps?`;
         async function openDatabaseModal(dbSystem) {
             currentModalDatabase = dbSystem;
             document.getElementById('database-modal').classList.add('active');
+
+            // Clear filter inputs
+            ['db-traces-search', 'db-traces-min-duration', 'db-logs-search', 'db-metrics-search'].forEach(id => {
+                const el = document.getElementById(id); if (el) el.value = '';
+            });
+            ['db-traces-status-filter', 'db-logs-severity-filter'].forEach(id => {
+                const el = document.getElementById(id); if (el) el.value = '';
+            });
 
             // Populate database selector dropdown
             const selector = document.getElementById('database-selector');
@@ -4644,8 +4946,8 @@ Can you help me understand this issue further or suggest next steps?`;
                 if (data.slow_queries && data.slow_queries.length > 0) {
                     queriesTable.innerHTML = data.slow_queries.map(q => `
                         <tr>
-                            <td title="${escapeHtml(q.service_name)}">${escapeHtml(q.service_name.substring(0, 20))}</td>
-                            <td title="${escapeHtml(q.span_name)}">${escapeHtml(q.span_name.substring(0, 25))}</td>
+                            <td title="${escapeHtml(q.service_name)}">${escapeHtml(q.service_name)}</td>
+                            <td title="${escapeHtml(q.span_name)}">${escapeHtml(q.span_name)}</td>
                             <td>${q.avg_latency_ms}ms</td>
                             <td style="color: ${q.error_pct > 5 ? 'var(--accent-error)' : 'inherit'}">${q.error_pct}%</td>
                         </tr>
@@ -4762,6 +5064,8 @@ Can you help me understand this issue further or suggest next steps?`;
             // Load data for the tab if needed
             if (tabName === 'deps' && currentModalDatabase) {
                 loadDatabaseDependencies();
+            } else if (tabName === 'db-topology' && currentModalDatabase) {
+                loadDatabaseTopology();
             } else if (tabName === 'db-traces' && currentModalDatabase) {
                 loadDatabaseTraces();
             } else if (tabName === 'db-logs' && currentModalDatabase) {
@@ -4852,8 +5156,17 @@ Can you help me understand this issue further or suggest next steps?`;
             const timeSelector = document.getElementById('db-traces-time-selector');
             const timeWindow = timeSelector ? timeSelector.value : '5m';
 
+            let filterParams = '';
+            const searchVal = document.getElementById('db-traces-search')?.value?.trim();
+            const statusVal = document.getElementById('db-traces-status-filter')?.value;
+            const minDurVal = document.getElementById('db-traces-min-duration')?.value?.trim();
+            if (searchVal) filterParams += `&search=${encodeURIComponent(searchVal)}`;
+            if (statusVal) filterParams += `&status=${encodeURIComponent(statusVal)}`;
+            if (minDurVal) filterParams += `&min_duration=${encodeURIComponent(minDurVal)}`;
+            const limitVal = document.getElementById('db-traces-limit')?.value || '50';
+
             try {
-                const response = await fetch(`/api/database/${encodeURIComponent(currentModalDatabase)}/traces?time=${timeWindow}&limit=50`);
+                const response = await fetch(`/api/database/${encodeURIComponent(currentModalDatabase)}/traces?time=${timeWindow}&limit=${limitVal}${filterParams}`);
                 const data = await response.json();
 
                 const tbody = document.getElementById('db-traces-table').querySelector('tbody');
@@ -4867,11 +5180,11 @@ Can you help me understand this issue further or suggest next steps?`;
                         return `
                             <tr class="${isError ? 'error-row' : ''}" onclick="openErrorModal('${t.trace_id}', '${t.span_id}')" style="cursor: pointer;">
                                 <td>${time}</td>
-                                <td>${escapeHtml((t.service_name || '-').substring(0, 20))}</td>
-                                <td title="${escapeHtml(t.span_name)}">${escapeHtml((t.span_name || '-').substring(0, 30))}</td>
+                                <td title="${escapeHtml(t.service_name)}">${escapeHtml(t.service_name || '-')}</td>
+                                <td title="${escapeHtml(t.span_name)}">${escapeHtml(t.span_name || '-')}</td>
                                 <td>${t.duration_ms}ms</td>
                                 <td style="color: ${isError ? 'var(--accent-error)' : 'var(--accent-success)'}">${t.status_code || 'OK'}</td>
-                                <td title="${t.trace_id}">${(t.trace_id || '').substring(0, 12)}...</td>
+                                <td title="${t.trace_id}">${t.trace_id || '-'}</td>
                             </tr>
                         `;
                     }).join('');
@@ -4890,8 +5203,15 @@ Can you help me understand this issue further or suggest next steps?`;
             const timeSelector = document.getElementById('db-logs-time-selector');
             const timeWindow = timeSelector ? timeSelector.value : '5m';
 
+            let filterParams = '';
+            const searchVal = document.getElementById('db-logs-search')?.value?.trim();
+            const severityVal = document.getElementById('db-logs-severity-filter')?.value;
+            if (searchVal) filterParams += `&search=${encodeURIComponent(searchVal)}`;
+            if (severityVal) filterParams += `&severity=${encodeURIComponent(severityVal)}`;
+            const limitVal = document.getElementById('db-logs-limit')?.value || '50';
+
             try {
-                const response = await fetch(`/api/database/${encodeURIComponent(currentModalDatabase)}/logs?time=${timeWindow}&limit=50`);
+                const response = await fetch(`/api/database/${encodeURIComponent(currentModalDatabase)}/logs?time=${timeWindow}&limit=${limitVal}${filterParams}`);
                 const data = await response.json();
 
                 const tbody = document.getElementById('db-logs-table').querySelector('tbody');
@@ -4909,10 +5229,10 @@ Can you help me understand this issue further or suggest next steps?`;
                         return `
                             <tr class="${isError ? 'error-row' : ''}">
                                 <td>${time}</td>
-                                <td>${escapeHtml((log.service_name || '-').substring(0, 20))}</td>
+                                <td title="${escapeHtml(log.service_name)}">${escapeHtml(log.service_name || '-')}</td>
                                 <td class="${severityClass}">${severity}</td>
-                                <td class="log-body" title="${escapeHtml(log.body || '')}">${escapeHtml((log.body || '-').substring(0, 80))}</td>
-                                <td title="${log.trace_id || ''}">${log.trace_id ? (log.trace_id.substring(0, 12) + '...') : '-'}</td>
+                                <td class="log-body" title="${escapeHtml(log.body || '')}">${escapeHtml(log.body || '-')}</td>
+                                <td title="${log.trace_id || ''}">${log.trace_id || '-'}</td>
                             </tr>
                         `;
                     }).join('');
@@ -4931,8 +5251,13 @@ Can you help me understand this issue further or suggest next steps?`;
             const timeSelector = document.getElementById('db-metrics-time-selector');
             const timeWindow = timeSelector ? timeSelector.value : '5m';
 
+            let filterParams = '';
+            const searchVal = document.getElementById('db-metrics-search')?.value?.trim();
+            if (searchVal) filterParams += `&search=${encodeURIComponent(searchVal)}`;
+            const limitVal = document.getElementById('db-metrics-limit')?.value || '50';
+
             try {
-                const response = await fetch(`/api/database/${encodeURIComponent(currentModalDatabase)}/metrics?time=${timeWindow}&limit=50`);
+                const response = await fetch(`/api/database/${encodeURIComponent(currentModalDatabase)}/metrics?time=${timeWindow}&limit=${limitVal}${filterParams}`);
                 const data = await response.json();
 
                 const tbody = document.getElementById('db-metrics-table').querySelector('tbody');
@@ -4944,7 +5269,7 @@ Can you help me understand this issue further or suggest next steps?`;
                         const lastSeen = m.last_seen ? new Date(m.last_seen).toLocaleTimeString() : '-';
                         return `
                             <tr>
-                                <td title="${escapeHtml(m.metric_name)}">${escapeHtml((m.metric_name || '-').substring(0, 40))}</td>
+                                <td title="${escapeHtml(m.metric_name)}">${escapeHtml(m.metric_name || '-')}</td>
                                 <td>${m.data_points}</td>
                                 <td>${m.avg_value !== null ? m.avg_value : '-'}</td>
                                 <td>${m.min_value !== null ? m.min_value : '-'}</td>
@@ -4967,13 +5292,28 @@ Can you help me understand this issue further or suggest next steps?`;
             document.getElementById('error-modal').classList.add('active');
             document.getElementById('error-modal-title').textContent = 'Loading...';
 
+            // Reset badge
+            const badge = document.getElementById('trace-detail-badge');
+            badge.textContent = 'Trace';
+            badge.style.background = 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)';
+
             try {
                 const response = await fetch(`/api/error/${encodeURIComponent(traceId)}/${encodeURIComponent(spanId)}`);
                 const data = await response.json();
 
                 if (data.error_info) {
                     const info = data.error_info;
-                    document.getElementById('error-modal-title').textContent = info.span_name || 'Error Details';
+                    const isError = info.status_code === 'ERROR';
+                    document.getElementById('error-modal-title').textContent = info.span_name || 'Span Details';
+
+                    // Update badge based on status
+                    if (isError) {
+                        badge.textContent = 'Error';
+                        badge.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+                    } else {
+                        badge.textContent = 'Trace';
+                        badge.style.background = 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)';
+                    }
                     document.getElementById('error-service').textContent = info.service_name || '-';
                     document.getElementById('error-operation').textContent = info.span_name || '-';
                     document.getElementById('error-timestamp').textContent = info.start_time ? new Date(info.start_time).toLocaleString() : '-';
@@ -4997,7 +5337,7 @@ Can you help me understand this issue further or suggest next steps?`;
                     traceTable.innerHTML = data.trace.map(span => `
                         <tr class="${span.status_code === 'ERROR' ? 'error-row' : ''}">
                             <td>${escapeHtml(span.service_name)}</td>
-                            <td title="${escapeHtml(span.span_name)}">${escapeHtml(span.span_name.substring(0, 40))}</td>
+                            <td title="${escapeHtml(span.span_name)}">${escapeHtml(span.span_name)}</td>
                             <td>${span.duration_ms}ms</td>
                             <td style="color: ${span.status_code === 'ERROR' ? 'var(--accent-error)' : 'var(--accent-success)'}">${span.status_code || 'OK'}</td>
                         </tr>
@@ -5021,6 +5361,14 @@ Can you help me understand this issue further or suggest next steps?`;
             currentModalHost = hostName;
             document.getElementById('host-modal').classList.add('active');
             document.getElementById('host-modal-title').textContent = hostName;
+
+            // Clear filter inputs
+            ['host-traces-search', 'host-traces-min-duration', 'host-logs-search', 'host-metrics-detail-search'].forEach(id => {
+                const el = document.getElementById(id); if (el) el.value = '';
+            });
+            ['host-traces-status-filter', 'host-logs-severity-filter'].forEach(id => {
+                const el = document.getElementById(id); if (el) el.value = '';
+            });
 
             // Enable auto-refresh by default
             hostModalAutoRefresh = true;
@@ -5150,6 +5498,8 @@ Can you help me understand this issue further or suggest next steps?`;
             // Load data for the tab if needed
             if (tabName === 'services' && currentModalHost) {
                 loadHostServices();
+            } else if (tabName === 'host-topology' && currentModalHost) {
+                loadHostTopology();
             } else if (tabName === 'host-traces' && currentModalHost) {
                 loadHostTraces();
             } else if (tabName === 'host-logs' && currentModalHost) {
@@ -5165,8 +5515,17 @@ Can you help me understand this issue further or suggest next steps?`;
             const timeSelector = document.getElementById('host-traces-time-selector');
             const timeWindow = timeSelector ? timeSelector.value : '5m';
 
+            let filterParams = '';
+            const searchVal = document.getElementById('host-traces-search')?.value?.trim();
+            const statusVal = document.getElementById('host-traces-status-filter')?.value;
+            const minDurVal = document.getElementById('host-traces-min-duration')?.value?.trim();
+            if (searchVal) filterParams += `&search=${encodeURIComponent(searchVal)}`;
+            if (statusVal) filterParams += `&status=${encodeURIComponent(statusVal)}`;
+            if (minDurVal) filterParams += `&min_duration=${encodeURIComponent(minDurVal)}`;
+            const limitVal = document.getElementById('host-traces-limit')?.value || '50';
+
             try {
-                const response = await fetch(`/api/host/${encodeURIComponent(currentModalHost)}/traces?time=${timeWindow}&limit=50`);
+                const response = await fetch(`/api/host/${encodeURIComponent(currentModalHost)}/traces?time=${timeWindow}&limit=${limitVal}${filterParams}`);
                 const data = await response.json();
 
                 const tbody = document.getElementById('host-traces-table').querySelector('tbody');
@@ -5180,11 +5539,11 @@ Can you help me understand this issue further or suggest next steps?`;
                         return `
                             <tr class="${isError ? 'error-row' : ''}" onclick="openErrorModal('${t.trace_id}', '${t.span_id}')" style="cursor: pointer;">
                                 <td>${time}</td>
-                                <td>${escapeHtml((t.service_name || '-').substring(0, 20))}</td>
-                                <td title="${escapeHtml(t.span_name || '')}">${escapeHtml((t.span_name || '-').substring(0, 30))}</td>
+                                <td title="${escapeHtml(t.service_name)}">${escapeHtml(t.service_name || '-')}</td>
+                                <td title="${escapeHtml(t.span_name || '')}">${escapeHtml(t.span_name || '-')}</td>
                                 <td>${t.duration_ms ? t.duration_ms + 'ms' : '-'}</td>
                                 <td style="color: ${isError ? 'var(--accent-error)' : 'var(--accent-success)'}">${t.status_code || 'OK'}</td>
-                                <td title="${t.trace_id || ''}">${(t.trace_id || '').substring(0, 12)}...</td>
+                                <td title="${t.trace_id || ''}">${t.trace_id || '-'}</td>
                             </tr>
                         `;
                     }).join('');
@@ -5203,8 +5562,15 @@ Can you help me understand this issue further or suggest next steps?`;
             const timeSelector = document.getElementById('host-logs-time-selector');
             const timeWindow = timeSelector ? timeSelector.value : '5m';
 
+            let filterParams = '';
+            const searchVal = document.getElementById('host-logs-search')?.value?.trim();
+            const severityVal = document.getElementById('host-logs-severity-filter')?.value;
+            if (searchVal) filterParams += `&search=${encodeURIComponent(searchVal)}`;
+            if (severityVal) filterParams += `&severity=${encodeURIComponent(severityVal)}`;
+            const limitVal = document.getElementById('host-logs-limit')?.value || '50';
+
             try {
-                const response = await fetch(`/api/host/${encodeURIComponent(currentModalHost)}/logs?time=${timeWindow}&limit=50`);
+                const response = await fetch(`/api/host/${encodeURIComponent(currentModalHost)}/logs?time=${timeWindow}&limit=${limitVal}${filterParams}`);
                 const data = await response.json();
 
                 const tbody = document.getElementById('host-logs-table').querySelector('tbody');
@@ -5222,10 +5588,10 @@ Can you help me understand this issue further or suggest next steps?`;
                         return `
                             <tr class="${isError ? 'error-row' : ''}">
                                 <td>${time}</td>
-                                <td>${escapeHtml((log.service_name || '-').substring(0, 20))}</td>
+                                <td title="${escapeHtml(log.service_name)}">${escapeHtml(log.service_name || '-')}</td>
                                 <td class="${severityClass}">${severity}</td>
-                                <td class="log-body" title="${escapeHtml(log.body || '')}">${escapeHtml((log.body || '-').substring(0, 80))}</td>
-                                <td title="${log.trace_id || ''}">${log.trace_id ? (log.trace_id.substring(0, 12) + '...') : '-'}</td>
+                                <td class="log-body" title="${escapeHtml(log.body || '')}">${escapeHtml(log.body || '-')}</td>
+                                <td title="${log.trace_id || ''}">${log.trace_id || '-'}</td>
                             </tr>
                         `;
                     }).join('');
@@ -5244,8 +5610,13 @@ Can you help me understand this issue further or suggest next steps?`;
             const timeSelector = document.getElementById('host-metrics-detail-time-selector');
             const timeWindow = timeSelector ? timeSelector.value : '5m';
 
+            let filterParams = '';
+            const searchVal = document.getElementById('host-metrics-detail-search')?.value?.trim();
+            if (searchVal) filterParams += `&search=${encodeURIComponent(searchVal)}`;
+            const limitVal = document.getElementById('host-metrics-detail-limit')?.value || '50';
+
             try {
-                const response = await fetch(`/api/host/${encodeURIComponent(currentModalHost)}/metrics?time=${timeWindow}&limit=50`);
+                const response = await fetch(`/api/host/${encodeURIComponent(currentModalHost)}/metrics?time=${timeWindow}&limit=${limitVal}${filterParams}`);
                 const data = await response.json();
 
                 const tbody = document.getElementById('host-metrics-detail-table').querySelector('tbody');
@@ -5257,7 +5628,7 @@ Can you help me understand this issue further or suggest next steps?`;
                         const lastSeen = m.last_seen ? new Date(m.last_seen).toLocaleTimeString() : '-';
                         return `
                             <tr>
-                                <td title="${escapeHtml(m.metric_name)}">${escapeHtml((m.metric_name || '-').substring(0, 40))}</td>
+                                <td title="${escapeHtml(m.metric_name)}">${escapeHtml(m.metric_name || '-')}</td>
                                 <td>${m.data_points}</td>
                                 <td>${m.avg_value !== null ? m.avg_value : '-'}</td>
                                 <td>${m.min_value !== null ? m.min_value : '-'}</td>
@@ -5272,6 +5643,158 @@ Can you help me understand this issue further or suggest next steps?`;
                 }
             } catch (error) {
                 console.error('Failed to load host metrics detail:', error);
+            }
+        }
+
+        // Topology Graph Rendering
+        let topologyNetworks = {};
+
+        function renderTopologyGraph(containerId, data) {
+            // Destroy existing network
+            if (topologyNetworks[containerId]) {
+                topologyNetworks[containerId].destroy();
+                delete topologyNetworks[containerId];
+            }
+
+            const container = document.getElementById(containerId);
+            if (!container) return;
+
+            if (!data.nodes || data.nodes.length === 0) {
+                container.innerHTML = '<div class="empty-state" style="padding: 40px;">No topology data found</div>';
+                return;
+            }
+
+            const nodeColors = {
+                application: { background: '#7c3aed', border: '#6d28d9', highlight: { background: '#8b5cf6', border: '#7c3aed' } },
+                database: { background: '#f59e0b', border: '#d97706', highlight: { background: '#fbbf24', border: '#f59e0b' } },
+                infrastructure: { background: '#06b6d4', border: '#0891b2', highlight: { background: '#22d3ee', border: '#06b6d4' } },
+                host: { background: '#06b6d4', border: '#0891b2', highlight: { background: '#22d3ee', border: '#06b6d4' } }
+            };
+
+            const nodeShapes = {
+                application: 'dot',
+                database: 'diamond',
+                infrastructure: 'square',
+                host: 'square'
+            };
+
+            const nodes = new vis.DataSet(data.nodes.map(n => {
+                const type = n.type || 'application';
+                const colors = nodeColors[type] || nodeColors.application;
+                const isRoot = n.root || false;
+                const errorPct = n.error_pct || 0;
+                let borderColor = colors.border;
+                if (errorPct > 5) borderColor = '#ef4444';
+                else if (errorPct > 1) borderColor = '#f59e0b';
+
+                return {
+                    id: n.id,
+                    label: n.label,
+                    shape: nodeShapes[type] || 'dot',
+                    size: isRoot ? 30 : 20,
+                    color: {
+                        background: colors.background,
+                        border: borderColor,
+                        highlight: colors.highlight
+                    },
+                    borderWidth: isRoot ? 3 : 2,
+                    font: { color: '#f0f0f5', size: 12, face: 'Inter' },
+                    title: buildNodeTooltip(n)
+                };
+            }));
+
+            const edges = new vis.DataSet(data.edges.map((e, i) => {
+                const errorPct = e.error_pct || 0;
+                let edgeColor = 'rgba(160, 160, 176, 0.5)';
+                if (errorPct > 5) edgeColor = 'rgba(239, 68, 68, 0.7)';
+                else if (errorPct > 1) edgeColor = 'rgba(245, 158, 11, 0.7)';
+
+                return {
+                    id: i,
+                    from: e.from,
+                    to: e.to,
+                    label: e.label || '',
+                    arrows: e.label === 'hosts' ? '' : 'to',
+                    color: { color: edgeColor, highlight: '#00d9ff' },
+                    font: { color: '#a0a0b0', size: 10, face: 'Inter', strokeWidth: 0 },
+                    width: Math.max(1, Math.min(4, Math.log10((e.call_count || 1) + 1))),
+                    smooth: { type: 'curvedCW', roundness: 0.15 }
+                };
+            }));
+
+            const options = {
+                physics: {
+                    solver: 'forceAtlas2Based',
+                    forceAtlas2Based: { gravitationalConstant: -80, centralGravity: 0.01, springLength: 150, springConstant: 0.04 },
+                    stabilization: { iterations: 150 }
+                },
+                interaction: { hover: true, tooltipDelay: 200 },
+                layout: { improvedLayout: true }
+            };
+
+            topologyNetworks[containerId] = new vis.Network(container, { nodes, edges }, options);
+
+            // Click to navigate
+            topologyNetworks[containerId].on('doubleClick', function(params) {
+                if (params.nodes.length > 0) {
+                    const nodeId = params.nodes[0];
+                    const node = data.nodes.find(n => n.id === nodeId);
+                    if (node && !node.root) {
+                        if (node.type === 'database') {
+                            openDatabaseModal(nodeId);
+                        } else if (node.type === 'host') {
+                            openHostModal(nodeId);
+                        } else {
+                            openServiceModal(nodeId);
+                        }
+                    }
+                }
+            });
+        }
+
+        function buildNodeTooltip(n) {
+            let tip = `<b>${n.label}</b><br>Type: ${n.type || 'application'}`;
+            if (n.span_count != null) tip += `<br>Spans: ${n.span_count}`;
+            if (n.error_pct != null) tip += `<br>Error: ${n.error_pct}%`;
+            if (n.avg_latency_ms != null) tip += `<br>Avg Latency: ${n.avg_latency_ms}ms`;
+            if (n.cpu_pct != null) tip += `<br>CPU: ${n.cpu_pct}%`;
+            if (n.memory_pct != null) tip += `<br>Memory: ${n.memory_pct}%`;
+            return tip;
+        }
+
+        async function loadServiceTopology() {
+            if (!currentModalService) return;
+            const depth = document.getElementById('topology-depth')?.value || '2';
+            try {
+                const response = await fetch(`/api/topology/${encodeURIComponent(currentModalService)}?depth=${depth}`);
+                const data = await response.json();
+                renderTopologyGraph('service-topology-graph', data);
+            } catch (error) {
+                console.error('Failed to load service topology:', error);
+            }
+        }
+
+        async function loadDatabaseTopology() {
+            if (!currentModalDatabase) return;
+            const depth = document.getElementById('db-topology-depth')?.value || '2';
+            try {
+                const response = await fetch(`/api/topology/${encodeURIComponent(currentModalDatabase)}?depth=${depth}`);
+                const data = await response.json();
+                renderTopologyGraph('db-topology-graph', data);
+            } catch (error) {
+                console.error('Failed to load database topology:', error);
+            }
+        }
+
+        async function loadHostTopology() {
+            if (!currentModalHost) return;
+            const depth = document.getElementById('host-topology-depth')?.value || '2';
+            try {
+                const response = await fetch(`/api/topology/${encodeURIComponent(currentModalHost)}?depth=${depth}`);
+                const data = await response.json();
+                renderTopologyGraph('host-topology-graph', data);
+            } catch (error) {
+                console.error('Failed to load host topology:', error);
             }
         }
 

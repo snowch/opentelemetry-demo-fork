@@ -861,7 +861,7 @@ def error_details(trace_id, span_id):
 def service_logs(service_name):
     """Get recent logs for a specific service."""
     executor = get_query_executor()
-    limit = min(int(request.args.get('limit', '20')), 100)
+    limit = min(int(request.args.get('limit', '50')), 1000)
     time_param = request.args.get('time', '5m')
 
     # Parse time parameter
@@ -876,11 +876,21 @@ def service_logs(service_name):
     else:
         interval = "'5' MINUTE"
 
+    # Build extra filters
+    extra_where = ''
+    severity_filter = request.args.get('severity', '')
+    search_filter = request.args.get('search', '')
+    if severity_filter:
+        extra_where += f" AND severity_text = '{severity_filter}'"
+    if search_filter:
+        extra_where += f" AND LOWER(body) LIKE LOWER('%{search_filter}%')"
+
     logs_query = f"""
     SELECT timestamp, severity_text, body, trace_id, span_id
     FROM logs_otel_analytic
     WHERE service_name = '{service_name}'
       AND timestamp > NOW() - INTERVAL {interval}
+      {extra_where}
     ORDER BY timestamp DESC
     LIMIT {limit}
     """
@@ -896,7 +906,7 @@ def service_logs(service_name):
 def service_traces(service_name):
     """Get recent traces for a specific service."""
     executor = get_query_executor()
-    limit = min(int(request.args.get('limit', '20')), 100)
+    limit = min(int(request.args.get('limit', '50')), 1000)
     time_param = request.args.get('time', '5m')
 
     # Parse time parameter
@@ -911,6 +921,18 @@ def service_traces(service_name):
     else:
         interval = "'5' MINUTE"
 
+    # Build extra filters
+    extra_where = ''
+    status_filter = request.args.get('status', '')
+    search_filter = request.args.get('search', '')
+    min_duration = request.args.get('min_duration', '')
+    if status_filter:
+        extra_where += f" AND status_code = '{status_filter}'"
+    if search_filter:
+        extra_where += f" AND LOWER(span_name) LIKE LOWER('%{search_filter}%')"
+    if min_duration:
+        extra_where += f" AND duration_ns / 1000000.0 >= {float(min_duration)}"
+
     traces_query = f"""
     SELECT trace_id, span_id, span_name, span_kind, status_code,
            ROUND(duration_ns / 1000000.0, 2) as duration_ms,
@@ -918,6 +940,7 @@ def service_traces(service_name):
     FROM traces_otel_analytic
     WHERE service_name = '{service_name}'
       AND start_time > NOW() - INTERVAL {interval}
+      {extra_where}
     ORDER BY start_time DESC
     LIMIT {limit}
     """
@@ -933,7 +956,7 @@ def service_traces(service_name):
 def service_metrics(service_name):
     """Get recent metrics for a specific service."""
     executor = get_query_executor()
-    limit = min(int(request.args.get('limit', '20')), 100)
+    limit = min(int(request.args.get('limit', '50')), 1000)
     time_param = request.args.get('time', '5m')
 
     # Parse time parameter
@@ -948,6 +971,12 @@ def service_metrics(service_name):
     else:
         interval = "'5' MINUTE"
 
+    # Build extra filters
+    extra_where = ''
+    search_filter = request.args.get('search', '')
+    if search_filter:
+        extra_where += f" AND LOWER(metric_name) LIKE LOWER('%{search_filter}%')"
+
     # Get metrics summary by metric name for this service
     metrics_query = f"""
     SELECT metric_name,
@@ -959,6 +988,7 @@ def service_metrics(service_name):
     FROM metrics_otel_analytic
     WHERE service_name = '{service_name}'
       AND timestamp > NOW() - INTERVAL {interval}
+      {extra_where}
     GROUP BY metric_name
     ORDER BY data_points DESC
     LIMIT {limit}
@@ -1016,8 +1046,8 @@ def service_dependencies(service_name):
         # Fallback: expensive self-JOIN on traces
         downstream_query = f"""
         SELECT DISTINCT
-            COALESCE(child.db_system, child.service_name) as dependency,
-            CASE WHEN child.db_system IS NOT NULL THEN 'database' ELSE 'service' END as dep_type,
+            COALESCE(NULLIF(child.db_system, ''), child.service_name) as dependency,
+            CASE WHEN child.db_system IS NOT NULL AND child.db_system != '' THEN 'database' ELSE 'service' END as dep_type,
             COUNT(*) as call_count
         FROM traces_otel_analytic parent
         JOIN traces_otel_analytic child ON parent.span_id = child.parent_span_id
@@ -1025,8 +1055,8 @@ def service_dependencies(service_name):
         WHERE parent.service_name = '{service_name}'
           AND (child.service_name != '{service_name}' OR child.db_system IS NOT NULL)
           AND parent.start_time > NOW() - INTERVAL {interval}
-        GROUP BY COALESCE(child.db_system, child.service_name),
-                 CASE WHEN child.db_system IS NOT NULL THEN 'database' ELSE 'service' END
+        GROUP BY COALESCE(NULLIF(child.db_system, ''), child.service_name),
+                 CASE WHEN child.db_system IS NOT NULL AND child.db_system != '' THEN 'database' ELSE 'service' END
         ORDER BY call_count DESC
         LIMIT 20
         """
@@ -1254,8 +1284,8 @@ def database_dependencies(db_system):
 
         downstream_query = f"""
         SELECT DISTINCT
-            COALESCE(child.db_system, child.service_name) as dependency,
-            CASE WHEN child.db_system IS NOT NULL THEN 'database' ELSE 'service' END as dep_type,
+            COALESCE(NULLIF(child.db_system, ''), child.service_name) as dependency,
+            CASE WHEN child.db_system IS NOT NULL AND child.db_system != '' THEN 'database' ELSE 'service' END as dep_type,
             COUNT(*) as call_count
         FROM traces_otel_analytic parent
         JOIN traces_otel_analytic child ON parent.span_id = child.parent_span_id
@@ -1264,8 +1294,8 @@ def database_dependencies(db_system):
           AND child.db_system IS NULL
           AND child.service_name IS NOT NULL
           AND parent.start_time > NOW() - INTERVAL {interval}
-        GROUP BY COALESCE(child.db_system, child.service_name),
-                 CASE WHEN child.db_system IS NOT NULL THEN 'database' ELSE 'service' END
+        GROUP BY COALESCE(NULLIF(child.db_system, ''), child.service_name),
+                 CASE WHEN child.db_system IS NOT NULL AND child.db_system != '' THEN 'database' ELSE 'service' END
         ORDER BY call_count DESC
         LIMIT 20
         """
@@ -1299,7 +1329,7 @@ def database_dependencies(db_system):
 def database_traces(db_system):
     """Get recent traces for a specific database."""
     executor = get_query_executor()
-    limit = min(int(request.args.get('limit', '20')), 100)
+    limit = min(int(request.args.get('limit', '50')), 1000)
     time_param = request.args.get('time', '5m')
 
     time_value = int(time_param[:-1])
@@ -1313,6 +1343,18 @@ def database_traces(db_system):
     else:
         interval = "'5' MINUTE"
 
+    # Build extra filters
+    extra_where = ''
+    status_filter = request.args.get('status', '')
+    search_filter = request.args.get('search', '')
+    min_duration = request.args.get('min_duration', '')
+    if status_filter:
+        extra_where += f" AND status_code = '{status_filter}'"
+    if search_filter:
+        extra_where += f" AND LOWER(span_name) LIKE LOWER('%{search_filter}%')"
+    if min_duration:
+        extra_where += f" AND duration_ns / 1000000.0 >= {float(min_duration)}"
+
     traces_query = f"""
     SELECT trace_id, span_id, service_name, span_name, span_kind, status_code,
            ROUND(duration_ns / 1000000.0, 2) as duration_ms,
@@ -1320,6 +1362,7 @@ def database_traces(db_system):
     FROM traces_otel_analytic
     WHERE db_system = '{db_system}'
       AND start_time > NOW() - INTERVAL {interval}
+      {extra_where}
     ORDER BY start_time DESC
     LIMIT {limit}
     """
@@ -1335,7 +1378,7 @@ def database_traces(db_system):
 def database_logs(db_system):
     """Get recent logs from services that use this database."""
     executor = get_query_executor()
-    limit = min(int(request.args.get('limit', '20')), 100)
+    limit = min(int(request.args.get('limit', '50')), 1000)
     time_param = request.args.get('time', '5m')
 
     time_value = int(time_param[:-1])
@@ -1349,6 +1392,15 @@ def database_logs(db_system):
     else:
         interval = "'5' MINUTE"
 
+    # Build extra filters
+    extra_where = ''
+    severity_filter = request.args.get('severity', '')
+    search_filter = request.args.get('search', '')
+    if severity_filter:
+        extra_where += f" AND l.severity_text = '{severity_filter}'"
+    if search_filter:
+        extra_where += f" AND LOWER(l.body) LIKE LOWER('%{search_filter}%')"
+
     # Get logs from services that have DB spans for this db_system
     logs_query = f"""
     SELECT l.timestamp, l.service_name, l.severity_text, l.body, l.trace_id, l.span_id
@@ -1360,6 +1412,7 @@ def database_logs(db_system):
           AND start_time > NOW() - INTERVAL {interval}
     )
       AND l.timestamp > NOW() - INTERVAL {interval}
+      {extra_where}
     ORDER BY l.timestamp DESC
     LIMIT {limit}
     """
@@ -1375,7 +1428,7 @@ def database_logs(db_system):
 def database_metrics(db_system):
     """Get database-specific metrics (e.g. postgresql.*)."""
     executor = get_query_executor()
-    limit = min(int(request.args.get('limit', '20')), 100)
+    limit = min(int(request.args.get('limit', '50')), 1000)
     time_param = request.args.get('time', '5m')
 
     time_value = int(time_param[:-1])
@@ -1389,6 +1442,12 @@ def database_metrics(db_system):
     else:
         interval = "'5' MINUTE"
 
+    # Build extra filters
+    extra_where = ''
+    search_filter = request.args.get('search', '')
+    if search_filter:
+        extra_where += f" AND LOWER(metric_name) LIKE LOWER('%{search_filter}%')"
+
     metrics_query = f"""
     SELECT metric_name,
            COUNT(*) as data_points,
@@ -1399,6 +1458,7 @@ def database_metrics(db_system):
     FROM metrics_otel_analytic
     WHERE metric_name LIKE '{db_system}.%'
       AND timestamp > NOW() - INTERVAL {interval}
+      {extra_where}
     GROUP BY metric_name
     ORDER BY data_points DESC
     LIMIT {limit}
@@ -1552,7 +1612,7 @@ def host_services(host_name):
 def host_traces(host_name):
     """Get recent traces from services running on this host."""
     executor = get_query_executor()
-    limit = min(int(request.args.get('limit', '20')), 100)
+    limit = min(int(request.args.get('limit', '50')), 1000)
     time_param = request.args.get('time', '5m')
 
     time_value = int(time_param[:-1])
@@ -1566,6 +1626,18 @@ def host_traces(host_name):
     else:
         interval = "'5' MINUTE"
 
+    # Build extra filters
+    extra_where = ''
+    status_filter = request.args.get('status', '')
+    search_filter = request.args.get('search', '')
+    min_duration = request.args.get('min_duration', '')
+    if status_filter:
+        extra_where += f" AND status_code = '{status_filter}'"
+    if search_filter:
+        extra_where += f" AND LOWER(span_name) LIKE LOWER('%{search_filter}%')"
+    if min_duration:
+        extra_where += f" AND duration_ns / 1000000.0 >= {float(min_duration)}"
+
     traces_query = f"""
     SELECT trace_id, span_id, service_name, span_name, span_kind, status_code,
            ROUND(duration_ns / 1000000.0, 2) as duration_ms,
@@ -1573,6 +1645,7 @@ def host_traces(host_name):
     FROM spans_otel_analytic
     WHERE attributes_flat LIKE '%host.name={host_name}%'
       AND timestamp > NOW() - INTERVAL {interval}
+      {extra_where}
     ORDER BY timestamp DESC
     LIMIT {limit}
     """
@@ -1588,7 +1661,7 @@ def host_traces(host_name):
 def host_logs(host_name):
     """Get recent logs from services running on this host."""
     executor = get_query_executor()
-    limit = min(int(request.args.get('limit', '20')), 100)
+    limit = min(int(request.args.get('limit', '50')), 1000)
     time_param = request.args.get('time', '5m')
 
     time_value = int(time_param[:-1])
@@ -1602,6 +1675,15 @@ def host_logs(host_name):
     else:
         interval = "'5' MINUTE"
 
+    # Build extra filters
+    extra_where = ''
+    severity_filter = request.args.get('severity', '')
+    search_filter = request.args.get('search', '')
+    if severity_filter:
+        extra_where += f" AND l.severity_text = '{severity_filter}'"
+    if search_filter:
+        extra_where += f" AND LOWER(l.body) LIKE LOWER('%{search_filter}%')"
+
     # Get logs from services known to run on this host
     logs_query = f"""
     SELECT l.timestamp, l.service_name, l.severity_text, l.body, l.trace_id, l.span_id
@@ -1614,6 +1696,7 @@ def host_logs(host_name):
           AND service_name IS NOT NULL AND service_name != ''
     )
       AND l.timestamp > NOW() - INTERVAL {interval}
+      {extra_where}
     ORDER BY l.timestamp DESC
     LIMIT {limit}
     """
@@ -1629,7 +1712,7 @@ def host_logs(host_name):
 def host_metrics_detail(host_name):
     """Get detailed metrics for a specific host."""
     executor = get_query_executor()
-    limit = min(int(request.args.get('limit', '20')), 100)
+    limit = min(int(request.args.get('limit', '50')), 1000)
     time_param = request.args.get('time', '5m')
 
     time_value = int(time_param[:-1])
@@ -1643,6 +1726,12 @@ def host_metrics_detail(host_name):
     else:
         interval = "'5' MINUTE"
 
+    # Build extra filters
+    extra_where = ''
+    search_filter = request.args.get('search', '')
+    if search_filter:
+        extra_where += f" AND LOWER(metric_name) LIKE LOWER('%{search_filter}%')"
+
     metrics_query = f"""
     SELECT metric_name,
            COUNT(*) as data_points,
@@ -1653,6 +1742,7 @@ def host_metrics_detail(host_name):
     FROM metrics_otel_analytic
     WHERE attributes_flat LIKE '%host.name={host_name}%'
       AND timestamp > NOW() - INTERVAL {interval}
+      {extra_where}
     GROUP BY metric_name
     ORDER BY data_points DESC
     LIMIT {limit}
@@ -1663,6 +1753,277 @@ def host_metrics_detail(host_name):
         return jsonify({'metrics': result['rows']})
     else:
         return jsonify({'metrics': [], 'error': result.get('error')})
+
+
+# =============================================================================
+# Topology API
+# =============================================================================
+
+@app.route('/api/topology/<entity_name>', methods=['GET'])
+def topology_graph(entity_name):
+    """Get N-level dependency graph centered on an entity (service or database).
+    Uses live trace data (parent-child span joins) for reliable edge discovery,
+    with topology tables as metadata supplement.
+    """
+    executor = get_query_executor()
+    depth = min(int(request.args.get('depth', '2')), 5)
+
+    visited_edges = set()
+    visited_nodes = {entity_name}
+    frontier = {entity_name}
+    nodes = {}
+    edges = []
+    is_host = False
+
+    # Determine entity type from topology tables
+    svc_result = executor.execute_query(f"""
+    SELECT service_name, service_type, span_count, error_pct, avg_latency_ms
+    FROM topology_services
+    WHERE service_name = '{entity_name}'
+    LIMIT 1
+    """)
+    if svc_result['success'] and svc_result['rows']:
+        row = svc_result['rows'][0]
+        nodes[entity_name] = {
+            'id': entity_name, 'label': entity_name,
+            'type': row.get('service_type', 'application'),
+            'error_pct': row.get('error_pct', 0),
+            'span_count': row.get('span_count', 0),
+            'avg_latency_ms': row.get('avg_latency_ms', 0),
+            'root': True
+        }
+
+    # Check if it's a host
+    host_result = executor.execute_query(f"""
+    SELECT host_name, os_type, cpu_pct, memory_pct, disk_pct
+    FROM topology_hosts
+    WHERE host_name = '{entity_name}'
+    LIMIT 1
+    """)
+    if host_result['success'] and host_result['rows']:
+        is_host = True
+        row = host_result['rows'][0]
+        nodes[entity_name] = {
+            'id': entity_name, 'label': entity_name, 'type': 'host',
+            'os_type': row.get('os_type'),
+            'cpu_pct': row.get('cpu_pct'),
+            'memory_pct': row.get('memory_pct'),
+            'root': True
+        }
+        # Seed frontier with services on this host (from topology or live spans)
+        host_svc = executor.execute_query(f"""
+        SELECT service_name, data_point_count
+        FROM topology_host_services
+        WHERE host_name = '{entity_name}'
+        """)
+        if host_svc['success'] and host_svc['rows']:
+            for r in host_svc['rows']:
+                svc = r['service_name']
+                if svc not in visited_nodes:
+                    visited_nodes.add(svc)
+                    frontier.add(svc)
+                ek = (entity_name, svc, 'hosts')
+                if ek not in visited_edges:
+                    visited_edges.add(ek)
+                    edges.append({'from': entity_name, 'to': svc, 'label': 'hosts', 'call_count': r.get('data_point_count', 0)})
+        else:
+            # Fallback: discover services from spans
+            live_svc = executor.execute_query(f"""
+            SELECT DISTINCT service_name, COUNT(*) as cnt
+            FROM spans_otel_analytic
+            WHERE attributes_flat LIKE '%host.name={entity_name}%'
+              AND timestamp > NOW() - INTERVAL '1' HOUR
+              AND service_name IS NOT NULL AND service_name != ''
+            GROUP BY service_name
+            """)
+            if live_svc['success']:
+                for r in live_svc['rows']:
+                    svc = r['service_name']
+                    if svc not in visited_nodes:
+                        visited_nodes.add(svc)
+                        frontier.add(svc)
+                    ek = (entity_name, svc, 'hosts')
+                    if ek not in visited_edges:
+                        visited_edges.add(ek)
+                        edges.append({'from': entity_name, 'to': svc, 'label': 'hosts', 'call_count': r.get('cnt', 0)})
+        # Database hosts
+        db_host = executor.execute_query(f"""
+        SELECT db_system FROM topology_database_hosts WHERE host_name = '{entity_name}'
+        """)
+        if db_host['success']:
+            for r in db_host['rows']:
+                db = r['db_system']
+                if db not in visited_nodes:
+                    visited_nodes.add(db)
+                    frontier.add(db)
+                ek = (entity_name, db, 'hosts')
+                if ek not in visited_edges:
+                    visited_edges.add(ek)
+                    edges.append({'from': entity_name, 'to': db, 'label': 'hosts', 'call_count': 0})
+
+    # Default node if nothing found yet
+    if entity_name not in nodes:
+        nodes[entity_name] = {'id': entity_name, 'label': entity_name, 'type': 'application', 'root': True}
+
+    def get_edges_for_services(service_list):
+        """Get downstream edges from live trace data using parent-child span join."""
+        svc_in = "', '".join(service_list)
+        result = executor.execute_query(f"""
+        SELECT
+            parent.service_name as source_service,
+            COALESCE(NULLIF(child.db_system, ''), child.service_name) as target_service,
+            CASE WHEN child.db_system IS NOT NULL AND child.db_system != '' THEN 'database' ELSE 'service' END as dependency_type,
+            COUNT(*) as call_count,
+            ROUND(AVG(child.duration_ns / 1000000.0), 2) as avg_latency_ms,
+            ROUND(100.0 * SUM(CASE WHEN child.status_code = 'ERROR' THEN 1 ELSE 0 END) / COUNT(*), 1) as error_pct
+        FROM traces_otel_analytic parent
+        JOIN traces_otel_analytic child
+            ON parent.span_id = child.parent_span_id
+            AND parent.trace_id = child.trace_id
+        WHERE parent.service_name IN ('{svc_in}')
+          AND (child.service_name != parent.service_name OR (child.db_system IS NOT NULL AND child.db_system != ''))
+          AND parent.start_time > NOW() - INTERVAL '1' HOUR
+        GROUP BY parent.service_name,
+                 COALESCE(NULLIF(child.db_system, ''), child.service_name),
+                 CASE WHEN child.db_system IS NOT NULL AND child.db_system != '' THEN 'database' ELSE 'service' END
+        ORDER BY call_count DESC
+        """)
+        return result
+
+    def get_upstream_for_services(service_list):
+        """Get upstream edges from live trace data."""
+        svc_in = "', '".join(service_list)
+        result = executor.execute_query(f"""
+        SELECT
+            parent.service_name as source_service,
+            child.service_name as target_service,
+            'service' as dependency_type,
+            COUNT(*) as call_count,
+            ROUND(AVG(child.duration_ns / 1000000.0), 2) as avg_latency_ms,
+            ROUND(100.0 * SUM(CASE WHEN child.status_code = 'ERROR' THEN 1 ELSE 0 END) / COUNT(*), 1) as error_pct
+        FROM traces_otel_analytic parent
+        JOIN traces_otel_analytic child
+            ON parent.span_id = child.parent_span_id
+            AND parent.trace_id = child.trace_id
+        WHERE child.service_name IN ('{svc_in}')
+          AND parent.service_name != child.service_name
+          AND child.start_time > NOW() - INTERVAL '1' HOUR
+        GROUP BY parent.service_name, child.service_name
+        ORDER BY call_count DESC
+        """)
+        return result
+
+    # Also handle database entities: find services that call this db_system
+    def get_upstream_for_databases(db_list):
+        """Get services that call these databases."""
+        db_in = "', '".join(db_list)
+        result = executor.execute_query(f"""
+        SELECT
+            service_name as source_service,
+            db_system as target_service,
+            'database' as dependency_type,
+            COUNT(*) as call_count,
+            ROUND(AVG(duration_ns / 1000000.0), 2) as avg_latency_ms,
+            ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) / COUNT(*), 1) as error_pct
+        FROM traces_otel_analytic
+        WHERE db_system IN ('{db_in}')
+          AND start_time > NOW() - INTERVAL '1' HOUR
+        GROUP BY service_name, db_system
+        ORDER BY call_count DESC
+        """)
+        return result
+
+    def process_edges(result, frontier_set):
+        """Process query result into edges and return new nodes to explore."""
+        new_nodes = set()
+        if not result['success']:
+            return new_nodes
+        for row in result['rows']:
+            src = row['source_service']
+            tgt = row['target_service']
+            if not src or not tgt:
+                continue
+            dep_type = row.get('dependency_type', 'service')
+            ek = (src, tgt, dep_type)
+            if ek not in visited_edges:
+                visited_edges.add(ek)
+                cc = row.get('call_count', 0)
+                edges.append({
+                    'from': src, 'to': tgt,
+                    'label': f"{cc} calls",
+                    'call_count': cc,
+                    'avg_latency_ms': row.get('avg_latency_ms'),
+                    'error_pct': row.get('error_pct')
+                })
+            # Track database type for targets
+            if dep_type == 'database' and tgt not in nodes:
+                nodes[tgt] = {'id': tgt, 'label': tgt, 'type': 'database'}
+            for name in (src, tgt):
+                if name not in visited_nodes:
+                    visited_nodes.add(name)
+                    new_nodes.add(name)
+        return new_nodes
+
+    for level in range(depth):
+        if not frontier:
+            break
+        next_frontier = set()
+
+        # Separate services from databases in frontier
+        service_frontier = []
+        db_frontier = []
+        for name in frontier:
+            node = nodes.get(name, {})
+            if node.get('type') == 'database':
+                db_frontier.append(name)
+            elif node.get('type') != 'host':
+                service_frontier.append(name)
+
+        # Get downstream edges (services calling other services/databases)
+        if service_frontier:
+            result = get_edges_for_services(service_frontier)
+            next_frontier |= process_edges(result, frontier)
+
+            # Get upstream edges (who calls these services)
+            result = get_upstream_for_services(service_frontier)
+            next_frontier |= process_edges(result, frontier)
+
+        # Get upstream edges for databases (who calls these databases)
+        if db_frontier:
+            result = get_upstream_for_databases(db_frontier)
+            next_frontier |= process_edges(result, frontier)
+
+        frontier = next_frontier
+
+    # Fetch node metadata for discovered nodes
+    missing = [n for n in visited_nodes if n not in nodes]
+    if missing:
+        missing_list = "', '".join(missing)
+        svc_result = executor.execute_query(f"""
+        SELECT service_name, service_type, span_count, error_pct, avg_latency_ms
+        FROM topology_services
+        WHERE service_name IN ('{missing_list}')
+        """)
+        if svc_result['success']:
+            for row in svc_result['rows']:
+                name = row['service_name']
+                nodes[name] = {
+                    'id': name, 'label': name,
+                    'type': row.get('service_type', 'application'),
+                    'error_pct': row.get('error_pct', 0),
+                    'span_count': row.get('span_count', 0),
+                    'avg_latency_ms': row.get('avg_latency_ms', 0)
+                }
+        for name in missing:
+            if name not in nodes:
+                nodes[name] = {'id': name, 'label': name, 'type': 'application'}
+
+    return jsonify({
+        'nodes': list(nodes.values()),
+        'edges': edges,
+        'root': entity_name,
+        'depth': depth
+    })
 
 
 # =============================================================================

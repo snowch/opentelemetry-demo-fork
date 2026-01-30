@@ -138,6 +138,58 @@ Columns:
 - linked_trace_state (varchar) - W3C trace state
 - link_attributes_json (varchar) - JSON attributes
 
+### 6. topology_services
+Pre-computed service registry with health metrics (refreshed periodically).
+Columns:
+- service_name (varchar) - Service or database name
+- service_type (varchar) - 'application', 'database', or 'infrastructure'
+- span_count (bigint) - Total spans in recent window
+- error_pct (double) - Error percentage
+- avg_latency_ms (double) - Average latency in ms
+- last_seen (timestamp) - Last activity time
+- updated_at (timestamp) - When this row was last refreshed
+
+### 7. topology_dependencies
+Pre-computed service-to-service and service-to-database call relationships.
+Columns:
+- source_service (varchar) - Calling service name
+- target_service (varchar) - Called service or database name
+- dependency_type (varchar) - 'service' or 'database'
+- call_count (bigint) - Number of calls in recent window
+- avg_latency_ms (double) - Average call latency in ms
+- error_pct (double) - Error percentage of calls
+- last_seen (timestamp) - Last call time
+- updated_at (timestamp) - When this row was last refreshed
+
+### 8. topology_hosts
+Host registry with current system resource metrics.
+Columns:
+- host_name (varchar) - Hostname
+- os_type (varchar) - Operating system type (e.g., 'linux')
+- cpu_pct (double) - CPU utilization percentage
+- memory_pct (double) - Memory utilization percentage
+- disk_pct (double) - Disk utilization percentage
+- last_seen (timestamp) - Last metric report time
+- updated_at (timestamp) - When this row was last refreshed
+
+### 9. topology_host_services
+Mapping of which services run on which hosts.
+Columns:
+- host_name (varchar) - Hostname
+- service_name (varchar) - Service running on this host
+- source (varchar) - Discovery source: 'traces' or 'metrics'
+- data_point_count (bigint) - Number of data points observed
+- last_seen (timestamp) - Last observation time
+- updated_at (timestamp) - When this row was last refreshed
+
+### 10. topology_database_hosts
+Mapping of which databases run on which hosts.
+Columns:
+- db_system (varchar) - Database system name (e.g., 'postgresql', 'redis')
+- host_name (varchar) - Host running this database
+- last_seen (timestamp) - Last observation time
+- updated_at (timestamp) - When this row was last refreshed
+
 ## Common Service Names (OpenTelemetry Demo)
 - frontend - Web frontend
 - adservice - Advertisement service
