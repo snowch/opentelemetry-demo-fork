@@ -123,6 +123,7 @@ TRACES_SCHEMA = pa.schema([
     ("status_code", pa.string()),
     ("http_status", pa.int32()),
     ("db_system", pa.string()),
+    ("attributes_json", pa.string()),
 ])
 
 SPAN_EVENTS_SCHEMA = pa.schema([
@@ -654,6 +655,7 @@ def parse_otlp_traces(message: Dict) -> Dict[str, List[Dict]]:
                     "status_code": status_code,
                     "http_status": safe_int(http_status),
                     "db_system": db_system or "",
+                    "attributes_json": safe_json_dumps(span_attrs),
                 })
                 
                 # --- Event records ---

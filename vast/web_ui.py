@@ -2157,10 +2157,19 @@ CRITICAL SQL RULES:
 - NO semicolons, NO square brackets
 - Interval: INTERVAL '15' MINUTE (quoted number)
 
+STRICT ANTI-HALLUCINATION RULES:
+- ONLY state facts that came from query results in THIS investigation.
+- NEVER fabricate error messages, metric values, service names, or trace IDs.
+- If a query returns 0 rows, say "no data found" — do NOT invent results.
+- Quote exception messages and error text VERBATIM from query results.
+- If you cannot determine the root cause from the data, say so explicitly.
+- Every claim in EVIDENCE must reference actual query output.
+- Do NOT describe what a query "would show" — only describe what it DID show.
+
 Be CONCISE. Output:
-ROOT CAUSE: <one sentence>
+ROOT CAUSE: <one sentence based on evidence>
 EVIDENCE:
-- <finding 1>
+- <finding 1 with actual values from queries>
 RECOMMENDED ACTIONS:
 1. <action 1>"""
 

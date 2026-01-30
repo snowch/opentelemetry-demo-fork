@@ -2398,58 +2398,40 @@
             color: var(--accent-secondary);
         }
 
-        /* Simulation Control */
-        .simulate-btn {
-            background: rgba(124, 58, 237, 0.15);
-            color: var(--accent-secondary);
-            border: 1px solid rgba(124, 58, 237, 0.3);
-            padding: 4px 12px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 12px;
-            font-weight: 600;
-            transition: all 0.2s;
-        }
-
-        .simulate-btn:hover {
-            background: rgba(124, 58, 237, 0.25);
-        }
-
-        .simulation-modal {
+        /* Simulation Header Controls */
+        .sim-header-controls {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
             max-width: 600px;
+            margin: 0 24px;
+            gap: 2px;
         }
 
-        .sim-scenario-select {
-            width: 100%;
-            padding: 8px 10px;
-            background: var(--bg-secondary);
-            color: var(--text-primary);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            font-size: 13px;
-            margin-bottom: 8px;
-        }
-
-        .sim-scenario-desc {
-            font-size: 12px;
-            color: var(--text-secondary);
-            margin-bottom: 12px;
-            min-height: 36px;
-        }
-
-        .sim-controls {
+        .sim-header-row {
             display: flex;
             gap: 8px;
-            margin-bottom: 12px;
+            align-items: center;
+        }
+
+        .sim-header-controls select {
+            padding: 6px 10px;
+            font-size: 12px;
+            min-width: 180px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
         }
 
         .sim-start-btn, .sim-stop-btn {
-            padding: 8px 20px;
+            padding: 6px 14px;
             border-radius: 6px;
             font-weight: 600;
-            font-size: 13px;
+            font-size: 12px;
             cursor: pointer;
             border: none;
+            white-space: nowrap;
         }
 
         .sim-start-btn {
@@ -2467,73 +2449,40 @@
             color: #fff;
         }
 
-        .sim-status {
-            padding: 10px;
-            background: var(--bg-secondary);
-            border-radius: 6px;
-            border: 1px solid var(--border);
-            margin-bottom: 12px;
+        .sim-header-progress {
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
 
         .sim-progress-bar {
-            width: 100%;
-            height: 6px;
+            width: 150px;
+            height: 4px;
             background: var(--bg-tertiary);
-            border-radius: 3px;
-            margin-top: 6px;
+            border-radius: 2px;
             overflow: hidden;
         }
 
         .sim-progress-fill {
             height: 100%;
             background: var(--accent-primary);
-            border-radius: 3px;
+            border-radius: 2px;
             transition: width 0.5s;
         }
 
-        .sim-step-list {
+        .sim-elapsed {
             font-size: 11px;
-            margin-top: 8px;
-        }
-
-        .sim-step {
-            padding: 2px 0;
+            font-family: 'SF Mono', 'Fira Code', monospace;
             color: var(--text-muted);
         }
 
-        .sim-step.completed {
-            color: var(--accent-success);
-        }
-
-        .sim-step.current {
-            color: var(--accent-primary);
-            font-weight: 600;
-        }
-
-        .sim-results {
-            margin-top: 12px;
-            padding: 10px;
-            background: var(--bg-secondary);
-            border-radius: 6px;
-            border: 1px solid var(--border);
-        }
-
-        .sim-results h4 {
-            font-size: 13px;
-            margin-bottom: 8px;
-            color: var(--text-primary);
-        }
-
-        .sim-results-table {
-            width: 100%;
+        .sim-header-step {
             font-size: 11px;
-            border-collapse: collapse;
-        }
-
-        .sim-results-table th, .sim-results-table td {
-            padding: 4px 6px;
-            text-align: left;
-            border-bottom: 1px solid var(--border);
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
         }
     </style>
 </head>
@@ -2584,7 +2533,6 @@
             <div class="section-header">
                 <span class="section-title">Predictions</span>
                 <span id="predictions-badge" class="predictions-badge" style="display: none;">0</span>
-                <button class="simulate-btn" onclick="openSimulationModal()">Simulate</button>
             </div>
             <div id="predictions-list" class="predictions-list">
                 <div class="empty-state">No active predictions</div>
@@ -2634,6 +2582,22 @@
     <main class="main-content">
         <header class="header">
             <h1>Diagnostic Chat</h1>
+            <div class="sim-header-controls">
+                <div class="sim-header-row">
+                    <select id="sim-scenario-select" onchange="updateScenarioDescription()">
+                        <option value="">Select scenario...</option>
+                    </select>
+                    <button class="sim-start-btn" id="sim-start-btn" onclick="startSimulation()" disabled>&#9654; Start</button>
+                    <button class="sim-stop-btn" id="sim-stop-btn" onclick="stopSimulation()" style="display:none;">&#9632; Stop</button>
+                    <div class="sim-header-progress" id="sim-header-progress" style="display:none;">
+                        <div class="sim-progress-bar">
+                            <div class="sim-progress-fill" id="sim-progress-fill" style="width:0%"></div>
+                        </div>
+                        <span class="sim-elapsed" id="sim-elapsed"></span>
+                    </div>
+                </div>
+                <div class="sim-header-step" id="sim-header-step" style="display:none;"></div>
+            </div>
             <div class="header-actions">
                 <button onclick="openHelpModal()">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2930,47 +2894,6 @@
         </div>
     </div>
 
-    <!-- Simulation Control Modal -->
-    <div class="modal-overlay" id="simulation-modal">
-        <div class="modal simulation-modal">
-            <div class="modal-header">
-                <div class="modal-title-row">
-                    <h2>Failure Simulation</h2>
-                </div>
-                <div class="modal-refresh-controls">
-                    <button class="modal-close" onclick="closeSimulationModal()">&times;</button>
-                </div>
-            </div>
-            <div class="modal-body">
-                <select class="sim-scenario-select" id="sim-scenario-select" onchange="updateScenarioDescription()">
-                    <option value="">Select a scenario...</option>
-                </select>
-                <div class="sim-scenario-desc" id="sim-scenario-desc">Choose a scenario to see its description.</div>
-
-                <div class="sim-controls">
-                    <button class="sim-start-btn" id="sim-start-btn" onclick="startSimulation()" disabled>Start Scenario</button>
-                    <button class="sim-stop-btn" id="sim-stop-btn" onclick="stopSimulation()" style="display:none;">Stop</button>
-                </div>
-
-                <div class="sim-status" id="sim-status" style="display:none;">
-                    <div style="display:flex; justify-content:space-between; font-size:12px;">
-                        <span id="sim-status-label">Idle</span>
-                        <span id="sim-elapsed"></span>
-                    </div>
-                    <div class="sim-progress-bar">
-                        <div class="sim-progress-fill" id="sim-progress-fill" style="width:0%"></div>
-                    </div>
-                    <div class="sim-step-list" id="sim-step-list"></div>
-                </div>
-
-                <div class="sim-results" id="sim-results" style="display:none;">
-                    <h4>Results</h4>
-                    <div id="sim-results-content"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <script>
         const sessionId = 'session_' + Math.random().toString(36).substr(2, 9);
         let isLoading = false;
@@ -3069,6 +2992,7 @@
             }
             refreshStatus();
             startSidebarAutoRefresh();
+            initSimulator();
         });
 
         function startSidebarAutoRefresh() {
@@ -5458,46 +5382,27 @@ Can you help me understand this issue further or suggest next steps?`;
         let simPollInterval = null;
         let lastSimRunId = null;
 
-        async function openSimulationModal() {
-            document.getElementById('simulation-modal').classList.add('active');
-            // Load scenarios
+        async function initSimulator() {
             try {
                 const response = await fetch('/api/simulation/scenarios');
                 const data = await response.json();
                 simScenarios = data.scenarios || [];
 
                 const select = document.getElementById('sim-scenario-select');
-                select.innerHTML = '<option value="">Select a scenario...</option>' +
-                    simScenarios.map(s => `<option value="${s.id}">${escapeHtml(s.name)} (${s.duration_minutes}min)</option>`).join('');
+                select.innerHTML = '<option value="">Select scenario...</option>' +
+                    simScenarios.map(s => `<option value="${s.id}" title="${escapeHtml(s.description)}">${escapeHtml(s.name)} (${s.duration_minutes}min)</option>`).join('');
 
-                // Also check current status
+                // Check if a simulation is already running
                 await refreshSimulationStatus();
             } catch (error) {
-                console.error('Failed to load scenarios:', error);
-            }
-        }
-
-        function closeSimulationModal() {
-            document.getElementById('simulation-modal').classList.remove('active');
-            if (simPollInterval) {
-                clearInterval(simPollInterval);
-                simPollInterval = null;
+                console.error('Failed to init simulator:', error);
             }
         }
 
         function updateScenarioDescription() {
             const select = document.getElementById('sim-scenario-select');
-            const desc = document.getElementById('sim-scenario-desc');
             const startBtn = document.getElementById('sim-start-btn');
-            const scenario = simScenarios.find(s => s.id === select.value);
-
-            if (scenario) {
-                desc.textContent = scenario.description;
-                startBtn.disabled = false;
-            } else {
-                desc.textContent = 'Choose a scenario to see its description.';
-                startBtn.disabled = true;
-            }
+            startBtn.disabled = !select.value;
         }
 
         async function startSimulation() {
@@ -5507,7 +5412,7 @@ Can you help me understand this issue further or suggest next steps?`;
 
             const startBtn = document.getElementById('sim-start-btn');
             startBtn.disabled = true;
-            startBtn.textContent = 'Starting...';
+            startBtn.innerHTML = 'Starting...';
 
             try {
                 const response = await fetch('/api/simulation/start', {
@@ -5521,20 +5426,19 @@ Can you help me understand this issue further or suggest next steps?`;
                     lastSimRunId = data.run_id;
                     startBtn.style.display = 'none';
                     document.getElementById('sim-stop-btn').style.display = 'inline-block';
-                    document.getElementById('sim-status').style.display = 'block';
-                    document.getElementById('sim-results').style.display = 'none';
+                    document.getElementById('sim-header-progress').style.display = 'flex';
 
                     // Start polling
                     simPollInterval = setInterval(pollSimulationStatus, 5000);
                     pollSimulationStatus();
                 } else {
-                    startBtn.textContent = data.error || 'Failed to start';
-                    setTimeout(() => { startBtn.textContent = 'Start Scenario'; startBtn.disabled = false; }, 3000);
+                    startBtn.innerHTML = data.error || 'Failed';
+                    setTimeout(() => { startBtn.innerHTML = '&#9654; Start'; startBtn.disabled = false; }, 3000);
                 }
             } catch (error) {
                 console.error('Failed to start simulation:', error);
-                startBtn.textContent = 'Error';
-                setTimeout(() => { startBtn.textContent = 'Start Scenario'; startBtn.disabled = false; }, 3000);
+                startBtn.innerHTML = 'Error';
+                setTimeout(() => { startBtn.innerHTML = '&#9654; Start'; startBtn.disabled = false; }, 3000);
             }
         }
 
@@ -5545,10 +5449,10 @@ Can you help me understand this issue further or suggest next steps?`;
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ run_id: lastSimRunId })
                 });
-                // Will be reflected in next status poll
             } catch (error) {
                 console.error('Failed to stop simulation:', error);
             }
+            await refreshSimulationStatus();
         }
 
         async function pollSimulationStatus() {
@@ -5561,24 +5465,26 @@ Can you help me understand this issue further or suggest next steps?`;
                 const data = await response.json();
                 const status = data.status;
 
+                const startBtn = document.getElementById('sim-start-btn');
+                const stopBtn = document.getElementById('sim-stop-btn');
+                const progressDiv = document.getElementById('sim-header-progress');
+                const elapsed = document.getElementById('sim-elapsed');
+                const progressFill = document.getElementById('sim-progress-fill');
+                const stepDiv = document.getElementById('sim-header-step');
+
                 if (!status) {
-                    document.getElementById('sim-status').style.display = 'none';
-                    document.getElementById('sim-start-btn').style.display = 'inline-block';
-                    document.getElementById('sim-start-btn').textContent = 'Start Scenario';
-                    document.getElementById('sim-start-btn').disabled = !document.getElementById('sim-scenario-select').value;
-                    document.getElementById('sim-stop-btn').style.display = 'none';
+                    // Idle state
+                    startBtn.style.display = 'inline-block';
+                    startBtn.innerHTML = '&#9654; Start';
+                    startBtn.disabled = !document.getElementById('sim-scenario-select').value;
+                    stopBtn.style.display = 'none';
+                    progressDiv.style.display = 'none';
+                    stepDiv.style.display = 'none';
                     return;
                 }
 
-                document.getElementById('sim-status').style.display = 'block';
-                const statusLabel = document.getElementById('sim-status-label');
-                const elapsed = document.getElementById('sim-elapsed');
-                const progressFill = document.getElementById('sim-progress-fill');
-                const stepList = document.getElementById('sim-step-list');
-
-                statusLabel.textContent = `Status: ${status.status} | Scenario: ${status.scenario_name || ''}`;
-
-                if (status.elapsed_seconds) {
+                // Update elapsed time
+                if (status.elapsed_seconds != null) {
                     const mins = Math.floor(status.elapsed_seconds / 60);
                     const secs = status.elapsed_seconds % 60;
                     elapsed.textContent = `${mins}m ${secs}s`;
@@ -5586,30 +5492,37 @@ Can you help me understand this issue further or suggest next steps?`;
 
                 progressFill.style.width = (status.progress_pct || 0) + '%';
 
-                // Steps
+                // Show latest step label
                 if (status.steps_completed && status.steps_completed.length > 0) {
-                    stepList.innerHTML = status.steps_completed.map((s, i) => {
-                        const cls = s.success ? 'completed' : '';
-                        return `<div class="sim-step ${cls}">\u2713 ${escapeHtml(s.label)}</div>`;
-                    }).join('');
+                    const latest = status.steps_completed[status.steps_completed.length - 1];
+                    const total = status.total_steps || status.steps_completed.length;
+                    stepDiv.textContent = `Step ${status.steps_completed.length}/${total}: ${latest.label}`;
+                    stepDiv.style.display = 'block';
                 }
 
                 if (status.status === 'running') {
-                    document.getElementById('sim-start-btn').style.display = 'none';
-                    document.getElementById('sim-stop-btn').style.display = 'inline-block';
+                    startBtn.style.display = 'none';
+                    stopBtn.style.display = 'inline-block';
+                    progressDiv.style.display = 'flex';
+
+                    // Ensure polling is active (e.g. after page refresh)
+                    if (!simPollInterval) {
+                        lastSimRunId = status.run_id;
+                        simPollInterval = setInterval(pollSimulationStatus, 5000);
+                    }
                 } else {
                     // Completed or aborted
-                    document.getElementById('sim-start-btn').style.display = 'inline-block';
-                    document.getElementById('sim-start-btn').textContent = 'Start Scenario';
-                    document.getElementById('sim-start-btn').disabled = !document.getElementById('sim-scenario-select').value;
-                    document.getElementById('sim-stop-btn').style.display = 'none';
+                    startBtn.style.display = 'inline-block';
+                    startBtn.innerHTML = '&#9654; Start';
+                    startBtn.disabled = !document.getElementById('sim-scenario-select').value;
+                    stopBtn.style.display = 'none';
 
                     if (simPollInterval) {
                         clearInterval(simPollInterval);
                         simPollInterval = null;
                     }
 
-                    // Load results
+                    // Show results as a chat message
                     if (status.run_id) {
                         showSimulationResults(status.run_id);
                     }
@@ -5627,36 +5540,34 @@ Can you help me understand this issue further or suggest next steps?`;
                 if (!data.success) return;
 
                 const results = data.results;
-                const container = document.getElementById('sim-results-content');
-                const resultsDiv = document.getElementById('sim-results');
-                resultsDiv.style.display = 'block';
-
-                let html = '';
+                let summary = '**Simulation Complete**\n\n';
 
                 // Alerts that fired
                 const firedAlerts = results.fired_alerts || [];
-                html += `<div style="font-size:12px;font-weight:600;margin-bottom:4px;">Alerts Fired: ${firedAlerts.length}</div>`;
+                summary += `**Alerts Fired:** ${firedAlerts.length}\n`;
                 if (firedAlerts.length > 0) {
-                    html += '<table class="sim-results-table"><thead><tr><th>Time</th><th>Service</th><th>Type</th><th>Severity</th></tr></thead><tbody>';
                     firedAlerts.forEach(a => {
                         const t = a.created_at ? new Date(a.created_at).toLocaleTimeString() : '';
-                        html += `<tr><td>${t}</td><td>${escapeHtml(a.service_name || '')}</td><td>${escapeHtml(a.alert_type || '')}</td><td>${escapeHtml(a.severity || '')}</td></tr>`;
+                        summary += `- ${t} | ${a.service_name || ''} | ${a.alert_type || ''} | ${a.severity || ''}\n`;
                     });
-                    html += '</tbody></table>';
                 }
 
                 // Predictions generated
                 const firedPredictions = results.fired_predictions || [];
-                html += `<div style="font-size:12px;font-weight:600;margin:8px 0 4px;">Predictions Generated: ${firedPredictions.length}</div>`;
+                summary += `\n**Predictions Generated:** ${firedPredictions.length}\n`;
                 if (firedPredictions.length > 0) {
-                    html += '<table class="sim-results-table"><thead><tr><th>Host</th><th>Resource</th><th>Hours Left</th><th>Confidence</th></tr></thead><tbody>';
                     firedPredictions.forEach(p => {
-                        html += `<tr><td>${escapeHtml(p.host_name || '')}</td><td>${escapeHtml(p.resource_type || '')}</td><td>${p.hours_until_exhaustion ? p.hours_until_exhaustion.toFixed(1) : '?'}</td><td>${escapeHtml(p.confidence || '')}</td></tr>`;
+                        summary += `- ${p.host_name || ''} | ${p.resource_type || ''} | ${p.hours_until_exhaustion ? p.hours_until_exhaustion.toFixed(1) + 'h left' : '?'} | ${p.confidence || ''}\n`;
                     });
-                    html += '</tbody></table>';
                 }
 
-                container.innerHTML = html || '<div class="empty-state" style="font-size:11px;">No results available.</div>';
+                addMessage('assistant', summary);
+
+                // Reset progress display after showing results
+                document.getElementById('sim-header-progress').style.display = 'none';
+                document.getElementById('sim-header-step').style.display = 'none';
+                document.getElementById('sim-progress-fill').style.width = '0%';
+                document.getElementById('sim-elapsed').textContent = '';
 
             } catch (error) {
                 console.error('Failed to load simulation results:', error);
@@ -5679,17 +5590,12 @@ Can you help me understand this issue further or suggest next steps?`;
             if (e.target === this) closeAlertModal();
         });
 
-        document.getElementById('simulation-modal').addEventListener('click', function(e) {
-            if (e.target === this) closeSimulationModal();
-        });
-
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
                 closeEntityModal();
                 closeErrorModal();
                 closeHelpModal();
                 closeAlertModal();
-                closeSimulationModal();
             }
         });
     </script>

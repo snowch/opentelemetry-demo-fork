@@ -90,7 +90,8 @@ CREATE TABLE vast."csnow-db|otel".traces_otel_analytic (
    span_kind varchar,
    status_code varchar,
    http_status integer,
-   db_system varchar
+   db_system varchar,
+   attributes_json varchar
 );
 
 -- =============================================================================
