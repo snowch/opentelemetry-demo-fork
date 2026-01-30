@@ -64,7 +64,7 @@ docker compose up -d
 
 ### 3. Access the dashboard
 
-Open http://localhost:5001 in your browser.
+Open http://localhost:5000 in your browser.
 
 ## Services
 
@@ -72,7 +72,7 @@ This integration adds three services to the docker compose stack:
 
 | Service | Description | Port |
 |---------|-------------|------|
-| `observability-agent` | Web UI + predictive alerts + diagnostic chat | 5001 |
+| `observability-agent` | Web UI + predictive alerts + diagnostic chat | 5000 |
 | `observability-ingester` | Kafka consumer that writes OTEL data to VastDB | - |
 | `pg-latency-proxy` | PostgreSQL fault injection proxy (profile: `fault-injection`) | - |
 
