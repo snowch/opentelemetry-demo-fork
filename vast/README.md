@@ -123,20 +123,7 @@ An automated service that monitors telemetry data and generates predictive alert
 
 ### Setup
 
-The service requires the same Trino connection as the diagnostic chat:
-
-```bash
-export TRINO_HOST=trino.example.com
-export TRINO_PORT=443
-export TRINO_USER=your_user
-export TRINO_PASSWORD=your_password
-export TRINO_CATALOG=vast
-export TRINO_SCHEMA=otel
-```
-
-### Running
-
-The predictive alerts service runs automatically inside the `observability-agent` container. No separate process is needed.
+The service requires the same Trino and Anthropic credentials as the diagnostic chat. These are configured in `.env.override` (see [Quick Start](#1-configure-environment-variables)). The predictive alerts service runs automatically inside the `observability-agent` container — no separate process is needed.
 
 ### Configuration
 
