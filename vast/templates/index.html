@@ -2551,7 +2551,10 @@
             </div>
             <div class="modal-tabs" id="db-modal-tabs">
                 <div class="modal-tab active" onclick="switchDbModalTab('charts')">Charts</div>
-                <div class="modal-tab" onclick="switchDbModalTab('deps')">Dependents</div>
+                <div class="modal-tab" onclick="switchDbModalTab('deps')">Dependencies</div>
+                <div class="modal-tab" onclick="switchDbModalTab('db-traces')">Traces <span class="tab-badge" id="db-traces-count">-</span></div>
+                <div class="modal-tab" onclick="switchDbModalTab('db-logs')">Logs <span class="tab-badge" id="db-logs-count">-</span></div>
+                <div class="modal-tab" onclick="switchDbModalTab('db-metrics')">Metrics <span class="tab-badge" id="db-metrics-count">-</span></div>
             </div>
             <div class="modal-body" id="db-modal-body">
                 <!-- Charts Tab -->
@@ -2581,12 +2584,109 @@
                     </div>
                 </div>
 
-                <!-- Dependents Tab -->
+                <!-- Dependencies Tab (bidirectional) -->
                 <div class="modal-tab-content" id="db-tab-deps">
-                    <div class="chart-card">
-                        <h4>Services Using This Database</h4>
-                        <div class="deps-list" id="db-dependents">
-                            <div class="empty-state">Loading...</div>
+                    <div class="chart-row">
+                        <div class="chart-card">
+                            <h4>Upstream (Services Using This Database)</h4>
+                            <div class="deps-list" id="db-upstream-deps">
+                                <div class="empty-state">Loading...</div>
+                            </div>
+                        </div>
+                        <div class="chart-card">
+                            <h4>Downstream (Called by This Database's Spans)</h4>
+                            <div class="deps-list" id="db-downstream-deps">
+                                <div class="empty-state">Loading...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Traces Tab -->
+                <div class="modal-tab-content" id="db-tab-db-traces">
+                    <div class="tab-controls">
+                        <span class="tab-title">Recent Database Traces</span>
+                        <select class="time-selector" id="db-traces-time-selector" onchange="loadDatabaseTraces()">
+                            <option value="1m">Last 1m</option>
+                            <option value="5m" selected>Last 5m</option>
+                            <option value="15m">Last 15m</option>
+                            <option value="1h">Last 1h</option>
+                        </select>
+                    </div>
+                    <div class="data-table-container">
+                        <div class="data-table-wrapper">
+                            <table class="data-table" id="db-traces-table">
+                                <thead>
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>Service</th>
+                                        <th>Operation</th>
+                                        <th>Duration</th>
+                                        <th>Status</th>
+                                        <th>Trace ID</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Logs Tab -->
+                <div class="modal-tab-content" id="db-tab-db-logs">
+                    <div class="tab-controls">
+                        <span class="tab-title">Logs from Database Client Services</span>
+                        <select class="time-selector" id="db-logs-time-selector" onchange="loadDatabaseLogs()">
+                            <option value="1m">Last 1m</option>
+                            <option value="5m" selected>Last 5m</option>
+                            <option value="15m">Last 15m</option>
+                            <option value="1h">Last 1h</option>
+                        </select>
+                    </div>
+                    <div class="data-table-container">
+                        <div class="data-table-wrapper">
+                            <table class="data-table" id="db-logs-table">
+                                <thead>
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>Service</th>
+                                        <th>Severity</th>
+                                        <th>Message</th>
+                                        <th>Trace ID</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Metrics Tab -->
+                <div class="modal-tab-content" id="db-tab-db-metrics">
+                    <div class="tab-controls">
+                        <span class="tab-title">Database Metrics</span>
+                        <select class="time-selector" id="db-metrics-time-selector" onchange="loadDatabaseMetrics()">
+                            <option value="1m">Last 1m</option>
+                            <option value="5m" selected>Last 5m</option>
+                            <option value="15m">Last 15m</option>
+                            <option value="1h">Last 1h</option>
+                        </select>
+                    </div>
+                    <div class="data-table-container">
+                        <div class="data-table-wrapper">
+                            <table class="data-table" id="db-metrics-table">
+                                <thead>
+                                    <tr>
+                                        <th>Metric Name</th>
+                                        <th>Data Points</th>
+                                        <th>Avg Value</th>
+                                        <th>Min</th>
+                                        <th>Max</th>
+                                        <th>Last Seen</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
@@ -2692,6 +2792,9 @@
             <div class="modal-tabs" id="host-modal-tabs">
                 <div class="modal-tab active" onclick="switchHostModalTab('metrics')">Metrics</div>
                 <div class="modal-tab" onclick="switchHostModalTab('services')">Services</div>
+                <div class="modal-tab" onclick="switchHostModalTab('host-traces')">Traces <span class="tab-badge" id="host-traces-count">-</span></div>
+                <div class="modal-tab" onclick="switchHostModalTab('host-logs')">Logs <span class="tab-badge" id="host-logs-count">-</span></div>
+                <div class="modal-tab" onclick="switchHostModalTab('host-metrics-detail')">All Metrics <span class="tab-badge" id="host-metrics-detail-count">-</span></div>
             </div>
             <div class="modal-body" id="host-modal-body">
                 <!-- Metrics Tab -->
@@ -2718,6 +2821,95 @@
                         <h4>Services Running on This Host</h4>
                         <div class="deps-list" id="host-services">
                             <div class="empty-state">Loading...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Traces Tab -->
+                <div class="modal-tab-content" id="host-tab-host-traces">
+                    <div class="tab-controls">
+                        <span class="tab-title">Recent Traces on This Host</span>
+                        <select class="time-selector" id="host-traces-time-selector" onchange="loadHostTraces()">
+                            <option value="1m">Last 1m</option>
+                            <option value="5m" selected>Last 5m</option>
+                            <option value="15m">Last 15m</option>
+                            <option value="1h">Last 1h</option>
+                        </select>
+                    </div>
+                    <div class="data-table-container">
+                        <div class="data-table-wrapper">
+                            <table class="data-table" id="host-traces-table">
+                                <thead>
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>Service</th>
+                                        <th>Operation</th>
+                                        <th>Duration</th>
+                                        <th>Status</th>
+                                        <th>Trace ID</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Logs Tab -->
+                <div class="modal-tab-content" id="host-tab-host-logs">
+                    <div class="tab-controls">
+                        <span class="tab-title">Recent Logs from This Host</span>
+                        <select class="time-selector" id="host-logs-time-selector" onchange="loadHostLogs()">
+                            <option value="1m">Last 1m</option>
+                            <option value="5m" selected>Last 5m</option>
+                            <option value="15m">Last 15m</option>
+                            <option value="1h">Last 1h</option>
+                        </select>
+                    </div>
+                    <div class="data-table-container">
+                        <div class="data-table-wrapper">
+                            <table class="data-table" id="host-logs-table">
+                                <thead>
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>Service</th>
+                                        <th>Severity</th>
+                                        <th>Message</th>
+                                        <th>Trace ID</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- All Metrics Tab -->
+                <div class="modal-tab-content" id="host-tab-host-metrics-detail">
+                    <div class="tab-controls">
+                        <span class="tab-title">All Host Metrics</span>
+                        <select class="time-selector" id="host-metrics-detail-time-selector" onchange="loadHostMetricsDetail()">
+                            <option value="1m">Last 1m</option>
+                            <option value="5m" selected>Last 5m</option>
+                            <option value="15m">Last 15m</option>
+                            <option value="1h">Last 1h</option>
+                        </select>
+                    </div>
+                    <div class="data-table-container">
+                        <div class="data-table-wrapper">
+                            <table class="data-table" id="host-metrics-detail-table">
+                                <thead>
+                                    <tr>
+                                        <th>Metric Name</th>
+                                        <th>Data Points</th>
+                                        <th>Avg Value</th>
+                                        <th>Min</th>
+                                        <th>Max</th>
+                                        <th>Last Seen</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
@@ -4516,21 +4708,30 @@ Can you help me understand this issue further or suggest next steps?`;
             // Load data for the tab if needed
             if (tabName === 'deps' && currentModalDatabase) {
                 loadDatabaseDependencies();
+            } else if (tabName === 'db-traces' && currentModalDatabase) {
+                loadDatabaseTraces();
+            } else if (tabName === 'db-logs' && currentModalDatabase) {
+                loadDatabaseLogs();
+            } else if (tabName === 'db-metrics' && currentModalDatabase) {
+                loadDatabaseMetrics();
             }
         }
 
         async function loadDatabaseDependencies() {
             if (!currentModalDatabase) return;
 
-            const depsDiv = document.getElementById('db-dependents');
-            depsDiv.innerHTML = '<div class="empty-state">Loading...</div>';
+            const upstreamDiv = document.getElementById('db-upstream-deps');
+            const downstreamDiv = document.getElementById('db-downstream-deps');
+            upstreamDiv.innerHTML = '<div class="empty-state">Loading...</div>';
+            downstreamDiv.innerHTML = '<div class="empty-state">Loading...</div>';
 
             try {
                 const response = await fetch(`/api/database/${encodeURIComponent(currentModalDatabase)}/dependencies?time=15m`);
                 const data = await response.json();
 
-                if (data.dependents && data.dependents.length > 0) {
-                    depsDiv.innerHTML = data.dependents.map(dep => `
+                // Upstream (services that use this database)
+                if (data.upstream && data.upstream.length > 0) {
+                    upstreamDiv.innerHTML = data.upstream.map(dep => `
                         <div class="dep-item" onclick="openServiceModal('${escapeHtml(dep.dependent)}')">
                             <div class="dep-name">
                                 <span class="dep-type-badge service">service</span>
@@ -4543,11 +4744,150 @@ Can you help me understand this issue further or suggest next steps?`;
                         </div>
                     `).join('');
                 } else {
-                    depsDiv.innerHTML = '<div class="empty-state">No services found using this database</div>';
+                    upstreamDiv.innerHTML = '<div class="empty-state">No services found using this database</div>';
+                }
+
+                // Downstream (what this database's spans call)
+                if (data.downstream && data.downstream.length > 0) {
+                    downstreamDiv.innerHTML = data.downstream.map(dep => {
+                        const clickHandler = dep.dep_type === 'database'
+                            ? `openDatabaseModal('${escapeHtml(dep.dependency)}')`
+                            : `openServiceModal('${escapeHtml(dep.dependency)}')`;
+                        return `
+                        <div class="dep-item" onclick="${clickHandler}">
+                            <div class="dep-name">
+                                <span class="dep-type-badge ${dep.dep_type}">${dep.dep_type}</span>
+                                ${escapeHtml(dep.dependency)}
+                            </div>
+                            <div style="text-align: right;">
+                                <span class="dep-calls">${dep.call_count} calls</span>
+                            </div>
+                        </div>
+                        `;
+                    }).join('');
+                } else {
+                    downstreamDiv.innerHTML = '<div class="empty-state">No downstream dependencies found</div>';
                 }
             } catch (error) {
                 console.error('Failed to load database dependencies:', error);
-                depsDiv.innerHTML = '<div class="empty-state">Error loading dependencies</div>';
+                upstreamDiv.innerHTML = '<div class="empty-state">Error loading dependencies</div>';
+                downstreamDiv.innerHTML = '<div class="empty-state">Error loading dependencies</div>';
+            }
+        }
+
+        async function loadDatabaseTraces() {
+            if (!currentModalDatabase) return;
+
+            const timeSelector = document.getElementById('db-traces-time-selector');
+            const timeWindow = timeSelector ? timeSelector.value : '5m';
+
+            try {
+                const response = await fetch(`/api/database/${encodeURIComponent(currentModalDatabase)}/traces?time=${timeWindow}&limit=50`);
+                const data = await response.json();
+
+                const tbody = document.getElementById('db-traces-table').querySelector('tbody');
+                const countBadge = document.getElementById('db-traces-count');
+
+                if (data.traces && data.traces.length > 0) {
+                    countBadge.textContent = data.traces.length;
+                    tbody.innerHTML = data.traces.map(t => {
+                        const time = t.start_time ? new Date(t.start_time).toLocaleTimeString() : '-';
+                        const isError = t.status_code === 'ERROR';
+                        return `
+                            <tr class="${isError ? 'error-row' : ''}" onclick="openErrorModal('${t.trace_id}', '${t.span_id}')" style="cursor: pointer;">
+                                <td>${time}</td>
+                                <td>${escapeHtml((t.service_name || '-').substring(0, 20))}</td>
+                                <td title="${escapeHtml(t.span_name)}">${escapeHtml((t.span_name || '-').substring(0, 30))}</td>
+                                <td>${t.duration_ms}ms</td>
+                                <td style="color: ${isError ? 'var(--accent-error)' : 'var(--accent-success)'}">${t.status_code || 'OK'}</td>
+                                <td title="${t.trace_id}">${(t.trace_id || '').substring(0, 12)}...</td>
+                            </tr>
+                        `;
+                    }).join('');
+                } else {
+                    countBadge.textContent = '0';
+                    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No traces found</td></tr>';
+                }
+            } catch (error) {
+                console.error('Failed to load database traces:', error);
+            }
+        }
+
+        async function loadDatabaseLogs() {
+            if (!currentModalDatabase) return;
+
+            const timeSelector = document.getElementById('db-logs-time-selector');
+            const timeWindow = timeSelector ? timeSelector.value : '5m';
+
+            try {
+                const response = await fetch(`/api/database/${encodeURIComponent(currentModalDatabase)}/logs?time=${timeWindow}&limit=50`);
+                const data = await response.json();
+
+                const tbody = document.getElementById('db-logs-table').querySelector('tbody');
+                const countBadge = document.getElementById('db-logs-count');
+
+                if (data.logs && data.logs.length > 0) {
+                    countBadge.textContent = data.logs.length;
+                    tbody.innerHTML = data.logs.map(log => {
+                        const time = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '-';
+                        const severity = (log.severity_text || 'INFO').toUpperCase();
+                        const severityClass = severity === 'ERROR' ? 'severity-error' :
+                                             severity === 'WARN' || severity === 'WARNING' ? 'severity-warn' :
+                                             severity === 'DEBUG' ? 'severity-debug' : 'severity-info';
+                        const isError = severity === 'ERROR';
+                        return `
+                            <tr class="${isError ? 'error-row' : ''}">
+                                <td>${time}</td>
+                                <td>${escapeHtml((log.service_name || '-').substring(0, 20))}</td>
+                                <td class="${severityClass}">${severity}</td>
+                                <td class="log-body" title="${escapeHtml(log.body || '')}">${escapeHtml((log.body || '-').substring(0, 80))}</td>
+                                <td title="${log.trace_id || ''}">${log.trace_id ? (log.trace_id.substring(0, 12) + '...') : '-'}</td>
+                            </tr>
+                        `;
+                    }).join('');
+                } else {
+                    countBadge.textContent = '0';
+                    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No logs found</td></tr>';
+                }
+            } catch (error) {
+                console.error('Failed to load database logs:', error);
+            }
+        }
+
+        async function loadDatabaseMetrics() {
+            if (!currentModalDatabase) return;
+
+            const timeSelector = document.getElementById('db-metrics-time-selector');
+            const timeWindow = timeSelector ? timeSelector.value : '5m';
+
+            try {
+                const response = await fetch(`/api/database/${encodeURIComponent(currentModalDatabase)}/metrics?time=${timeWindow}&limit=50`);
+                const data = await response.json();
+
+                const tbody = document.getElementById('db-metrics-table').querySelector('tbody');
+                const countBadge = document.getElementById('db-metrics-count');
+
+                if (data.metrics && data.metrics.length > 0) {
+                    countBadge.textContent = data.metrics.length;
+                    tbody.innerHTML = data.metrics.map(m => {
+                        const lastSeen = m.last_seen ? new Date(m.last_seen).toLocaleTimeString() : '-';
+                        return `
+                            <tr>
+                                <td title="${escapeHtml(m.metric_name)}">${escapeHtml((m.metric_name || '-').substring(0, 40))}</td>
+                                <td>${m.data_points}</td>
+                                <td>${m.avg_value !== null ? m.avg_value : '-'}</td>
+                                <td>${m.min_value !== null ? m.min_value : '-'}</td>
+                                <td>${m.max_value !== null ? m.max_value : '-'}</td>
+                                <td>${lastSeen}</td>
+                            </tr>
+                        `;
+                    }).join('');
+                } else {
+                    countBadge.textContent = '0';
+                    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No metrics found</td></tr>';
+                }
+            } catch (error) {
+                console.error('Failed to load database metrics:', error);
             }
         }
 
@@ -4739,6 +5079,128 @@ Can you help me understand this issue further or suggest next steps?`;
             // Load data for the tab if needed
             if (tabName === 'services' && currentModalHost) {
                 loadHostServices();
+            } else if (tabName === 'host-traces' && currentModalHost) {
+                loadHostTraces();
+            } else if (tabName === 'host-logs' && currentModalHost) {
+                loadHostLogs();
+            } else if (tabName === 'host-metrics-detail' && currentModalHost) {
+                loadHostMetricsDetail();
+            }
+        }
+
+        async function loadHostTraces() {
+            if (!currentModalHost) return;
+
+            const timeSelector = document.getElementById('host-traces-time-selector');
+            const timeWindow = timeSelector ? timeSelector.value : '5m';
+
+            try {
+                const response = await fetch(`/api/host/${encodeURIComponent(currentModalHost)}/traces?time=${timeWindow}&limit=50`);
+                const data = await response.json();
+
+                const tbody = document.getElementById('host-traces-table').querySelector('tbody');
+                const countBadge = document.getElementById('host-traces-count');
+
+                if (data.traces && data.traces.length > 0) {
+                    countBadge.textContent = data.traces.length;
+                    tbody.innerHTML = data.traces.map(t => {
+                        const time = t.start_time || t.timestamp ? new Date(t.start_time || t.timestamp).toLocaleTimeString() : '-';
+                        const isError = t.status_code === 'ERROR';
+                        return `
+                            <tr class="${isError ? 'error-row' : ''}" onclick="openErrorModal('${t.trace_id}', '${t.span_id}')" style="cursor: pointer;">
+                                <td>${time}</td>
+                                <td>${escapeHtml((t.service_name || '-').substring(0, 20))}</td>
+                                <td title="${escapeHtml(t.span_name || '')}">${escapeHtml((t.span_name || '-').substring(0, 30))}</td>
+                                <td>${t.duration_ms ? t.duration_ms + 'ms' : '-'}</td>
+                                <td style="color: ${isError ? 'var(--accent-error)' : 'var(--accent-success)'}">${t.status_code || 'OK'}</td>
+                                <td title="${t.trace_id || ''}">${(t.trace_id || '').substring(0, 12)}...</td>
+                            </tr>
+                        `;
+                    }).join('');
+                } else {
+                    countBadge.textContent = '0';
+                    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No traces found</td></tr>';
+                }
+            } catch (error) {
+                console.error('Failed to load host traces:', error);
+            }
+        }
+
+        async function loadHostLogs() {
+            if (!currentModalHost) return;
+
+            const timeSelector = document.getElementById('host-logs-time-selector');
+            const timeWindow = timeSelector ? timeSelector.value : '5m';
+
+            try {
+                const response = await fetch(`/api/host/${encodeURIComponent(currentModalHost)}/logs?time=${timeWindow}&limit=50`);
+                const data = await response.json();
+
+                const tbody = document.getElementById('host-logs-table').querySelector('tbody');
+                const countBadge = document.getElementById('host-logs-count');
+
+                if (data.logs && data.logs.length > 0) {
+                    countBadge.textContent = data.logs.length;
+                    tbody.innerHTML = data.logs.map(log => {
+                        const time = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '-';
+                        const severity = (log.severity_text || 'INFO').toUpperCase();
+                        const severityClass = severity === 'ERROR' ? 'severity-error' :
+                                             severity === 'WARN' || severity === 'WARNING' ? 'severity-warn' :
+                                             severity === 'DEBUG' ? 'severity-debug' : 'severity-info';
+                        const isError = severity === 'ERROR';
+                        return `
+                            <tr class="${isError ? 'error-row' : ''}">
+                                <td>${time}</td>
+                                <td>${escapeHtml((log.service_name || '-').substring(0, 20))}</td>
+                                <td class="${severityClass}">${severity}</td>
+                                <td class="log-body" title="${escapeHtml(log.body || '')}">${escapeHtml((log.body || '-').substring(0, 80))}</td>
+                                <td title="${log.trace_id || ''}">${log.trace_id ? (log.trace_id.substring(0, 12) + '...') : '-'}</td>
+                            </tr>
+                        `;
+                    }).join('');
+                } else {
+                    countBadge.textContent = '0';
+                    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No logs found</td></tr>';
+                }
+            } catch (error) {
+                console.error('Failed to load host logs:', error);
+            }
+        }
+
+        async function loadHostMetricsDetail() {
+            if (!currentModalHost) return;
+
+            const timeSelector = document.getElementById('host-metrics-detail-time-selector');
+            const timeWindow = timeSelector ? timeSelector.value : '5m';
+
+            try {
+                const response = await fetch(`/api/host/${encodeURIComponent(currentModalHost)}/metrics?time=${timeWindow}&limit=50`);
+                const data = await response.json();
+
+                const tbody = document.getElementById('host-metrics-detail-table').querySelector('tbody');
+                const countBadge = document.getElementById('host-metrics-detail-count');
+
+                if (data.metrics && data.metrics.length > 0) {
+                    countBadge.textContent = data.metrics.length;
+                    tbody.innerHTML = data.metrics.map(m => {
+                        const lastSeen = m.last_seen ? new Date(m.last_seen).toLocaleTimeString() : '-';
+                        return `
+                            <tr>
+                                <td title="${escapeHtml(m.metric_name)}">${escapeHtml((m.metric_name || '-').substring(0, 40))}</td>
+                                <td>${m.data_points}</td>
+                                <td>${m.avg_value !== null ? m.avg_value : '-'}</td>
+                                <td>${m.min_value !== null ? m.min_value : '-'}</td>
+                                <td>${m.max_value !== null ? m.max_value : '-'}</td>
+                                <td>${lastSeen}</td>
+                            </tr>
+                        `;
+                    }).join('');
+                } else {
+                    countBadge.textContent = '0';
+                    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No metrics found</td></tr>';
+                }
+            } catch (error) {
+                console.error('Failed to load host metrics detail:', error);
             }
         }
 
