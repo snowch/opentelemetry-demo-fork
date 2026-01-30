@@ -697,6 +697,28 @@ services:
         condition: service_started
     logging: *logging
 
+  # Topology inference: materializes service topology into pre-computed tables
+  observability-topology:
+    build:
+      context: ./vast
+      dockerfile: Dockerfile
+    container_name: observability-topology
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    restart: unless-stopped
+    command: ["python", "-u", "topology_inference.py"]
+    environment:
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+      - .env.override
+    depends_on:
+      otel-collector:
+        condition: service_started
+    logging: *logging
+
   # PostgreSQL latency proxy for fault injection testing
   pg-latency-proxy:
     image: alpine/socat

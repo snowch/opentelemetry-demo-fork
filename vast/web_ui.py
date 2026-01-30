@@ -568,56 +568,62 @@ def system_status():
         'timestamp': datetime.utcnow().isoformat()
     }
 
-    # Get service health - discover from 1 hour, but calculate stats for selected window
-    # Use two queries and merge in Python for better compatibility
-
-    # First: discover all services from the last hour
-    all_services_query = """
-    SELECT DISTINCT service_name
-    FROM traces_otel_analytic
-    WHERE start_time > NOW() - INTERVAL '1' HOUR
-    """
-    all_services = set()
-    result = executor.execute_query(all_services_query)
-    if result['success']:
-        all_services = {row['service_name'] for row in result['rows']}
-
-    # Second: get stats for the selected time window
-    stats_query = f"""
+    # Get service health - try topology table first, fall back to inline query
+    topology_svc_result = executor.execute_query("""
     SELECT service_name,
-           COUNT(*) as total_spans,
-           SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) as errors,
-           ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) as error_pct,
-           ROUND(AVG(duration_ns / 1000000.0), 2) as avg_latency_ms
-    FROM traces_otel_analytic
-    WHERE start_time > NOW() - INTERVAL {interval}
-    GROUP BY service_name
-    ORDER BY total_spans DESC
-    """
-    stats_by_service = {}
-    result = executor.execute_query(stats_query)
-    if result['success']:
-        for row in result['rows']:
-            stats_by_service[row['service_name']] = row
+           span_count as total_spans,
+           CAST(ROUND(error_pct / 100.0 * span_count, 0) AS BIGINT) as errors,
+           error_pct,
+           avg_latency_ms
+    FROM topology_services
+    ORDER BY span_count DESC
+    """)
+    if topology_svc_result['success'] and topology_svc_result['rows']:
+        status['services'] = topology_svc_result['rows']
+    else:
+        # Fallback: discover from 1 hour, calculate stats for selected window
+        all_services_query = """
+        SELECT DISTINCT service_name
+        FROM traces_otel_analytic
+        WHERE start_time > NOW() - INTERVAL '1' HOUR
+        """
+        all_services = set()
+        result = executor.execute_query(all_services_query)
+        if result['success']:
+            all_services = {row['service_name'] for row in result['rows']}
 
-    # Merge: all discovered services with their stats (or zeros if no recent activity)
-    services_list = []
-    for svc in all_services:
-        if svc in stats_by_service:
-            services_list.append(stats_by_service[svc])
-        else:
-            # Service exists but has no activity in selected time window
-            services_list.append({
-                'service_name': svc,
-                'total_spans': 0,
-                'errors': 0,
-                'error_pct': None,
-                'avg_latency_ms': None
-            })
+        stats_query = f"""
+        SELECT service_name,
+               COUNT(*) as total_spans,
+               SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) as errors,
+               ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) as error_pct,
+               ROUND(AVG(duration_ns / 1000000.0), 2) as avg_latency_ms
+        FROM traces_otel_analytic
+        WHERE start_time > NOW() - INTERVAL {interval}
+        GROUP BY service_name
+        ORDER BY total_spans DESC
+        """
+        stats_by_service = {}
+        result = executor.execute_query(stats_query)
+        if result['success']:
+            for row in result['rows']:
+                stats_by_service[row['service_name']] = row
 
-    # Sort by total_spans descending
-    services_list.sort(key=lambda x: x['total_spans'], reverse=True)
-    status['services'] = services_list
+        services_list = []
+        for svc in all_services:
+            if svc in stats_by_service:
+                services_list.append(stats_by_service[svc])
+            else:
+                services_list.append({
+                    'service_name': svc,
+                    'total_spans': 0,
+                    'errors': 0,
+                    'error_pct': None,
+                    'avg_latency_ms': None
+                })
+
+        services_list.sort(key=lambda x: x['total_spans'], reverse=True)
+        status['services'] = services_list
 
     # Get database status
     db_query = """
@@ -662,34 +668,41 @@ def system_status():
     if result['success']:
         status['recent_errors'] = result['rows']
 
-    # Get host metrics (CPU, memory, etc.)
-    # Note: memory.utilization has state=used/free/cached - we want state=used
-    host_query = """
-    SELECT
-        SUBSTR(attributes_flat,
-               POSITION('host.name=' IN attributes_flat) + 10,
-               POSITION(',' IN SUBSTR(attributes_flat, POSITION('host.name=' IN attributes_flat) + 10)) - 1
-        ) as host_name,
-        MAX(CASE WHEN metric_name = 'system.cpu.utilization' AND value_double <= 1 THEN ROUND(value_double * 100, 1) END) as cpu_pct,
-        MAX(CASE WHEN metric_name = 'system.memory.utilization' AND attributes_flat LIKE '%state=used%' AND value_double <= 1 THEN ROUND(value_double * 100, 1) END) as memory_pct,
-        MAX(CASE WHEN metric_name = 'system.filesystem.utilization' AND value_double <= 1 THEN ROUND(value_double * 100, 1) END) as disk_pct,
-        MAX(timestamp) as last_seen
-    FROM metrics_otel_analytic
-    WHERE metric_name IN ('system.cpu.utilization', 'system.memory.utilization', 'system.filesystem.utilization')
-      AND timestamp > NOW() - INTERVAL '5' MINUTE
-      AND attributes_flat LIKE '%host.name=%'
-    GROUP BY SUBSTR(attributes_flat,
-               POSITION('host.name=' IN attributes_flat) + 10,
-               POSITION(',' IN SUBSTR(attributes_flat, POSITION('host.name=' IN attributes_flat) + 10)) - 1
-        )
-    HAVING SUBSTR(attributes_flat,
-               POSITION('host.name=' IN attributes_flat) + 10,
-               POSITION(',' IN SUBSTR(attributes_flat, POSITION('host.name=' IN attributes_flat) + 10)) - 1
-        ) IS NOT NULL
-    """
-    result = executor.execute_query(host_query)
-    if result['success']:
-        status['hosts'] = result['rows']
+    # Get host metrics - try topology table first, fall back to inline query
+    topology_host_result = executor.execute_query("""
+    SELECT host_name, os_type, cpu_pct, memory_pct, disk_pct, last_seen
+    FROM topology_hosts
+    """)
+    if topology_host_result['success'] and topology_host_result['rows']:
+        status['hosts'] = topology_host_result['rows']
+    else:
+        # Fallback: expensive SUBSTR/POSITION chain on attributes_flat
+        host_query = """
+        SELECT
+            SUBSTR(attributes_flat,
+                   POSITION('host.name=' IN attributes_flat) + 10,
+                   POSITION(',' IN SUBSTR(attributes_flat, POSITION('host.name=' IN attributes_flat) + 10)) - 1
+            ) as host_name,
+            MAX(CASE WHEN metric_name = 'system.cpu.utilization' AND value_double <= 1 THEN ROUND(value_double * 100, 1) END) as cpu_pct,
+            MAX(CASE WHEN metric_name = 'system.memory.utilization' AND attributes_flat LIKE '%state=used%' AND value_double <= 1 THEN ROUND(value_double * 100, 1) END) as memory_pct,
+            MAX(CASE WHEN metric_name = 'system.filesystem.utilization' AND value_double <= 1 THEN ROUND(value_double * 100, 1) END) as disk_pct,
+            MAX(timestamp) as last_seen
+        FROM metrics_otel_analytic
+        WHERE metric_name IN ('system.cpu.utilization', 'system.memory.utilization', 'system.filesystem.utilization')
+          AND timestamp > NOW() - INTERVAL '5' MINUTE
+          AND attributes_flat LIKE '%host.name=%'
+        GROUP BY SUBSTR(attributes_flat,
+                   POSITION('host.name=' IN attributes_flat) + 10,
+                   POSITION(',' IN SUBSTR(attributes_flat, POSITION('host.name=' IN attributes_flat) + 10)) - 1
+            )
+        HAVING SUBSTR(attributes_flat,
+                   POSITION('host.name=' IN attributes_flat) + 10,
+                   POSITION(',' IN SUBSTR(attributes_flat, POSITION('host.name=' IN attributes_flat) + 10)) - 1
+            ) IS NOT NULL
+        """
+        result = executor.execute_query(host_query)
+        if result['success']:
+            status['hosts'] = result['rows']
 
     return jsonify(status)
 
@@ -976,50 +989,71 @@ def service_dependencies(service_name):
     else:
         interval = "'15' MINUTE"
 
-    # Find services this service calls (downstream/dependencies)
-    downstream_query = f"""
-    SELECT DISTINCT
-        COALESCE(child.db_system, child.service_name) as dependency,
-        CASE WHEN child.db_system IS NOT NULL THEN 'database' ELSE 'service' END as dep_type,
-        COUNT(*) as call_count
-    FROM traces_otel_analytic parent
-    JOIN traces_otel_analytic child ON parent.span_id = child.parent_span_id
-        AND parent.trace_id = child.trace_id
-    WHERE parent.service_name = '{service_name}'
-      AND (child.service_name != '{service_name}' OR child.db_system IS NOT NULL)
-      AND parent.start_time > NOW() - INTERVAL {interval}
-    GROUP BY COALESCE(child.db_system, child.service_name),
-             CASE WHEN child.db_system IS NOT NULL THEN 'database' ELSE 'service' END
-    ORDER BY call_count DESC
-    LIMIT 20
-    """
-
-    # Find services that call this service (upstream/dependents)
-    upstream_query = f"""
-    SELECT DISTINCT
-        parent.service_name as dependent,
-        'service' as dep_type,
-        COUNT(*) as call_count
-    FROM traces_otel_analytic parent
-    JOIN traces_otel_analytic child ON parent.span_id = child.parent_span_id
-        AND parent.trace_id = child.trace_id
-    WHERE child.service_name = '{service_name}'
-      AND parent.service_name != '{service_name}'
-      AND child.start_time > NOW() - INTERVAL {interval}
-    GROUP BY parent.service_name
-    ORDER BY call_count DESC
-    LIMIT 20
-    """
-
     data = {'upstream': [], 'downstream': []}
 
-    result = executor.execute_query(downstream_query)
-    if result['success']:
-        data['downstream'] = result['rows']
+    # Try topology table first
+    topo_down = executor.execute_query(f"""
+    SELECT target_service as dependency, dependency_type as dep_type, call_count
+    FROM topology_dependencies
+    WHERE source_service = '{service_name}'
+    ORDER BY call_count DESC
+    LIMIT 20
+    """)
+    topo_up = executor.execute_query(f"""
+    SELECT source_service as dependent, 'service' as dep_type, call_count
+    FROM topology_dependencies
+    WHERE target_service = '{service_name}'
+    ORDER BY call_count DESC
+    LIMIT 20
+    """)
 
-    result = executor.execute_query(upstream_query)
-    if result['success']:
-        data['upstream'] = result['rows']
+    if (topo_down['success'] and topo_down['rows']) or (topo_up['success'] and topo_up['rows']):
+        if topo_down['success']:
+            data['downstream'] = topo_down['rows']
+        if topo_up['success']:
+            data['upstream'] = topo_up['rows']
+    else:
+        # Fallback: expensive self-JOIN on traces
+        downstream_query = f"""
+        SELECT DISTINCT
+            COALESCE(child.db_system, child.service_name) as dependency,
+            CASE WHEN child.db_system IS NOT NULL THEN 'database' ELSE 'service' END as dep_type,
+            COUNT(*) as call_count
+        FROM traces_otel_analytic parent
+        JOIN traces_otel_analytic child ON parent.span_id = child.parent_span_id
+            AND parent.trace_id = child.trace_id
+        WHERE parent.service_name = '{service_name}'
+          AND (child.service_name != '{service_name}' OR child.db_system IS NOT NULL)
+          AND parent.start_time > NOW() - INTERVAL {interval}
+        GROUP BY COALESCE(child.db_system, child.service_name),
+                 CASE WHEN child.db_system IS NOT NULL THEN 'database' ELSE 'service' END
+        ORDER BY call_count DESC
+        LIMIT 20
+        """
+
+        upstream_query = f"""
+        SELECT DISTINCT
+            parent.service_name as dependent,
+            'service' as dep_type,
+            COUNT(*) as call_count
+        FROM traces_otel_analytic parent
+        JOIN traces_otel_analytic child ON parent.span_id = child.parent_span_id
+            AND parent.trace_id = child.trace_id
+        WHERE child.service_name = '{service_name}'
+          AND parent.service_name != '{service_name}'
+          AND child.start_time > NOW() - INTERVAL {interval}
+        GROUP BY parent.service_name
+        ORDER BY call_count DESC
+        LIMIT 20
+        """
+
+        result = executor.execute_query(downstream_query)
+        if result['success']:
+            data['downstream'] = result['rows']
+
+        result = executor.execute_query(upstream_query)
+        if result['success']:
+            data['upstream'] = result['rows']
 
     return jsonify(data)
 
@@ -1180,65 +1214,83 @@ def database_dependencies(db_system):
     else:
         interval = "'15' MINUTE"
 
-    # Find services that call this database (upstream - what depends on this DB)
-    dependents_query = f"""
-    SELECT DISTINCT
-        service_name as dependent,
-        'service' as dep_type,
-        COUNT(*) as call_count,
-        ROUND(AVG(duration_ns / 1000000.0), 2) as avg_latency_ms,
-        ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) / COUNT(*), 2) as error_pct
-    FROM traces_otel_analytic
-    WHERE db_system = '{db_system}'
-      AND start_time > NOW() - INTERVAL {interval}
-    GROUP BY service_name
-    ORDER BY call_count DESC
-    LIMIT 20
-    """
-
-    # Find other databases/services that this DB's callers also depend on (downstream peers)
-    downstream_query = f"""
-    SELECT DISTINCT
-        COALESCE(child.db_system, child.service_name) as dependency,
-        CASE WHEN child.db_system IS NOT NULL THEN 'database' ELSE 'service' END as dep_type,
-        COUNT(*) as call_count
-    FROM traces_otel_analytic parent
-    JOIN traces_otel_analytic child ON parent.span_id = child.parent_span_id
-        AND parent.trace_id = child.trace_id
-    WHERE parent.db_system = '{db_system}'
-      AND child.db_system IS NULL
-      AND child.service_name IS NOT NULL
-      AND parent.start_time > NOW() - INTERVAL {interval}
-    GROUP BY COALESCE(child.db_system, child.service_name),
-             CASE WHEN child.db_system IS NOT NULL THEN 'database' ELSE 'service' END
-    ORDER BY call_count DESC
-    LIMIT 20
-    """
-
-    # Find the host this database is running on (from metrics attributes)
-    host_query = f"""
-    SELECT DISTINCT
-        REGEXP_EXTRACT(attributes_flat, 'host\\.name=([^,]+)', 1) as host_name
-    FROM metrics_otel_analytic
-    WHERE metric_name LIKE '{db_system}.%'
-      AND timestamp > NOW() - INTERVAL {interval}
-      AND attributes_flat LIKE '%host.name=%'
-    LIMIT 1
-    """
-
     data = {'upstream': [], 'downstream': [], 'host': None}
 
-    result = executor.execute_query(dependents_query)
-    if result['success']:
-        data['upstream'] = result['rows']
+    # Try topology tables first
+    topo_up = executor.execute_query(f"""
+    SELECT source_service as dependent, 'service' as dep_type,
+           call_count, avg_latency_ms, error_pct
+    FROM topology_dependencies
+    WHERE target_service = '{db_system}' AND dependency_type = 'database'
+    ORDER BY call_count DESC
+    LIMIT 20
+    """)
+    topo_host = executor.execute_query(f"""
+    SELECT host_name FROM topology_database_hosts
+    WHERE db_system = '{db_system}'
+    LIMIT 1
+    """)
 
-    result = executor.execute_query(downstream_query)
-    if result['success']:
-        data['downstream'] = result['rows']
+    if topo_up['success'] and topo_up['rows']:
+        data['upstream'] = topo_up['rows']
+        if topo_host['success'] and topo_host['rows']:
+            data['host'] = topo_host['rows'][0].get('host_name')
+    else:
+        # Fallback: expensive inline queries
+        dependents_query = f"""
+        SELECT DISTINCT
+            service_name as dependent,
+            'service' as dep_type,
+            COUNT(*) as call_count,
+            ROUND(AVG(duration_ns / 1000000.0), 2) as avg_latency_ms,
+            ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) / COUNT(*), 2) as error_pct
+        FROM traces_otel_analytic
+        WHERE db_system = '{db_system}'
+          AND start_time > NOW() - INTERVAL {interval}
+        GROUP BY service_name
+        ORDER BY call_count DESC
+        LIMIT 20
+        """
 
-    result = executor.execute_query(host_query)
-    if result['success'] and result['rows']:
-        data['host'] = result['rows'][0].get('host_name')
+        downstream_query = f"""
+        SELECT DISTINCT
+            COALESCE(child.db_system, child.service_name) as dependency,
+            CASE WHEN child.db_system IS NOT NULL THEN 'database' ELSE 'service' END as dep_type,
+            COUNT(*) as call_count
+        FROM traces_otel_analytic parent
+        JOIN traces_otel_analytic child ON parent.span_id = child.parent_span_id
+            AND parent.trace_id = child.trace_id
+        WHERE parent.db_system = '{db_system}'
+          AND child.db_system IS NULL
+          AND child.service_name IS NOT NULL
+          AND parent.start_time > NOW() - INTERVAL {interval}
+        GROUP BY COALESCE(child.db_system, child.service_name),
+                 CASE WHEN child.db_system IS NOT NULL THEN 'database' ELSE 'service' END
+        ORDER BY call_count DESC
+        LIMIT 20
+        """
+
+        host_query = f"""
+        SELECT DISTINCT
+            REGEXP_EXTRACT(attributes_flat, 'host\\.name=([^,]+)', 1) as host_name
+        FROM metrics_otel_analytic
+        WHERE metric_name LIKE '{db_system}.%'
+          AND timestamp > NOW() - INTERVAL {interval}
+          AND attributes_flat LIKE '%host.name=%'
+        LIMIT 1
+        """
+
+        result = executor.execute_query(dependents_query)
+        if result['success']:
+            data['upstream'] = result['rows']
+
+        result = executor.execute_query(downstream_query)
+        if result['success']:
+            data['downstream'] = result['rows']
+
+        result = executor.execute_query(host_query)
+        if result['success'] and result['rows']:
+            data['host'] = result['rows'][0].get('host_name')
 
     return jsonify(data)
 
@@ -1379,91 +1431,119 @@ def host_services(host_name):
 
     data = {'services': [], 'current_metrics': None, 'host_info': None}
 
-    # Find services running on this host from traces
-    services_query = f"""
-    SELECT
-        service_name,
-        COUNT(*) as span_count,
-        ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) / COUNT(*), 1) as error_pct
-    FROM spans_otel_analytic
-    WHERE attributes_flat LIKE '%host.name={host_name}%'
-      AND timestamp > NOW() - INTERVAL {interval}
-      AND service_name IS NOT NULL AND service_name != '' AND service_name != 'unknown'
-    GROUP BY service_name
-    ORDER BY span_count DESC
-    """
+    # Try topology tables first
+    topo_svc = executor.execute_query(f"""
+    SELECT service_name, data_point_count as span_count, 0.0 as error_pct
+    FROM topology_host_services
+    WHERE host_name = '{host_name}'
+    ORDER BY data_point_count DESC
+    """)
+    topo_host = executor.execute_query(f"""
+    SELECT os_type, cpu_pct, memory_pct, disk_pct, last_seen
+    FROM topology_hosts
+    WHERE host_name = '{host_name}'
+    LIMIT 1
+    """)
 
-    result = executor.execute_query(services_query)
-    if result['success']:
-        data['services'] = result['rows']
-
-    # Fallback: discover services from metrics if no trace-based services found
-    if not data['services']:
-        metrics_services_query = f"""
+    if topo_svc['success'] and topo_svc['rows']:
+        data['services'] = topo_svc['rows']
+        if topo_host['success'] and topo_host['rows']:
+            row = topo_host['rows'][0]
+            data['current_metrics'] = {
+                'cpu_pct': row.get('cpu_pct'),
+                'memory_pct': row.get('memory_pct'),
+                'disk_pct': row.get('disk_pct')
+            }
+            data['host_info'] = {
+                'last_seen': row.get('last_seen'),
+                'os_type': row.get('os_type', 'unknown')
+            }
+    else:
+        # Fallback: discover services from traces
+        services_query = f"""
         SELECT
-            SUBSTR(metric_name, 1, POSITION('.' IN metric_name) - 1) as service_name,
+            service_name,
             COUNT(*) as span_count,
-            0.0 as error_pct
-        FROM metrics_otel_analytic
+            ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) / COUNT(*), 1) as error_pct
+        FROM spans_otel_analytic
         WHERE attributes_flat LIKE '%host.name={host_name}%'
           AND timestamp > NOW() - INTERVAL {interval}
-          AND (metric_name LIKE 'postgresql.%'
-            OR metric_name LIKE 'redis.%'
-            OR metric_name LIKE 'nginx.%'
-            OR metric_name LIKE 'kafka.%'
-            OR metric_name LIKE 'docker.%')
-        GROUP BY SUBSTR(metric_name, 1, POSITION('.' IN metric_name) - 1)
+          AND service_name IS NOT NULL AND service_name != '' AND service_name != 'unknown'
+        GROUP BY service_name
         ORDER BY span_count DESC
         """
-        result = executor.execute_query(metrics_services_query)
+
+        result = executor.execute_query(services_query)
         if result['success']:
             data['services'] = result['rows']
 
-    # Get current host metrics
-    host_metrics_query = f"""
-    SELECT
-        MAX(CASE WHEN metric_name = 'system.cpu.utilization' AND value_double <= 1 THEN ROUND(value_double * 100, 1) END) as cpu_pct,
-        MAX(CASE WHEN metric_name = 'system.memory.utilization' AND attributes_flat LIKE '%state=used%' AND value_double <= 1 THEN ROUND(value_double * 100, 1) END) as memory_pct,
-        MAX(CASE WHEN metric_name = 'system.filesystem.utilization' AND value_double <= 1 THEN ROUND(value_double * 100, 1) END) as disk_pct,
-        MAX(timestamp) as last_seen
-    FROM metrics_otel_analytic
-    WHERE attributes_flat LIKE '%host.name={host_name}%'
-      AND metric_name IN ('system.cpu.utilization', 'system.memory.utilization', 'system.filesystem.utilization')
-      AND timestamp > NOW() - INTERVAL '5' MINUTE
-    """
+        # Fallback: discover services from metrics if no trace-based services found
+        if not data['services']:
+            metrics_services_query = f"""
+            SELECT
+                SUBSTR(metric_name, 1, POSITION('.' IN metric_name) - 1) as service_name,
+                COUNT(*) as span_count,
+                0.0 as error_pct
+            FROM metrics_otel_analytic
+            WHERE attributes_flat LIKE '%host.name={host_name}%'
+              AND timestamp > NOW() - INTERVAL {interval}
+              AND (metric_name LIKE 'postgresql.%'
+                OR metric_name LIKE 'redis.%'
+                OR metric_name LIKE 'nginx.%'
+                OR metric_name LIKE 'kafka.%'
+                OR metric_name LIKE 'docker.%')
+            GROUP BY SUBSTR(metric_name, 1, POSITION('.' IN metric_name) - 1)
+            ORDER BY span_count DESC
+            """
+            result = executor.execute_query(metrics_services_query)
+            if result['success']:
+                data['services'] = result['rows']
 
-    result = executor.execute_query(host_metrics_query)
-    if result['success'] and result['rows']:
-        row = result['rows'][0]
-        data['current_metrics'] = {
-            'cpu_pct': row.get('cpu_pct'),
-            'memory_pct': row.get('memory_pct'),
-            'disk_pct': row.get('disk_pct')
-        }
-        data['host_info'] = {
-            'last_seen': row.get('last_seen')
-        }
+        # Get current host metrics
+        host_metrics_query = f"""
+        SELECT
+            MAX(CASE WHEN metric_name = 'system.cpu.utilization' AND value_double <= 1 THEN ROUND(value_double * 100, 1) END) as cpu_pct,
+            MAX(CASE WHEN metric_name = 'system.memory.utilization' AND attributes_flat LIKE '%state=used%' AND value_double <= 1 THEN ROUND(value_double * 100, 1) END) as memory_pct,
+            MAX(CASE WHEN metric_name = 'system.filesystem.utilization' AND value_double <= 1 THEN ROUND(value_double * 100, 1) END) as disk_pct,
+            MAX(timestamp) as last_seen
+        FROM metrics_otel_analytic
+        WHERE attributes_flat LIKE '%host.name={host_name}%'
+          AND metric_name IN ('system.cpu.utilization', 'system.memory.utilization', 'system.filesystem.utilization')
+          AND timestamp > NOW() - INTERVAL '5' MINUTE
+        """
 
-    # Get OS type from metrics attributes
-    os_query = f"""
-    SELECT DISTINCT
-        CASE
-            WHEN attributes_flat LIKE '%os.type=linux%' THEN 'linux'
-            WHEN attributes_flat LIKE '%os.type=windows%' THEN 'windows'
-            WHEN attributes_flat LIKE '%os.type=darwin%' THEN 'darwin'
-            ELSE 'unknown'
-        END as os_type
-    FROM metrics_otel_analytic
-    WHERE attributes_flat LIKE '%host.name={host_name}%'
-      AND timestamp > NOW() - INTERVAL '5' MINUTE
-    LIMIT 1
-    """
+        result = executor.execute_query(host_metrics_query)
+        if result['success'] and result['rows']:
+            row = result['rows'][0]
+            data['current_metrics'] = {
+                'cpu_pct': row.get('cpu_pct'),
+                'memory_pct': row.get('memory_pct'),
+                'disk_pct': row.get('disk_pct')
+            }
+            data['host_info'] = {
+                'last_seen': row.get('last_seen')
+            }
 
-    result = executor.execute_query(os_query)
-    if result['success'] and result['rows']:
-        if data['host_info'] is None:
-            data['host_info'] = {}
-        data['host_info']['os_type'] = result['rows'][0].get('os_type', 'unknown')
+        # Get OS type from metrics attributes
+        os_query = f"""
+        SELECT DISTINCT
+            CASE
+                WHEN attributes_flat LIKE '%os.type=linux%' THEN 'linux'
+                WHEN attributes_flat LIKE '%os.type=windows%' THEN 'windows'
+                WHEN attributes_flat LIKE '%os.type=darwin%' THEN 'darwin'
+                ELSE 'unknown'
+            END as os_type
+        FROM metrics_otel_analytic
+        WHERE attributes_flat LIKE '%host.name={host_name}%'
+          AND timestamp > NOW() - INTERVAL '5' MINUTE
+        LIMIT 1
+        """
+
+        result = executor.execute_query(os_query)
+        if result['success'] and result['rows']:
+            if data['host_info'] is None:
+                data['host_info'] = {}
+            data['host_info']['os_type'] = result['rows'][0].get('os_type', 'unknown')
 
     return jsonify(data)
 

@@ -10,6 +10,11 @@ DROP TABLE IF EXISTS vast."csnow-db|otel".service_baselines;
 DROP TABLE IF EXISTS vast."csnow-db|otel".anomaly_scores;
 DROP TABLE IF EXISTS vast."csnow-db|otel".alerts;
 DROP TABLE IF EXISTS vast."csnow-db|otel".alert_investigations;
+DROP TABLE IF EXISTS vast."csnow-db|otel".topology_services;
+DROP TABLE IF EXISTS vast."csnow-db|otel".topology_dependencies;
+DROP TABLE IF EXISTS vast."csnow-db|otel".topology_host_services;
+DROP TABLE IF EXISTS vast."csnow-db|otel".topology_hosts;
+DROP TABLE IF EXISTS vast."csnow-db|otel".topology_database_hosts;
 
 -- vast."csnow-db|otel".logs_otel_analytic definition
 
@@ -156,5 +161,61 @@ CREATE TABLE vast."csnow-db|otel".alert_investigations (
    supporting_evidence varchar,     -- JSON with relevant traces/errors found
    queries_executed integer,
    tokens_used integer
+);
+
+-- =============================================================================
+-- Topology Inference Tables
+-- =============================================================================
+
+-- Active services registry (materialized from traces)
+CREATE TABLE vast."csnow-db|otel".topology_services (
+   service_name varchar,
+   service_type varchar,             -- 'application', 'database', 'infrastructure'
+   span_count bigint,
+   error_pct double,
+   avg_latency_ms double,
+   last_seen timestamp(9),
+   updated_at timestamp(9)
+);
+
+-- Service-to-service and service-to-database dependencies
+CREATE TABLE vast."csnow-db|otel".topology_dependencies (
+   source_service varchar,
+   target_service varchar,
+   dependency_type varchar,          -- 'service', 'database'
+   call_count bigint,
+   avg_latency_ms double,
+   error_pct double,
+   last_seen timestamp(9),
+   updated_at timestamp(9)
+);
+
+-- Host-to-service mappings
+CREATE TABLE vast."csnow-db|otel".topology_host_services (
+   host_name varchar,
+   service_name varchar,
+   source varchar,                   -- 'traces', 'metrics'
+   data_point_count bigint,
+   last_seen timestamp(9),
+   updated_at timestamp(9)
+);
+
+-- Host registry with system metrics
+CREATE TABLE vast."csnow-db|otel".topology_hosts (
+   host_name varchar,
+   os_type varchar,
+   cpu_pct double,
+   memory_pct double,
+   disk_pct double,
+   last_seen timestamp(9),
+   updated_at timestamp(9)
+);
+
+-- Database-to-host mappings (from metric attributes)
+CREATE TABLE vast."csnow-db|otel".topology_database_hosts (
+   db_system varchar,
+   host_name varchar,
+   last_seen timestamp(9),
+   updated_at timestamp(9)
 );
 
