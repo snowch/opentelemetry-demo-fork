@@ -11,6 +11,7 @@
 
 docker-compose.override.yml
 .env.override
+vast/.env-local
 
 # Eclipse
 .classpath
