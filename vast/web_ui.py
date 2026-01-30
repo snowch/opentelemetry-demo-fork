@@ -1148,7 +1148,7 @@ def database_dependencies(db_system):
     else:
         interval = "'15' MINUTE"
 
-    # Find services that call this database
+    # Find services that call this database (upstream - what depends on this DB)
     dependents_query = f"""
     SELECT DISTINCT
         service_name as dependent,
@@ -1164,13 +1164,152 @@ def database_dependencies(db_system):
     LIMIT 20
     """
 
-    data = {'dependents': []}
+    # Find other databases/services that this DB's callers also depend on (downstream peers)
+    downstream_query = f"""
+    SELECT DISTINCT
+        COALESCE(child.db_system, child.service_name) as dependency,
+        CASE WHEN child.db_system IS NOT NULL THEN 'database' ELSE 'service' END as dep_type,
+        COUNT(*) as call_count
+    FROM traces_otel_analytic parent
+    JOIN traces_otel_analytic child ON parent.span_id = child.parent_span_id
+        AND parent.trace_id = child.trace_id
+    WHERE parent.db_system = '{db_system}'
+      AND child.db_system IS NULL
+      AND child.service_name IS NOT NULL
+      AND parent.start_time > NOW() - INTERVAL {interval}
+    GROUP BY COALESCE(child.db_system, child.service_name),
+             CASE WHEN child.db_system IS NOT NULL THEN 'database' ELSE 'service' END
+    ORDER BY call_count DESC
+    LIMIT 20
+    """
+
+    data = {'upstream': [], 'downstream': []}
 
     result = executor.execute_query(dependents_query)
     if result['success']:
-        data['dependents'] = result['rows']
+        data['upstream'] = result['rows']
+
+    result = executor.execute_query(downstream_query)
+    if result['success']:
+        data['downstream'] = result['rows']
 
     return jsonify(data)
+
+
+@app.route('/api/database/<db_system>/traces', methods=['GET'])
+def database_traces(db_system):
+    """Get recent traces for a specific database."""
+    executor = get_query_executor()
+    limit = min(int(request.args.get('limit', '20')), 100)
+    time_param = request.args.get('time', '5m')
+
+    time_value = int(time_param[:-1])
+    time_unit = time_param[-1]
+    if time_unit == 's':
+        interval = f"'{time_value}' SECOND"
+    elif time_unit == 'm':
+        interval = f"'{time_value}' MINUTE"
+    elif time_unit == 'h':
+        interval = f"'{time_value}' HOUR"
+    else:
+        interval = "'5' MINUTE"
+
+    traces_query = f"""
+    SELECT trace_id, span_id, service_name, span_name, span_kind, status_code,
+           ROUND(duration_ns / 1000000.0, 2) as duration_ms,
+           start_time
+    FROM traces_otel_analytic
+    WHERE db_system = '{db_system}'
+      AND start_time > NOW() - INTERVAL {interval}
+    ORDER BY start_time DESC
+    LIMIT {limit}
+    """
+    result = executor.execute_query(traces_query)
+
+    if result['success']:
+        return jsonify({'traces': result['rows']})
+    else:
+        return jsonify({'traces': [], 'error': result.get('error')})
+
+
+@app.route('/api/database/<db_system>/logs', methods=['GET'])
+def database_logs(db_system):
+    """Get recent logs from services that use this database."""
+    executor = get_query_executor()
+    limit = min(int(request.args.get('limit', '20')), 100)
+    time_param = request.args.get('time', '5m')
+
+    time_value = int(time_param[:-1])
+    time_unit = time_param[-1]
+    if time_unit == 's':
+        interval = f"'{time_value}' SECOND"
+    elif time_unit == 'm':
+        interval = f"'{time_value}' MINUTE"
+    elif time_unit == 'h':
+        interval = f"'{time_value}' HOUR"
+    else:
+        interval = "'5' MINUTE"
+
+    # Get logs from services that have DB spans for this db_system
+    logs_query = f"""
+    SELECT l.timestamp, l.service_name, l.severity_text, l.body, l.trace_id, l.span_id
+    FROM logs_otel_analytic l
+    WHERE l.service_name IN (
+        SELECT DISTINCT service_name
+        FROM traces_otel_analytic
+        WHERE db_system = '{db_system}'
+          AND start_time > NOW() - INTERVAL {interval}
+    )
+      AND l.timestamp > NOW() - INTERVAL {interval}
+    ORDER BY l.timestamp DESC
+    LIMIT {limit}
+    """
+    result = executor.execute_query(logs_query)
+
+    if result['success']:
+        return jsonify({'logs': result['rows']})
+    else:
+        return jsonify({'logs': [], 'error': result.get('error')})
+
+
+@app.route('/api/database/<db_system>/metrics', methods=['GET'])
+def database_metrics(db_system):
+    """Get database-specific metrics (e.g. postgresql.*)."""
+    executor = get_query_executor()
+    limit = min(int(request.args.get('limit', '20')), 100)
+    time_param = request.args.get('time', '5m')
+
+    time_value = int(time_param[:-1])
+    time_unit = time_param[-1]
+    if time_unit == 's':
+        interval = f"'{time_value}' SECOND"
+    elif time_unit == 'm':
+        interval = f"'{time_value}' MINUTE"
+    elif time_unit == 'h':
+        interval = f"'{time_value}' HOUR"
+    else:
+        interval = "'5' MINUTE"
+
+    metrics_query = f"""
+    SELECT metric_name,
+           COUNT(*) as data_points,
+           ROUND(AVG(value_double), 4) as avg_value,
+           ROUND(MIN(value_double), 4) as min_value,
+           ROUND(MAX(value_double), 4) as max_value,
+           MAX(timestamp) as last_seen
+    FROM metrics_otel_analytic
+    WHERE metric_name LIKE '{db_system}.%'
+      AND timestamp > NOW() - INTERVAL {interval}
+    GROUP BY metric_name
+    ORDER BY data_points DESC
+    LIMIT {limit}
+    """
+    result = executor.execute_query(metrics_query)
+
+    if result['success']:
+        return jsonify({'metrics': result['rows']})
+    else:
+        return jsonify({'metrics': [], 'error': result.get('error')})
 
 
 @app.route('/api/host/<host_name>/services', methods=['GET'])
@@ -1258,6 +1397,123 @@ def host_services(host_name):
         data['host_info']['os_type'] = result['rows'][0].get('os_type', 'unknown')
 
     return jsonify(data)
+
+
+@app.route('/api/host/<host_name>/traces', methods=['GET'])
+def host_traces(host_name):
+    """Get recent traces from services running on this host."""
+    executor = get_query_executor()
+    limit = min(int(request.args.get('limit', '20')), 100)
+    time_param = request.args.get('time', '5m')
+
+    time_value = int(time_param[:-1])
+    time_unit = time_param[-1]
+    if time_unit == 's':
+        interval = f"'{time_value}' SECOND"
+    elif time_unit == 'm':
+        interval = f"'{time_value}' MINUTE"
+    elif time_unit == 'h':
+        interval = f"'{time_value}' HOUR"
+    else:
+        interval = "'5' MINUTE"
+
+    traces_query = f"""
+    SELECT trace_id, span_id, service_name, span_name, span_kind, status_code,
+           ROUND(duration_ns / 1000000.0, 2) as duration_ms,
+           start_time
+    FROM spans_otel_analytic
+    WHERE attributes_flat LIKE '%host.name={host_name}%'
+      AND timestamp > NOW() - INTERVAL {interval}
+    ORDER BY timestamp DESC
+    LIMIT {limit}
+    """
+    result = executor.execute_query(traces_query)
+
+    if result['success']:
+        return jsonify({'traces': result['rows']})
+    else:
+        return jsonify({'traces': [], 'error': result.get('error')})
+
+
+@app.route('/api/host/<host_name>/logs', methods=['GET'])
+def host_logs(host_name):
+    """Get recent logs from services running on this host."""
+    executor = get_query_executor()
+    limit = min(int(request.args.get('limit', '20')), 100)
+    time_param = request.args.get('time', '5m')
+
+    time_value = int(time_param[:-1])
+    time_unit = time_param[-1]
+    if time_unit == 's':
+        interval = f"'{time_value}' SECOND"
+    elif time_unit == 'm':
+        interval = f"'{time_value}' MINUTE"
+    elif time_unit == 'h':
+        interval = f"'{time_value}' HOUR"
+    else:
+        interval = "'5' MINUTE"
+
+    # Get logs from services known to run on this host
+    logs_query = f"""
+    SELECT l.timestamp, l.service_name, l.severity_text, l.body, l.trace_id, l.span_id
+    FROM logs_otel_analytic l
+    WHERE l.service_name IN (
+        SELECT DISTINCT service_name
+        FROM spans_otel_analytic
+        WHERE attributes_flat LIKE '%host.name={host_name}%'
+          AND timestamp > NOW() - INTERVAL {interval}
+          AND service_name IS NOT NULL AND service_name != ''
+    )
+      AND l.timestamp > NOW() - INTERVAL {interval}
+    ORDER BY l.timestamp DESC
+    LIMIT {limit}
+    """
+    result = executor.execute_query(logs_query)
+
+    if result['success']:
+        return jsonify({'logs': result['rows']})
+    else:
+        return jsonify({'logs': [], 'error': result.get('error')})
+
+
+@app.route('/api/host/<host_name>/metrics', methods=['GET'])
+def host_metrics_detail(host_name):
+    """Get detailed metrics for a specific host."""
+    executor = get_query_executor()
+    limit = min(int(request.args.get('limit', '20')), 100)
+    time_param = request.args.get('time', '5m')
+
+    time_value = int(time_param[:-1])
+    time_unit = time_param[-1]
+    if time_unit == 's':
+        interval = f"'{time_value}' SECOND"
+    elif time_unit == 'm':
+        interval = f"'{time_value}' MINUTE"
+    elif time_unit == 'h':
+        interval = f"'{time_value}' HOUR"
+    else:
+        interval = "'5' MINUTE"
+
+    metrics_query = f"""
+    SELECT metric_name,
+           COUNT(*) as data_points,
+           ROUND(AVG(value_double), 4) as avg_value,
+           ROUND(MIN(value_double), 4) as min_value,
+           ROUND(MAX(value_double), 4) as max_value,
+           MAX(timestamp) as last_seen
+    FROM metrics_otel_analytic
+    WHERE attributes_flat LIKE '%host.name={host_name}%'
+      AND timestamp > NOW() - INTERVAL {interval}
+    GROUP BY metric_name
+    ORDER BY data_points DESC
+    LIMIT {limit}
+    """
+    result = executor.execute_query(metrics_query)
+
+    if result['success']:
+        return jsonify({'metrics': result['rows']})
+    else:
+        return jsonify({'metrics': [], 'error': result.get('error')})
 
 
 # =============================================================================
