@@ -75,6 +75,9 @@ class Config:
     hosts_lookback_minutes: int = field(
         default_factory=lambda: int(os.getenv("TOPOLOGY_HOSTS_LOOKBACK_MINUTES", "5"))
     )
+    warmup_minutes: int = field(
+        default_factory=lambda: int(os.getenv("WARMUP_MINUTES", "5"))
+    )
 
     def validate(self):
         """Validate required configuration."""
@@ -183,12 +186,28 @@ class TopologyInferenceService:
     # Materialization Steps
     # -------------------------------------------------------------------------
 
+    def _warmup_cutoff(self):
+        """Return SQL clause that excludes the first N minutes of trace data.
+
+        Filters out transient startup errors (e.g. Kafka topic not yet
+        available) that occur before all services are fully initialized.
+        """
+        warmup = self.config.warmup_minutes
+        rows = self.executor.execute("SELECT MIN(start_time) as earliest FROM traces_otel_analytic")
+        earliest = rows[0]['earliest'] if rows and rows[0]['earliest'] else None
+        if earliest:
+            return f"start_time > TIMESTAMP '{earliest}' + INTERVAL '{warmup}' MINUTE"
+        return None
+
     def _materialize_services(self):
         """Materialize active services from traces."""
         lookback = self.config.services_lookback_hours
         print(f"[Topology] Materializing services (lookback: {lookback}h)...")
 
         self.executor.execute_write("DELETE FROM topology_services WHERE 1=1")
+
+        warmup = self._warmup_cutoff()
+        warmup_clause = f"AND {warmup}" if warmup else ""
 
         sql = f"""
         INSERT INTO topology_services
@@ -203,6 +222,7 @@ class TopologyInferenceService:
         FROM traces_otel_analytic
         WHERE start_time > NOW() - INTERVAL '{lookback}' HOUR
           AND service_name IS NOT NULL AND service_name != ''
+          {warmup_clause}
         GROUP BY service_name
         """
         if self.executor.execute_write(sql):
@@ -218,6 +238,9 @@ class TopologyInferenceService:
         print(f"[Topology] Materializing dependencies (lookback: {lookback}m)...")
 
         self.executor.execute_write("DELETE FROM topology_dependencies WHERE 1=1")
+
+        warmup = self._warmup_cutoff()
+        warmup_clause = f"AND {warmup}" if warmup else ""
 
         # Service-to-service dependencies via parent/child span join
         svc_sql = f"""
@@ -238,6 +261,7 @@ class TopologyInferenceService:
         WHERE parent.start_time > NOW() - INTERVAL '{lookback}' MINUTE
           AND child.service_name != parent.service_name
           AND child.db_system IS NULL
+          {warmup_clause}
         GROUP BY parent.service_name, child.service_name
         """
         self.executor.execute_write(svc_sql)
@@ -257,6 +281,7 @@ class TopologyInferenceService:
         FROM traces_otel_analytic
         WHERE start_time > NOW() - INTERVAL '{lookback}' MINUTE
           AND db_system IS NOT NULL AND db_system != ''
+          {warmup_clause}
         GROUP BY service_name, db_system
         """
         self.executor.execute_write(db_sql)

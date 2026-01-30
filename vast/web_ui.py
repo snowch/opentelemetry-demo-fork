@@ -673,17 +673,21 @@ def system_status():
         'timestamp': datetime.utcnow().isoformat()
     }
 
-    # Get service health - try topology table first, fall back to inline query
-    topology_svc_result = executor.execute_query("""
-    SELECT service_name,
-           span_count as total_spans,
-           CAST(ROUND(error_pct / 100.0 * span_count, 0) AS BIGINT) as errors,
-           error_pct,
-           avg_latency_ms
-    FROM topology_services
-    ORDER BY span_count DESC
-    """)
-    if topology_svc_result['success'] and topology_svc_result['rows']:
+    # Get service health - use pre-computed topology table only for the
+    # default 1h window (topology_services uses a 1h lookback).
+    # For shorter windows, query raw traces so the dropdown actually works.
+    topology_svc_result = None
+    if time_param == '1h':
+        topology_svc_result = executor.execute_query("""
+        SELECT service_name,
+               span_count as total_spans,
+               CAST(ROUND(error_pct / 100.0 * span_count, 0) AS BIGINT) as errors,
+               error_pct,
+               avg_latency_ms
+        FROM topology_services
+        ORDER BY span_count DESC
+        """)
+    if topology_svc_result and topology_svc_result['success'] and topology_svc_result['rows']:
         status['services'] = topology_svc_result['rows']
     else:
         # Fallback: discover from 1 hour, calculate stats for selected window

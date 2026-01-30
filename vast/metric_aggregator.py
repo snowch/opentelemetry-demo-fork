@@ -69,6 +69,9 @@ class Config:
     warmup_minutes: int = field(
         default_factory=lambda: int(os.getenv("WARMUP_MINUTES", "5"))
     )
+    overlap_minutes: int = field(
+        default_factory=lambda: int(os.getenv("OVERLAP_MINUTES", "10"))
+    )
 
     def validate(self):
         """Validate required configuration."""
@@ -174,6 +177,7 @@ class MetricAggregatorService:
     # Aggregation Steps
     # -------------------------------------------------------------------------
 
+
     def _warmup_cutoff(self):
         """Return SQL clause that excludes the first N minutes of trace data.
 
@@ -188,10 +192,20 @@ class MetricAggregatorService:
         return None
 
     def _aggregate_service_metrics_1m(self):
-        """Insert new 1-minute service metric buckets since last aggregation."""
-        print("[Aggregator] Aggregating service metrics (1m buckets)...")
+        """Recompute recent 1-minute service metric buckets.
 
-        # Find latest bucket already computed
+        Deletes and reinserts the most recent overlap window to capture
+        late-arriving spans, then inserts any older buckets not yet computed.
+        """
+        overlap = self.config.overlap_minutes
+        print(f"[Aggregator] Aggregating service metrics (1m buckets, {overlap}m overlap)...")
+
+        # Delete recent buckets so we can recompute with any late-arriving spans
+        self.executor.execute_write(
+            f"DELETE FROM service_metrics_1m WHERE time_bucket >= NOW() - INTERVAL '{overlap}' MINUTE"
+        )
+
+        # Find latest remaining bucket after the delete
         rows = self.executor.execute("SELECT MAX(time_bucket) as last_bucket FROM service_metrics_1m")
         last_bucket = rows[0]['last_bucket'] if rows and rows[0]['last_bucket'] else None
 
@@ -230,8 +244,13 @@ class MetricAggregatorService:
             print("[Aggregator]   -> FAILED to aggregate service metrics")
 
     def _aggregate_db_metrics_1m(self):
-        """Insert new 1-minute database metric buckets since last aggregation."""
-        print("[Aggregator] Aggregating database metrics (1m buckets)...")
+        """Recompute recent 1-minute database metric buckets."""
+        overlap = self.config.overlap_minutes
+        print(f"[Aggregator] Aggregating database metrics (1m buckets, {overlap}m overlap)...")
+
+        self.executor.execute_write(
+            f"DELETE FROM db_metrics_1m WHERE time_bucket >= NOW() - INTERVAL '{overlap}' MINUTE"
+        )
 
         rows = self.executor.execute("SELECT MAX(time_bucket) as last_bucket FROM db_metrics_1m")
         last_bucket = rows[0]['last_bucket'] if rows and rows[0]['last_bucket'] else None
@@ -270,8 +289,13 @@ class MetricAggregatorService:
             print("[Aggregator]   -> FAILED to aggregate database metrics")
 
     def _aggregate_operations_5m(self):
-        """Insert new 5-minute per-service, per-operation rollups."""
-        print("[Aggregator] Aggregating operation metrics (5m buckets)...")
+        """Recompute recent 5-minute per-service, per-operation rollups."""
+        overlap = self.config.overlap_minutes
+        print(f"[Aggregator] Aggregating operation metrics (5m buckets, {overlap}m overlap)...")
+
+        self.executor.execute_write(
+            f"DELETE FROM operation_metrics_5m WHERE time_bucket >= NOW() - INTERVAL '{overlap}' MINUTE"
+        )
 
         rows = self.executor.execute("SELECT MAX(time_bucket) as last_bucket FROM operation_metrics_5m")
         last_bucket = rows[0]['last_bucket'] if rows and rows[0]['last_bucket'] else None
@@ -338,6 +362,7 @@ class MetricAggregatorService:
         print(f"  Aggregation interval: {self.config.aggregation_interval}s")
         print(f"  Retention: {self.config.retention_hours}h")
         print(f"  Warmup skip: {self.config.warmup_minutes}m")
+        print(f"  Overlap recompute: {self.config.overlap_minutes}m")
         print()
 
         print(f"[Service] Starting aggregation loop (interval: {self.config.aggregation_interval}s)...\n")
