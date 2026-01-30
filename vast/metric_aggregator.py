@@ -66,6 +66,9 @@ class Config:
     retention_hours: int = field(
         default_factory=lambda: int(os.getenv("RETENTION_HOURS", "48"))
     )
+    warmup_minutes: int = field(
+        default_factory=lambda: int(os.getenv("WARMUP_MINUTES", "5"))
+    )
 
     def validate(self):
         """Validate required configuration."""
@@ -171,6 +174,19 @@ class MetricAggregatorService:
     # Aggregation Steps
     # -------------------------------------------------------------------------
 
+    def _warmup_cutoff(self):
+        """Return SQL clause that excludes the first N minutes of trace data.
+
+        This filters out transient startup errors (e.g. Kafka topic not yet
+        available) that occur before all services are fully initialized.
+        """
+        warmup = self.config.warmup_minutes
+        rows = self.executor.execute("SELECT MIN(start_time) as earliest FROM traces_otel_analytic")
+        earliest = rows[0]['earliest'] if rows and rows[0]['earliest'] else None
+        if earliest:
+            return f"start_time > TIMESTAMP '{earliest}' + INTERVAL '{warmup}' MINUTE"
+        return None
+
     def _aggregate_service_metrics_1m(self):
         """Insert new 1-minute service metric buckets since last aggregation."""
         print("[Aggregator] Aggregating service metrics (1m buckets)...")
@@ -183,6 +199,9 @@ class MetricAggregatorService:
             since_clause = f"start_time > TIMESTAMP '{last_bucket}'"
         else:
             since_clause = f"start_time > NOW() - INTERVAL '{self.config.retention_hours}' HOUR"
+
+        warmup = self._warmup_cutoff()
+        warmup_clause = f"AND {warmup}" if warmup else ""
 
         sql = f"""
         INSERT INTO service_metrics_1m
@@ -198,6 +217,7 @@ class MetricAggregatorService:
         FROM traces_otel_analytic
         WHERE {since_clause}
           AND service_name IS NOT NULL AND service_name != ''
+          {warmup_clause}
         GROUP BY date_trunc('minute', start_time), service_name
         """
         if self.executor.execute_write(sql):
@@ -221,6 +241,9 @@ class MetricAggregatorService:
         else:
             since_clause = f"start_time > NOW() - INTERVAL '{self.config.retention_hours}' HOUR"
 
+        warmup = self._warmup_cutoff()
+        warmup_clause = f"AND {warmup}" if warmup else ""
+
         sql = f"""
         INSERT INTO db_metrics_1m
         SELECT
@@ -234,6 +257,7 @@ class MetricAggregatorService:
         FROM traces_otel_analytic
         WHERE {since_clause}
           AND db_system IS NOT NULL AND db_system != ''
+          {warmup_clause}
         GROUP BY date_trunc('minute', start_time), db_system
         """
         if self.executor.execute_write(sql):
@@ -257,6 +281,9 @@ class MetricAggregatorService:
         else:
             since_clause = f"start_time > NOW() - INTERVAL '{self.config.retention_hours}' HOUR"
 
+        warmup = self._warmup_cutoff()
+        warmup_clause = f"AND {warmup}" if warmup else ""
+
         sql = f"""
         INSERT INTO operation_metrics_5m
         SELECT
@@ -271,6 +298,7 @@ class MetricAggregatorService:
         WHERE {since_clause}
           AND service_name IS NOT NULL AND service_name != ''
           AND span_name IS NOT NULL AND span_name != ''
+          {warmup_clause}
         GROUP BY
             date_trunc('hour', start_time) + INTERVAL '5' MINUTE * FLOOR(EXTRACT(MINUTE FROM start_time) / 5),
             service_name,
@@ -309,6 +337,7 @@ class MetricAggregatorService:
         print(f"\nConfiguration:")
         print(f"  Aggregation interval: {self.config.aggregation_interval}s")
         print(f"  Retention: {self.config.retention_hours}h")
+        print(f"  Warmup skip: {self.config.warmup_minutes}m")
         print()
 
         print(f"[Service] Starting aggregation loop (interval: {self.config.aggregation_interval}s)...\n")

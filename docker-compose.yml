@@ -44,6 +44,8 @@ services:
         condition: service_started
       kafka:
         condition: service_healthy
+      postgresql:
+        condition: service_healthy
     logging: *logging
 
   # AdService
@@ -917,6 +919,11 @@ services:
       - POSTGRES_DB
     volumes:
       - ./src/postgresql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: pg_isready -U root -d ${POSTGRES_DB}
+      interval: 5s
+      timeout: 5s
+      retries: 5
     logging: *logging
 
   # Valkey used by Cart service
