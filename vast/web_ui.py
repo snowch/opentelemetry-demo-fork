@@ -3326,6 +3326,64 @@ def get_alert_history():
     return jsonify(data)
 
 
+@app.route('/api/errors/history', methods=['GET'])
+def get_error_history():
+    """Get historical error traces for the sidebar history tab."""
+    executor = get_query_executor()
+    if not executor:
+        return jsonify({"errors": [], "summary": {}})
+
+    hours = min(int(request.args.get('hours', 24)), 168)
+    service = request.args.get('service', '').strip()
+    limit = min(int(request.args.get('limit', 50)), 100)
+
+    conditions = [
+        "status_code = 'ERROR'",
+        f"start_time > NOW() - INTERVAL '{hours}' HOUR",
+    ]
+    if service:
+        conditions.append(f"service_name = '{service}'")
+    where = " AND ".join(conditions)
+
+    errors_query = f"""
+    SELECT trace_id, span_id, service_name, span_name,
+           duration_ns / 1000000.0 as duration_ms,
+           start_time
+    FROM traces_otel_analytic
+    WHERE {where}
+    ORDER BY start_time DESC
+    LIMIT {limit}
+    """
+    errors = []
+    result = executor.execute_query(errors_query)
+    if result.get('success'):
+        errors = result['rows']
+
+    # Summary: count by service
+    summary_query = f"""
+    SELECT service_name,
+           COUNT(*) as error_count
+    FROM traces_otel_analytic
+    WHERE {where}
+    GROUP BY service_name
+    ORDER BY error_count DESC
+    LIMIT 20
+    """
+    by_service = []
+    result = executor.execute_query(summary_query)
+    if result.get('success'):
+        by_service = result['rows']
+
+    total = sum(s.get('error_count', 0) for s in by_service)
+
+    return jsonify({
+        "errors": errors,
+        "by_service": by_service,
+        "total": total,
+        "hours": hours,
+    })
+
+
 @app.route('/api/baselines', methods=['GET'])
 def get_baselines():
     """Get current baselines for monitoring."""

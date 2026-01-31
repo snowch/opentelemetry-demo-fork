@@ -456,6 +456,93 @@
         .alert-type-badge.badge-resolved { background: rgba(34, 197, 94, 0.2); color: var(--accent-success); }
         .alert-type-badge.badge-activity { background: rgba(107, 114, 128, 0.2); color: #9ca3af; }
 
+        /* Sidebar section tabs (Active / History) */
+        .sidebar-tabs {
+            display: flex;
+            gap: 2px;
+            margin-bottom: 8px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            padding: 2px;
+        }
+        .sidebar-tab {
+            flex: 1;
+            padding: 5px 0;
+            text-align: center;
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-muted);
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s;
+            border: none;
+            background: none;
+        }
+        .sidebar-tab:hover {
+            color: var(--text-secondary);
+        }
+        .sidebar-tab.active {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-weight: 600;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+        .sidebar-tab .tab-count {
+            font-size: 10px;
+            font-weight: 600;
+            margin-left: 4px;
+            opacity: 0.7;
+        }
+        .history-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .history-list .history-item {
+            padding: 8px 12px;
+            margin-bottom: 4px;
+            border-radius: 6px;
+            border-left: 3px solid var(--border-color);
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .history-list .history-item:hover {
+            transform: translateX(2px);
+            background: rgba(255,255,255,0.03);
+        }
+        .history-item .history-time {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+        .history-item .history-title {
+            color: var(--text-primary);
+            font-weight: 500;
+            margin-top: 2px;
+        }
+        .history-item .history-detail {
+            color: var(--text-secondary);
+            font-size: 10px;
+            margin-top: 1px;
+        }
+        .history-item.severity-critical { border-left-color: var(--accent-error); }
+        .history-item.severity-warning { border-left-color: var(--accent-warning); }
+        .history-item.severity-info { border-left-color: var(--accent-primary); }
+        .history-item.error-item-history { border-left-color: var(--accent-error); }
+        .history-filter-row {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 8px;
+        }
+        .history-filter-row select {
+            flex: 1;
+            padding: 4px 6px;
+            font-size: 11px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
         /* Background jobs styles */
         .job-item {
             display: flex;
@@ -3068,12 +3155,35 @@
 
         <div class="sidebar-section">
             <div class="section-header">
-                <span class="section-title">Recent Errors</span>
+                <span class="section-title">Errors</span>
             </div>
-            <div id="error-summary" class="error-summary-card">
-                <div class="empty-state">Loading...</div>
+            <div class="sidebar-tabs">
+                <button class="sidebar-tab active" id="errors-tab-active" onclick="switchErrorsTab('active')">Active</button>
+                <button class="sidebar-tab" id="errors-tab-history" onclick="switchErrorsTab('history')">History</button>
             </div>
-            <div id="errors-list" class="errors-list-collapsed"></div>
+            <div id="errors-active-panel">
+                <div id="error-summary" class="error-summary-card">
+                    <div class="empty-state">Loading...</div>
+                </div>
+                <div id="errors-list" class="errors-list-collapsed"></div>
+            </div>
+            <div id="errors-history-panel" style="display:none;">
+                <div class="history-filter-row">
+                    <select id="errors-history-hours" onchange="loadErrorsHistory()">
+                        <option value="1">1h</option>
+                        <option value="6">6h</option>
+                        <option value="24" selected>24h</option>
+                        <option value="72">3d</option>
+                        <option value="168">7d</option>
+                    </select>
+                    <select id="errors-history-service" onchange="loadErrorsHistory()">
+                        <option value="">All services</option>
+                    </select>
+                </div>
+                <div id="errors-history-list" class="history-list">
+                    <div class="empty-state">Select a time range</div>
+                </div>
+            </div>
         </div>
 
         <div class="sidebar-section">
@@ -3081,8 +3191,28 @@
                 <span class="section-title">Alerts</span>
                 <span id="alerts-badge" class="alerts-badge" style="display: none;">0</span>
             </div>
-            <div id="combined-alerts-list" class="combined-alerts-list" style="max-height: 400px; overflow-y: auto;">
-                <div class="empty-state">No alerts</div>
+            <div class="sidebar-tabs">
+                <button class="sidebar-tab active" id="alerts-tab-active" onclick="switchAlertsTab('active')">Active</button>
+                <button class="sidebar-tab" id="alerts-tab-history" onclick="switchAlertsTab('history')">History</button>
+            </div>
+            <div id="alerts-active-panel">
+                <div id="combined-alerts-list" class="combined-alerts-list" style="max-height: 400px; overflow-y: auto;">
+                    <div class="empty-state">No alerts</div>
+                </div>
+            </div>
+            <div id="alerts-history-panel" style="display:none;">
+                <div class="history-filter-row">
+                    <select id="alerts-history-hours" onchange="loadAlertsHistory()">
+                        <option value="1">1h</option>
+                        <option value="6">6h</option>
+                        <option value="24" selected>24h</option>
+                        <option value="72">3d</option>
+                        <option value="168">7d</option>
+                    </select>
+                </div>
+                <div id="alerts-history-list" class="history-list">
+                    <div class="empty-state">Select a time range</div>
+                </div>
             </div>
         </div>
 
@@ -4504,6 +4634,146 @@
             } catch (error) {
                 console.error('Failed to refresh alerts:', error);
                 document.getElementById('combined-alerts-list').innerHTML = '<div class="empty-state">Alerts unavailable</div>';
+            }
+        }
+
+        // =================================================================
+        // Sidebar Tab Switching & History Loading
+        // =================================================================
+        function switchErrorsTab(tab) {
+            document.getElementById('errors-tab-active').classList.toggle('active', tab === 'active');
+            document.getElementById('errors-tab-history').classList.toggle('active', tab === 'history');
+            document.getElementById('errors-active-panel').style.display = tab === 'active' ? '' : 'none';
+            document.getElementById('errors-history-panel').style.display = tab === 'history' ? '' : 'none';
+            if (tab === 'history') {
+                populateErrorsServiceFilter();
+                loadErrorsHistory();
+            }
+        }
+
+        function switchAlertsTab(tab) {
+            document.getElementById('alerts-tab-active').classList.toggle('active', tab === 'active');
+            document.getElementById('alerts-tab-history').classList.toggle('active', tab === 'history');
+            document.getElementById('alerts-active-panel').style.display = tab === 'active' ? '' : 'none';
+            document.getElementById('alerts-history-panel').style.display = tab === 'history' ? '' : 'none';
+            if (tab === 'history') loadAlertsHistory();
+        }
+
+        function populateErrorsServiceFilter() {
+            const select = document.getElementById('errors-history-service');
+            // Keep existing options if already populated
+            if (select.options.length > 1) return;
+            // Pull service names from the sidebar entity list
+            const serviceItems = document.querySelectorAll('#services-list .entity-item');
+            serviceItems.forEach(item => {
+                const name = item.getAttribute('data-name') || item.textContent.trim().split('\n')[0].trim();
+                if (name) {
+                    const opt = document.createElement('option');
+                    opt.value = name;
+                    opt.textContent = name;
+                    select.appendChild(opt);
+                }
+            });
+        }
+
+        async function loadErrorsHistory() {
+            const container = document.getElementById('errors-history-list');
+            const hours = document.getElementById('errors-history-hours').value;
+            const service = document.getElementById('errors-history-service').value;
+            container.innerHTML = '<div class="empty-state">Loading...</div>';
+
+            try {
+                let url = `/api/errors/history?hours=${hours}&limit=50`;
+                if (service) url += `&service=${encodeURIComponent(service)}`;
+                const resp = await fetch(url);
+                const data = await resp.json();
+
+                if (!data.errors || data.errors.length === 0) {
+                    container.innerHTML = `<div class="empty-state">No errors in the last ${hours}h</div>`;
+                    // Update tab count
+                    document.getElementById('errors-tab-history').innerHTML = 'History';
+                    return;
+                }
+
+                document.getElementById('errors-tab-history').innerHTML = `History <span class="tab-count">${data.total}</span>`;
+
+                let html = '';
+                // Summary by service
+                if (data.by_service && data.by_service.length > 0) {
+                    html += '<div style="margin-bottom:8px;font-size:10px;color:var(--text-muted);">';
+                    html += data.by_service.map(s =>
+                        `<span style="margin-right:8px;">${escapeHtml(s.service_name)}: <strong style="color:var(--accent-error);">${s.error_count}</strong></span>`
+                    ).join('');
+                    html += '</div>';
+                }
+
+                data.errors.forEach(e => {
+                    const time = e.start_time ? new Date(e.start_time).toLocaleString() : '';
+                    const dur = e.duration_ms ? `${Number(e.duration_ms).toFixed(1)}ms` : '';
+                    html += `
+                        <div class="history-item error-item-history" onclick="openErrorModal('${e.trace_id}', '${e.span_id}')">
+                            <div class="history-time">${time}${dur ? ' · ' + dur : ''}</div>
+                            <div class="history-title">${escapeHtml(e.service_name || '')}</div>
+                            <div class="history-detail">${escapeHtml(e.span_name || '')}</div>
+                        </div>
+                    `;
+                });
+                container.innerHTML = html;
+            } catch (err) {
+                console.error('Failed to load error history:', err);
+                container.innerHTML = '<div class="empty-state">Failed to load history</div>';
+            }
+        }
+
+        async function loadAlertsHistory() {
+            const container = document.getElementById('alerts-history-list');
+            const hours = document.getElementById('alerts-history-hours').value;
+            container.innerHTML = '<div class="empty-state">Loading...</div>';
+
+            try {
+                const resp = await fetch(`/api/alerts?status=all&limit=100`);
+                const data = await resp.json();
+
+                const cutoff = new Date(Date.now() - hours * 3600 * 1000);
+                let alerts = (data.alerts || []).filter(a => {
+                    const t = new Date(a.created_at || 0);
+                    return t >= cutoff;
+                });
+
+                // Sort newest first
+                alerts.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+
+                if (alerts.length === 0) {
+                    container.innerHTML = `<div class="empty-state">No alerts in the last ${hours}h</div>`;
+                    document.getElementById('alerts-tab-history').innerHTML = 'History';
+                    return;
+                }
+
+                const totalCount = alerts.length;
+                document.getElementById('alerts-tab-history').innerHTML = `History <span class="tab-count">${totalCount}</span>`;
+
+                let html = '';
+                alerts.forEach(alert => {
+                    const severity = alert.severity || 'info';
+                    const status = alert.status || 'active';
+                    const timeStr = alert.created_at ? new Date(alert.created_at).toLocaleString() : '';
+                    const statusBadge = status === 'active'
+                        ? `<span class="alert-type-badge severity-${severity}">${severity}</span>`
+                        : `<span class="alert-type-badge badge-resolved">${status}</span>`;
+                    const autoResolved = alert.auto_resolved ? ' · auto' : '';
+
+                    html += `
+                        <div class="history-item severity-${severity}" onclick="investigateAlert('${escapeHtml(alert.alert_id)}')" style="${status !== 'active' ? 'opacity:0.7;' : ''}">
+                            <div class="history-time">${timeStr}${autoResolved}</div>
+                            <div class="history-title">${statusBadge} ${escapeHtml(alert.title || alert.alert_type)}</div>
+                            <div class="history-detail">${escapeHtml(alert.service_name || '')} · ${(alert.alert_type || '').replace(/_/g, ' ')}</div>
+                        </div>
+                    `;
+                });
+                container.innerHTML = html;
+            } catch (err) {
+                console.error('Failed to load alert history:', err);
+                container.innerHTML = '<div class="empty-state">Failed to load history</div>';
             }
         }
 
