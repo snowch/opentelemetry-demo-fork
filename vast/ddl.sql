@@ -25,6 +25,7 @@ DROP TABLE IF EXISTS vast."csnow-db|otel".db_metrics_1m;
 DROP TABLE IF EXISTS vast."csnow-db|otel".operation_metrics_5m;
 DROP TABLE IF EXISTS vast."csnow-db|otel".job_status;
 DROP TABLE IF EXISTS vast."csnow-db|otel".pinned_charts;
+DROP TABLE IF EXISTS vast."csnow-db|otel".threshold_overrides;
 
 -- vast."csnow-db|otel".logs_otel_analytic definition
 
@@ -352,6 +353,17 @@ CREATE TABLE vast."csnow-db|otel".job_status (
     status        varchar,
     details_json  varchar,
     updated_at    timestamp(9)
+);
+
+-- Threshold overrides: manual and learned threshold adjustments
+CREATE TABLE vast."csnow-db|otel".threshold_overrides (
+   service_name    varchar,       -- '*' = global (used by learned adjustments)
+   metric_category varchar,       -- 'error_rate', 'db_error', 'latency', etc.
+   override_type   varchar,       -- 'manual' or 'learned'
+   threshold_value double,        -- manual: absolute z-score; learned: additive delta
+   created_by      varchar,       -- 'system' or 'user'
+   created_at      timestamp(9),
+   updated_at      timestamp(9)
 );
 
 -- Pinned metric charts per entity

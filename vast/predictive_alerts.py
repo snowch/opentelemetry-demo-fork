@@ -230,6 +230,9 @@ class AdaptiveThresholdManager:
         # Learned adjustments (loaded from DB, modified over time)
         self.learned_adjustments: Dict[str, float] = {}
 
+        # Manual overrides: (service_name, category) -> absolute z-score value
+        self.manual_overrides: Dict[Tuple[str, str], float] = {}
+
         # Parse enabled root cause types
         self.enabled_types: set = self._parse_enabled_types(config.root_cause_types)
 
@@ -262,12 +265,21 @@ class AdaptiveThresholdManager:
             return True  # Empty set means all enabled
         return root_cause_type in self.enabled_types
 
-    def get_threshold(self, metric_category: str) -> float:
+    def get_threshold(self, metric_category: str, service_name: str = None) -> float:
         """
         Get the effective threshold for a metric category.
 
+        If a manual override exists for (service_name, category), return it directly.
+        Otherwise fall through to base * multiplier + learned logic.
+
         Categories: db_latency, db_error, dependency_latency, dependency_error, exception_surge, new_exception
         """
+        # Check manual override first
+        if service_name:
+            key = (service_name, metric_category)
+            if key in self.manual_overrides:
+                return max(1.0, self.manual_overrides[key])
+
         # Start with base threshold
         threshold = self.base_threshold
 
@@ -360,6 +372,128 @@ class AdaptiveThresholdManager:
         # Cap adjustments to prevent runaway
         for category in self.learned_adjustments:
             self.learned_adjustments[category] = max(-1.0, min(1.0, self.learned_adjustments[category]))
+
+        # Persist learned adjustments to DB
+        self.save_learned_adjustments(executor)
+
+    def load_overrides_from_db(self, executor):
+        """Load learned adjustments and manual overrides from threshold_overrides table."""
+        sql = """
+            SELECT service_name, metric_category, override_type, threshold_value
+            FROM threshold_overrides
+        """
+        try:
+            results = executor.execute(sql)
+        except Exception as e:
+            print(f"[Adaptive] Could not load overrides from DB: {e}")
+            return
+
+        for row in results:
+            svc = row.get("service_name", "*")
+            cat = row.get("metric_category", "")
+            otype = row.get("override_type", "")
+            val = row.get("threshold_value")
+            if val is None:
+                continue
+            val = float(val)
+            if otype == "learned" and svc == "*":
+                self.learned_adjustments[cat] = val
+            elif otype == "manual":
+                self.manual_overrides[(svc, cat)] = val
+
+        print(f"[Adaptive] Loaded {len(self.learned_adjustments)} learned adjustments, {len(self.manual_overrides)} manual overrides from DB")
+
+    def save_learned_adjustments(self, executor):
+        """Persist current learned adjustments to threshold_overrides table."""
+        try:
+            executor.execute("DELETE FROM threshold_overrides WHERE override_type = 'learned' AND service_name = '*'")
+        except Exception as e:
+            print(f"[Adaptive] Could not clear old learned adjustments: {e}")
+            return
+
+        now_str = "CURRENT_TIMESTAMP"
+        for category, value in self.learned_adjustments.items():
+            sql = f"""
+                INSERT INTO threshold_overrides
+                    (service_name, metric_category, override_type, threshold_value, created_by, created_at, updated_at)
+                VALUES ('*', '{category}', 'learned', {value}, 'system', {now_str}, {now_str})
+            """
+            try:
+                executor.execute(sql)
+            except Exception as e:
+                print(f"[Adaptive] Could not save learned adjustment for {category}: {e}")
+
+    def set_manual_override(self, executor, service_name: str, category: str, value: float):
+        """Set a manual threshold override for a service+category."""
+        try:
+            executor.execute(
+                f"DELETE FROM threshold_overrides WHERE service_name = '{service_name}' "
+                f"AND metric_category = '{category}' AND override_type = 'manual'"
+            )
+        except Exception:
+            pass
+        now_str = "CURRENT_TIMESTAMP"
+        sql = f"""
+            INSERT INTO threshold_overrides
+                (service_name, metric_category, override_type, threshold_value, created_by, created_at, updated_at)
+            VALUES ('{service_name}', '{category}', 'manual', {value}, 'user', {now_str}, {now_str})
+        """
+        executor.execute(sql)
+        self.manual_overrides[(service_name, category)] = value
+
+    def delete_manual_override(self, executor, service_name: str, category: str):
+        """Remove a manual threshold override."""
+        executor.execute(
+            f"DELETE FROM threshold_overrides WHERE service_name = '{service_name}' "
+            f"AND metric_category = '{category}' AND override_type = 'manual'"
+        )
+        self.manual_overrides.pop((service_name, category), None)
+
+    def get_all_effective(self, service_name: str = None) -> Dict[str, Dict]:
+        """Return effective thresholds for all categories with full breakdown."""
+        all_categories = [
+            "error_rate", "latency", "throughput",
+            "db_latency", "db_error",
+            "dependency_latency", "dependency_error",
+            "exception_surge", "new_exception",
+        ]
+        result = {}
+        for cat in all_categories:
+            # Compute base * multiplier
+            base = self.base_threshold
+            mult = 1.0
+            if cat in self.multipliers:
+                mult = self.multipliers[cat]
+            else:
+                for key, m in self.multipliers.items():
+                    if cat.startswith(key) or key in cat:
+                        mult = m
+                        break
+            computed = base * mult
+            learned_adj = self.learned_adjustments.get(cat, 0.0)
+            manual_ov = None
+            if service_name:
+                manual_ov = self.manual_overrides.get((service_name, cat))
+
+            if manual_ov is not None:
+                effective = max(1.0, manual_ov)
+                source = "manual"
+            elif learned_adj != 0.0:
+                effective = max(1.0, computed + learned_adj)
+                source = "learned"
+            else:
+                effective = max(1.0, computed)
+                source = "default"
+
+            result[cat] = {
+                "base": round(base, 2),
+                "multiplier": round(mult, 2),
+                "learned_adjustment": round(learned_adj, 2),
+                "manual_override": round(manual_ov, 2) if manual_ov is not None else None,
+                "effective": round(effective, 2),
+                "source": source,
+            }
+        return result
 
     def _get_metric_category(self, alert_type: str, metric_type: str) -> str:
         """Map alert/metric type to a threshold category."""
@@ -2663,6 +2797,10 @@ class PredictiveAlertsService:
         print("[Service] Computing initial baselines...")
         self.baseline_computer.compute_all_baselines()
         self.last_baseline_update = time.time()
+
+        # Load persisted threshold overrides from DB
+        print("[Service] Loading threshold overrides from DB...")
+        self.anomaly_detector.threshold_manager.load_overrides_from_db(self.executor)
 
         # Learn adaptive thresholds from alert history
         if self.config.adaptive_thresholds_enabled:

@@ -266,6 +266,16 @@ class TrinoQueryExecutor:
         except Exception as e:
             return {"success": False, "error": f"{type(e).__name__}: {str(e)}", "rows": [], "columns": []}
 
+    def execute_write(self, sql: str) -> Dict[str, Any]:
+        """Execute a write SQL statement (INSERT, DELETE, etc.) via Trino."""
+        sql = sql.strip().rstrip(";")
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(sql)
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "error": f"{type(e).__name__}: {str(e)}"}
+
 
 # Global instances
 query_executor = None
@@ -2472,6 +2482,33 @@ def get_alert_thresholds():
             except ValueError:
                 pass
 
+    service_name = request.args.get('service', '').strip()
+
+    # Load overrides from DB
+    learned_map = {}  # category -> delta
+    manual_map = {}   # (service, category) -> value
+    executor = get_query_executor()
+    if executor:
+        try:
+            result = executor.execute_query(
+                "SELECT service_name, metric_category, override_type, threshold_value "
+                "FROM threshold_overrides LIMIT 500"
+            )
+            for row in result.get("rows", []):
+                svc = row.get("service_name", "*")
+                cat = row.get("metric_category", "")
+                otype = row.get("override_type", "")
+                val = row.get("threshold_value")
+                if val is None:
+                    continue
+                val = float(val)
+                if otype == "learned" and svc == "*":
+                    learned_map[cat] = val
+                elif otype == "manual":
+                    manual_map[(svc, cat)] = val
+        except Exception:
+            pass
+
     # Build effective thresholds per category
     categories = {
         "error_rate": {"description": "Service error rate spike", "base": zscore},
@@ -2491,7 +2528,22 @@ def get_alert_thresholds():
                 mult = m
                 break
         info["multiplier"] = mult
-        info["effective"] = round(max(1.0, zscore * mult), 2)
+
+        learned_adj = learned_map.get(cat, 0.0)
+        info["learned_adjustment"] = round(learned_adj, 2)
+
+        manual_ov = manual_map.get((service_name, cat)) if service_name else None
+        info["manual_override"] = round(manual_ov, 2) if manual_ov is not None else None
+
+        if manual_ov is not None:
+            info["effective"] = round(max(1.0, manual_ov), 2)
+            info["source"] = "manual"
+        elif learned_adj != 0.0:
+            info["effective"] = round(max(1.0, zscore * mult + learned_adj), 2)
+            info["source"] = "learned"
+        else:
+            info["effective"] = round(max(1.0, zscore * mult), 2)
+            info["source"] = "default"
 
     return jsonify({
         "detection": {
@@ -2593,6 +2645,188 @@ def get_entity_baselines(entity_type, entity_name):
         return jsonify({"baselines": list(seen.values())})
     except Exception as e:
         return jsonify({"baselines": [], "error": str(e)})
+
+
+@app.route('/api/entity/<entity_type>/<entity_name>/threshold-overrides', methods=['GET'])
+def get_entity_threshold_overrides(entity_type, entity_name):
+    """Return manual overrides, global learned adjustments, 24h alert counts, and 7d auto-resolve rates."""
+    executor = get_query_executor()
+    if not executor:
+        return jsonify({"error": "No database connection"}), 503
+
+    manual_overrides = {}
+    learned_adjustments = {}
+    alert_counts = {}
+    auto_resolve_rates = {}
+
+    # Load manual overrides for this entity
+    try:
+        result = executor.execute_query(
+            f"SELECT metric_category, threshold_value, updated_at "
+            f"FROM threshold_overrides "
+            f"WHERE service_name = '{entity_name}' AND override_type = 'manual' LIMIT 100"
+        )
+        for row in result.get("rows", []):
+            cat = row.get("metric_category", "")
+            manual_overrides[cat] = {
+                "value": float(row.get("threshold_value", 0)),
+                "updated_at": str(row.get("updated_at")) if row.get("updated_at") else None,
+            }
+    except Exception:
+        pass
+
+    # Load global learned adjustments
+    try:
+        result = executor.execute_query(
+            "SELECT metric_category, threshold_value "
+            "FROM threshold_overrides "
+            "WHERE service_name = '*' AND override_type = 'learned' LIMIT 100"
+        )
+        for row in result.get("rows", []):
+            cat = row.get("metric_category", "")
+            learned_adjustments[cat] = round(float(row.get("threshold_value", 0)), 2)
+    except Exception:
+        pass
+
+    # 24h alert counts per category
+    try:
+        result = executor.execute_query(
+            f"SELECT alert_type, COUNT(*) as cnt "
+            f"FROM alerts "
+            f"WHERE service_name = '{entity_name}' "
+            f"AND created_at > NOW() - INTERVAL '24' HOUR "
+            f"GROUP BY alert_type LIMIT 50"
+        )
+        for row in result.get("rows", []):
+            alert_counts[row.get("alert_type", "")] = int(row.get("cnt", 0))
+    except Exception:
+        pass
+
+    # 7d auto-resolve rates per category
+    try:
+        result = executor.execute_query(
+            f"SELECT alert_type, "
+            f"COUNT(*) as total, "
+            f"SUM(CASE WHEN auto_resolved = true THEN 1 ELSE 0 END) as auto_cnt "
+            f"FROM alerts "
+            f"WHERE service_name = '{entity_name}' "
+            f"AND created_at > NOW() - INTERVAL '7' DAY "
+            f"GROUP BY alert_type "
+            f"HAVING COUNT(*) >= 1 LIMIT 50"
+        )
+        for row in result.get("rows", []):
+            total = int(row.get("total", 0))
+            auto_cnt = int(row.get("auto_cnt", 0))
+            auto_resolve_rates[row.get("alert_type", "")] = round(auto_cnt / total, 2) if total > 0 else 0
+    except Exception:
+        pass
+
+    return jsonify({
+        "manual_overrides": manual_overrides,
+        "learned_adjustments": learned_adjustments,
+        "alert_counts_24h": alert_counts,
+        "auto_resolve_rates_7d": auto_resolve_rates,
+    })
+
+
+@app.route('/api/entity/<entity_type>/<entity_name>/threshold-override', methods=['PUT'])
+def set_entity_threshold_override(entity_type, entity_name):
+    """Set a manual threshold override for this entity."""
+    executor = get_query_executor()
+    if not executor:
+        return jsonify({"error": "No database connection"}), 503
+
+    data = request.json or {}
+    category = data.get("metric_category", "").strip()
+    value = data.get("threshold_value")
+
+    valid_categories = {
+        "error_rate", "latency", "throughput",
+        "db_latency", "db_error",
+        "dependency_latency", "dependency_error",
+        "exception_surge", "new_exception",
+    }
+    if category not in valid_categories:
+        return jsonify({"error": f"Invalid category: {category}"}), 400
+
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return jsonify({"error": "threshold_value must be a number"}), 400
+    if value < 1.0:
+        return jsonify({"error": "threshold_value must be >= 1.0"}), 400
+
+    # DELETE + INSERT
+    try:
+        executor.execute_write(
+            f"DELETE FROM threshold_overrides "
+            f"WHERE service_name = '{entity_name}' "
+            f"AND metric_category = '{category}' "
+            f"AND override_type = 'manual'"
+        )
+        executor.execute_write(
+            f"INSERT INTO threshold_overrides "
+            f"(service_name, metric_category, override_type, threshold_value, created_by, created_at, updated_at) "
+            f"VALUES ('{entity_name}', '{category}', 'manual', {value}, 'user', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify({"success": True, "effective_threshold": round(value, 2)})
+
+
+@app.route('/api/entity/<entity_type>/<entity_name>/threshold-override', methods=['DELETE'])
+def delete_entity_threshold_override(entity_type, entity_name):
+    """Remove a manual threshold override, reverting to computed threshold."""
+    executor = get_query_executor()
+    if not executor:
+        return jsonify({"error": "No database connection"}), 503
+
+    data = request.json or {}
+    category = data.get("metric_category", "").strip()
+    if not category:
+        return jsonify({"error": "metric_category is required"}), 400
+
+    try:
+        executor.execute_write(
+            f"DELETE FROM threshold_overrides "
+            f"WHERE service_name = '{entity_name}' "
+            f"AND metric_category = '{category}' "
+            f"AND override_type = 'manual'"
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    # Compute new effective threshold
+    zscore = float(os.getenv("ANOMALY_THRESHOLD", "3.0"))
+    multiplier_str = os.getenv("ROOT_CAUSE_THRESHOLDS", "db_error:0.8,dependency_error:0.9")
+    mult = 1.0
+    for pair in multiplier_str.split(","):
+        if ":" in pair:
+            k, v = pair.strip().split(":", 1)
+            try:
+                if category.startswith(k.strip()) or k.strip() in category:
+                    mult = float(v.strip())
+                    break
+            except ValueError:
+                pass
+
+    # Check for learned adjustment
+    learned_adj = 0.0
+    try:
+        result = executor.execute_query(
+            f"SELECT threshold_value FROM threshold_overrides "
+            f"WHERE service_name = '*' AND metric_category = '{category}' "
+            f"AND override_type = 'learned' LIMIT 1"
+        )
+        rows = result.get("rows", [])
+        if rows:
+            learned_adj = float(rows[0].get("threshold_value", 0))
+    except Exception:
+        pass
+
+    effective = round(max(1.0, zscore * mult + learned_adj), 2)
+    return jsonify({"success": True, "effective_threshold": effective})
 
 
 @app.route('/api/alerts', methods=['GET'])
