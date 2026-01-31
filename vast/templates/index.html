@@ -393,6 +393,95 @@
             margin-top: 2px;
         }
 
+        /* Combined alerts styles */
+        .combined-alerts-list .alert-item {
+            padding: 10px 12px;
+            margin-bottom: 6px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-left: 3px solid var(--border-color);
+        }
+        .combined-alerts-list .alert-item:hover {
+            transform: translateX(2px);
+        }
+        .combined-alerts-list .alert-item.resolved {
+            opacity: 0.5;
+        }
+        .combined-alerts-list .alert-item.alert-critical {
+            background: rgba(239, 68, 68, 0.12);
+            border-left-color: var(--accent-error);
+        }
+        .combined-alerts-list .alert-item.alert-warning {
+            background: rgba(245, 158, 11, 0.12);
+            border-left-color: var(--accent-warning);
+        }
+        .combined-alerts-list .alert-item.alert-info {
+            background: rgba(0, 217, 255, 0.12);
+            border-left-color: var(--accent-primary);
+        }
+        .combined-alerts-list .alert-item.alert-forecast {
+            background: rgba(139, 92, 246, 0.10);
+            border-left-color: #a78bfa;
+        }
+        .alert-type-badge {
+            display: inline-block;
+            font-size: 9px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 1px 5px;
+            border-radius: 3px;
+            margin-left: 6px;
+        }
+        .alert-type-badge.severity-critical { background: rgba(239, 68, 68, 0.2); color: var(--accent-error); }
+        .alert-type-badge.severity-warning { background: rgba(245, 158, 11, 0.2); color: var(--accent-warning); }
+        .alert-type-badge.severity-info { background: rgba(0, 217, 255, 0.2); color: var(--accent-primary); }
+        .alert-type-badge.badge-forecast { background: rgba(139, 92, 246, 0.2); color: #a78bfa; }
+        .alert-type-badge.badge-resolved { background: rgba(34, 197, 94, 0.2); color: var(--accent-success); }
+        .alert-type-badge.badge-activity { background: rgba(107, 114, 128, 0.2); color: #9ca3af; }
+
+        /* Background jobs styles */
+        .job-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            margin-bottom: 4px;
+            border-radius: 6px;
+            background: var(--bg-tertiary);
+            border-left: 3px solid var(--accent-success);
+        }
+        .job-item.job-stale {
+            border-left-color: var(--accent-warning);
+        }
+        .job-item.job-error {
+            border-left-color: var(--accent-error);
+        }
+        .job-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            background: var(--accent-success);
+        }
+        .job-item.job-stale .job-indicator { background: var(--accent-warning); }
+        .job-item.job-error .job-indicator { background: var(--accent-error); }
+        .job-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .job-name {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .job-details {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 1px;
+        }
+
         .error-item {
             padding: 12px;
             background: rgba(239, 68, 68, 0.08);
@@ -2528,30 +2617,11 @@
 
         <div class="sidebar-section">
             <div class="section-header">
-                <span class="section-title">Predictive Alerts</span>
+                <span class="section-title">Alerts</span>
                 <span id="alerts-badge" class="alerts-badge" style="display: none;">0</span>
             </div>
-            <div id="alerts-list" class="alerts-list">
-                <div class="empty-state">Loading...</div>
-            </div>
-        </div>
-
-        <div class="sidebar-section">
-            <div class="section-header">
-                <span class="section-title">Alert Activity</span>
-            </div>
-            <div id="activity-list" class="activity-list">
-                <div class="empty-state">Loading...</div>
-            </div>
-        </div>
-
-        <div class="sidebar-section">
-            <div class="section-header">
-                <span class="section-title">Predictions</span>
-                <span id="predictions-badge" class="predictions-badge" style="display: none;">0</span>
-            </div>
-            <div id="predictions-list" class="predictions-list">
-                <div class="empty-state">No active predictions</div>
+            <div id="combined-alerts-list" class="combined-alerts-list" style="max-height: 400px; overflow-y: auto;">
+                <div class="empty-state">No alerts</div>
             </div>
         </div>
 
@@ -2589,6 +2659,15 @@
                     <div class="status-card-title">System resources</div>
                     <div id="hosts-list"><div class="empty-state">Loading...</div></div>
                 </div>
+            </div>
+        </div>
+
+        <div class="sidebar-section">
+            <div class="section-header">
+                <span class="section-title">Background Jobs</span>
+            </div>
+            <div id="jobs-list" class="status-card">
+                <div class="empty-state">Loading...</div>
             </div>
         </div>
 
@@ -2916,6 +2995,12 @@
         let isLoading = false;
         let modalCharts = {};
         let chatCharts = [];
+
+        // History buffers for sidebar persistence
+        const MAX_HISTORY = 50;
+        const errorHistory = new Map();    // key: trace_id + '_' + span_id
+        const alertHistory = new Map();    // key: alert_id
+        const forecastHistory = new Map(); // key: prediction_id
 
         // Auto-refresh state
         let sidebarAutoRefresh = true;
@@ -3630,19 +3715,37 @@
                     }
                 }
 
-                // Error summary card
+                // Error summary card with history buffer
                 const errorSummary = document.getElementById('error-summary');
                 const errorsList = document.getElementById('errors-list');
                 const totalErrors = data.error_summary?.total_errors || 0;
                 const affectedServices = data.error_summary?.affected_services || 0;
 
-                if (totalErrors > 0) {
+                // Merge new errors into history
+                if (data.recent_errors && data.recent_errors.length > 0) {
+                    data.recent_errors.forEach(e => {
+                        const key = e.trace_id + '_' + e.span_id;
+                        if (!errorHistory.has(key)) {
+                            e._added_at = Date.now();
+                            errorHistory.set(key, e);
+                        }
+                    });
+                    // Trim history
+                    if (errorHistory.size > MAX_HISTORY) {
+                        const sorted = [...errorHistory.entries()].sort((a, b) => (b[1]._added_at || 0) - (a[1]._added_at || 0));
+                        errorHistory.clear();
+                        sorted.slice(0, MAX_HISTORY).forEach(([k, v]) => errorHistory.set(k, v));
+                    }
+                }
+
+                if (totalErrors > 0 || errorHistory.size > 0) {
+                    const displayCount = Math.max(totalErrors, errorHistory.size);
                     errorSummary.className = 'error-summary-card has-errors';
                     errorSummary.innerHTML = `
                         <div class="error-summary-stats">
                             <div>
-                                <div class="error-count">${totalErrors}</div>
-                                <div class="error-label">errors (5m)</div>
+                                <div class="error-count">${displayCount}</div>
+                                <div class="error-label">errors${totalErrors > 0 ? ' (5m)' : ' (history)'}</div>
                             </div>
                             <div class="error-services">
                                 <div class="error-services-count">${affectedServices}</div>
@@ -3653,15 +3756,20 @@
                     `;
                     errorSummary.onclick = toggleErrorsList;
 
-                    // Populate errors list
-                    if (data.recent_errors && data.recent_errors.length > 0) {
-                        errorsList.innerHTML = data.recent_errors.map(e => `
-                            <div class="error-item" onclick="event.stopPropagation(); openErrorModal('${e.trace_id}', '${e.span_id}')">
+                    // Render errors from history (newest first)
+                    const historyErrors = [...errorHistory.values()].sort((a, b) => (b._added_at || 0) - (a._added_at || 0));
+                    // Mark which errors are still in the current response
+                    const currentErrorKeys = new Set((data.recent_errors || []).map(e => e.trace_id + '_' + e.span_id));
+                    errorsList.innerHTML = historyErrors.map(e => {
+                        const key = e.trace_id + '_' + e.span_id;
+                        const isCurrent = currentErrorKeys.has(key);
+                        return `
+                            <div class="error-item" style="${!isCurrent ? 'opacity: 0.5;' : ''}" onclick="event.stopPropagation(); openErrorModal('${e.trace_id}', '${e.span_id}')">
                                 <div class="error-service">${e.service_name}</div>
                                 <div class="error-span">${e.span_name}</div>
                             </div>
-                        `).join('');
-                    }
+                        `;
+                    }).join('');
                 } else {
                     errorSummary.className = 'error-summary-card no-errors';
                     errorSummary.innerHTML = `
@@ -3679,10 +3787,9 @@
 
                 document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
 
-                // Also refresh alerts, activity, and predictions
+                // Refresh combined alerts and background jobs
                 await refreshAlerts();
-                await refreshActivity();
-                await refreshPredictions();
+                await refreshJobs();
 
             } catch (error) {
                 console.error('Failed to refresh status:', error);
@@ -3691,22 +3798,92 @@
 
         async function refreshAlerts() {
             try {
-                const response = await fetch('/api/alerts?status=active&limit=10');
-                const data = await response.json();
+                // Fetch all three sources in parallel
+                const [alertsResp, activityResp, predictionsResp] = await Promise.all([
+                    fetch('/api/alerts?status=all&limit=50'),
+                    fetch('/api/alerts/activity?minutes=60&limit=50'),
+                    fetch('/api/predictions')
+                ]);
+                const [alertsData, activityData, predictionsData] = await Promise.all([
+                    alertsResp.json(), activityResp.json(), predictionsResp.json()
+                ]);
 
-                const alertsList = document.getElementById('alerts-list');
                 const alertsBadge = document.getElementById('alerts-badge');
+                const container = document.getElementById('combined-alerts-list');
+
+                // Merge alerts into alertHistory
+                window.alertsCache = window.alertsCache || {};
+                if (alertsData.alerts) {
+                    alertsData.alerts.forEach(alert => {
+                        window.alertsCache[alert.alert_id] = alert;
+                        const existing = alertHistory.get(alert.alert_id);
+                        if (existing) {
+                            Object.assign(existing, alert);
+                        } else {
+                            alert._added_at = Date.now();
+                            alertHistory.set(alert.alert_id, alert);
+                        }
+                    });
+                }
+
+                // Merge predictions into forecastHistory
+                const predictions = predictionsData.predictions || [];
+                predictions.forEach(p => {
+                    const key = p.prediction_id || (p.host_name + '_' + p.resource_type);
+                    const existing = forecastHistory.get(key);
+                    if (existing) {
+                        Object.assign(existing, p);
+                    } else {
+                        p._added_at = Date.now();
+                        forecastHistory.set(key, p);
+                    }
+                });
+                // Remove forecasts no longer active
+                const activeForecastKeys = new Set(predictions.map(p => p.prediction_id || (p.host_name + '_' + p.resource_type)));
+                for (const [k, v] of forecastHistory) {
+                    if (!activeForecastKeys.has(k)) {
+                        v.status = 'resolved';
+                    }
+                }
+
+                // Trim histories
+                if (alertHistory.size > MAX_HISTORY) {
+                    const sorted = [...alertHistory.entries()].sort((a, b) => (b[1]._added_at || 0) - (a[1]._added_at || 0));
+                    alertHistory.clear();
+                    sorted.slice(0, MAX_HISTORY).forEach(([k, v]) => alertHistory.set(k, v));
+                }
+                if (forecastHistory.size > MAX_HISTORY) {
+                    const sorted = [...forecastHistory.entries()].sort((a, b) => (b[1]._added_at || 0) - (a[1]._added_at || 0));
+                    forecastHistory.clear();
+                    sorted.slice(0, MAX_HISTORY).forEach(([k, v]) => forecastHistory.set(k, v));
+                }
+
+                // Separate active alerts, active forecasts, resolved/activity
+                const severityOrder = { critical: 0, warning: 1, info: 2 };
+                const activeAlerts = [...alertHistory.values()]
+                    .filter(a => a.status === 'active')
+                    .sort((a, b) => (severityOrder[a.severity] ?? 3) - (severityOrder[b.severity] ?? 3) || new Date(b.created_at || 0) - new Date(a.created_at || 0));
+
+                const activeForecasts = [...forecastHistory.values()]
+                    .filter(p => p.status === 'active')
+                    .sort((a, b) => (a.hours_until_exhaustion || 999) - (b.hours_until_exhaustion || 999));
+
+                const resolvedAlerts = [...alertHistory.values()]
+                    .filter(a => a.status !== 'active')
+                    .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0))
+                    .slice(0, 10);
+
+                // Activity events (rendered inline)
+                const activityEvents = (activityData.events || []).slice(0, 10);
 
                 // Update badge
-                const totalActive = data.summary?.active || 0;
-                if (totalActive > 0) {
-                    alertsBadge.textContent = totalActive;
+                const activeCount = activeAlerts.length + activeForecasts.length;
+                if (activeCount > 0) {
+                    alertsBadge.textContent = activeCount;
                     alertsBadge.style.display = 'inline';
-
-                    // Change badge color based on severity
-                    if (data.summary.critical > 0) {
+                    if (activeAlerts.some(a => a.severity === 'critical')) {
                         alertsBadge.style.background = 'var(--accent-error)';
-                    } else if (data.summary.warning > 0) {
+                    } else if (activeAlerts.some(a => a.severity === 'warning')) {
                         alertsBadge.style.background = 'var(--accent-warning)';
                     } else {
                         alertsBadge.style.background = 'var(--accent-primary)';
@@ -3715,47 +3892,102 @@
                     alertsBadge.style.display = 'none';
                 }
 
-                // Update alerts list and cache for investigation lookup
-                if (data.alerts && data.alerts.length > 0) {
-                    // Cache alerts by ID for investigation lookup
-                    window.alertsCache = {};
-                    data.alerts.forEach(alert => {
-                        window.alertsCache[alert.alert_id] = alert;
-                    });
+                // Render combined list
+                let html = '';
 
-                    alertsList.innerHTML = data.alerts.map(alert => {
-                        const severity = alert.severity || 'info';
-                        const timeAgo = formatTimeAgo(alert.created_at);
-                        const hasInvestigation = alert.root_cause_summary;
-                        const isRootCauseAlert = isRootCauseAlertType(alert.alert_type);
-                        const categoryLabel = isRootCauseAlert ? 'ROOT CAUSE' : 'SYMPTOM';
-                        const categoryClass = isRootCauseAlert ? 'root-cause' : 'symptom';
+                // Active alerts
+                activeAlerts.forEach(alert => {
+                    const severity = alert.severity || 'info';
+                    const timeAgo = formatTimeAgo(alert.created_at);
+                    const hasInvestigation = alert.root_cause_summary;
+                    const isRootCause = isRootCauseAlertType(alert.alert_type);
+                    const categoryLabel = isRootCause ? 'ROOT CAUSE' : 'SYMPTOM';
+                    const categoryClass = isRootCause ? 'root-cause' : 'symptom';
 
-                        return `
-                            <div class="alert-item alert-${severity}" onclick="investigateAlert('${escapeHtml(alert.alert_id)}')">
-                                <div class="alert-header">
-                                    <span class="alert-severity ${severity}">${severity}</span>
-                                    <span class="alert-category ${categoryClass}">${categoryLabel}</span>
-                                    <span class="alert-time">${timeAgo}${hasInvestigation ? ' • analyzed' : ''}</span>
-                                </div>
-                                <div class="alert-title">${escapeHtml(alert.title || alert.alert_type)}</div>
-                                ${hasInvestigation
-                                    ? `<div class="alert-root-cause">${escapeHtml(alert.root_cause_summary)}</div>`
-                                    : `<div class="alert-description">${escapeHtml(alert.description || '')}</div>`
-                                }
+                    html += `
+                        <div class="alert-item alert-${severity}" onclick="investigateAlert('${escapeHtml(alert.alert_id)}')">
+                            <div class="alert-header">
+                                <span class="alert-severity ${severity}">${severity}</span>
+                                <span class="alert-type-badge severity-${severity}">${severity}</span>
+                                <span class="alert-category ${categoryClass}">${categoryLabel}</span>
+                                <span class="alert-time">${timeAgo}${hasInvestigation ? ' \u2022 analyzed' : ''}</span>
                             </div>
-                        `;
-                    }).join('');
-                } else {
-                    alertsList.innerHTML = `
-                        <div class="empty-state" style="color: var(--accent-success);">
-                            No active alerts
+                            <div class="alert-title">${escapeHtml(alert.title || alert.alert_type)}</div>
+                            ${hasInvestigation
+                                ? `<div class="alert-root-cause">${escapeHtml(alert.root_cause_summary)}</div>`
+                                : `<div class="alert-description">${escapeHtml(alert.description || '')}</div>`
+                            }
                         </div>
                     `;
-                }
+                });
+
+                // Active forecasts
+                const resourceIcons = { disk: '\u{1F4BE}', memory: '\u{1F9E0}', cpu: '\u{2699}\u{FE0F}', connections: '\u{1F50C}' };
+                activeForecasts.forEach(p => {
+                    const icon = resourceIcons[p.resource_type] || '\u{1F4CA}';
+                    const hours = typeof p.hours_until_exhaustion === 'number' ? p.hours_until_exhaustion.toFixed(1) : '?';
+                    const current = typeof p.current_value === 'number' ? Math.round(p.current_value * 100) : '?';
+
+                    html += `
+                        <div class="alert-item alert-forecast">
+                            <div class="alert-header">
+                                <span class="alert-type-badge badge-forecast">forecast</span>
+                                <span class="alert-time">~${hours}h until threshold</span>
+                            </div>
+                            <div class="alert-title">${icon} ${escapeHtml(p.resource_type)} - ${escapeHtml(p.host_name || p.service_name || '')}</div>
+                            <div class="alert-description">Currently ${current}% &rarr; exhaustion in ~${hours}h</div>
+                        </div>
+                    `;
+                });
+
+                // Activity events (inline status changes)
+                activityEvents.forEach(event => {
+                    const eventType = event.event_type;
+                    const timeAgo = formatTimeAgo(event.event_time);
+                    const service = escapeHtml(event.service_name || 'unknown');
+                    const alertType = (event.alert_type || '').replace(/_/g, ' ');
+
+                    let label;
+                    if (eventType === 'created') {
+                        label = 'alert created';
+                    } else if (eventType === 'auto_resolved') {
+                        label = 'auto-resolved';
+                    } else {
+                        label = 'resolved';
+                    }
+
+                    html += `
+                        <div class="alert-item resolved" style="padding: 6px 12px;">
+                            <div class="alert-header">
+                                <span class="alert-type-badge badge-activity">${eventType}</span>
+                                <span class="alert-time">${timeAgo}</span>
+                            </div>
+                            <div class="alert-description">${service} \u2014 ${alertType} ${label}</div>
+                        </div>
+                    `;
+                });
+
+                // Resolved alerts
+                resolvedAlerts.forEach(alert => {
+                    const severity = alert.severity || 'info';
+                    const timeAgo = formatTimeAgo(alert.updated_at || alert.created_at);
+
+                    html += `
+                        <div class="alert-item alert-${severity} resolved" onclick="investigateAlert('${escapeHtml(alert.alert_id)}')">
+                            <div class="alert-header">
+                                <span class="alert-type-badge badge-resolved">resolved</span>
+                                <span class="alert-time">${timeAgo}</span>
+                            </div>
+                            <div class="alert-title">${escapeHtml(alert.title || alert.alert_type)}</div>
+                        </div>
+                    `;
+                });
+
+                container.innerHTML = html || '<div class="empty-state" style="color: var(--accent-success);">No alerts</div>';
+
             } catch (error) {
                 console.error('Failed to refresh alerts:', error);
-                document.getElementById('alerts-list').innerHTML = '<div class="empty-state">Alerts unavailable</div>';
+                document.getElementById('combined-alerts-list').innerHTML = '<div class="empty-state">Alerts unavailable</div>';
             }
         }
 
@@ -4007,8 +4239,8 @@ ${escapeHtml(alert.supporting_evidence)}</div>
                     if (window.alertsCache) {
                         delete window.alertsCache[alertId];
                     }
+                    alertHistory.delete(alertId);
                     refreshAlerts();
-                    refreshActivity();
                 } else {
                     alert('Failed to archive: ' + (data.error || 'Unknown error'));
                 }
@@ -4041,47 +4273,65 @@ Can you help me understand this issue further or suggest next steps?`;
             sendMessage();
         }
 
-        async function refreshActivity() {
+        async function refreshJobs() {
             try {
-                const response = await fetch('/api/alerts/activity?minutes=60&limit=15');
+                const response = await fetch('/api/jobs/status');
                 const data = await response.json();
-                const activityList = document.getElementById('activity-list');
+                const jobsList = document.getElementById('jobs-list');
 
-                if (data.events && data.events.length > 0) {
-                    activityList.innerHTML = data.events.map(event => {
-                        const eventType = event.event_type;
-                        const timeAgo = formatTimeAgo(event.event_time);
-                        const service = escapeHtml(event.service_name || 'unknown');
-                        const alertType = (event.alert_type || '').replace(/_/g, ' ');
+                const jobNames = {
+                    'metric_aggregator': 'Metric Aggregator',
+                    'topology_inference': 'Topology Inference',
+                    'predictive_alerts': 'Predictive Alerts'
+                };
 
-                        let icon, text;
-                        if (eventType === 'created') {
-                            icon = '!';
-                            text = `<strong>${service}</strong> ${alertType}`;
-                        } else if (eventType === 'auto_resolved') {
-                            icon = '✓';
-                            text = `<strong>${service}</strong> ${alertType} auto-resolved`;
-                        } else {
-                            icon = '✓';
-                            text = `<strong>${service}</strong> ${alertType} resolved`;
+                if (data.jobs && data.jobs.length > 0) {
+                    jobsList.innerHTML = data.jobs.map(job => {
+                        const name = jobNames[job.job_name] || job.job_name;
+                        const durationS = job.cycle_duration_ms ? (job.cycle_duration_ms / 1000).toFixed(1) : '?';
+
+                        // Calculate staleness
+                        let staleClass = '';
+                        let agoText = '';
+                        if (job.updated_at) {
+                            const updatedAt = new Date(job.updated_at);
+                            const agoMs = Date.now() - updatedAt.getTime();
+                            const agoS = Math.floor(agoMs / 1000);
+                            if (agoS < 60) agoText = agoS + 's ago';
+                            else if (agoS < 3600) agoText = Math.floor(agoS / 60) + 'm ago';
+                            else agoText = Math.floor(agoS / 3600) + 'h ago';
+
+                            if (agoMs > 180000) staleClass = 'job-stale'; // > 3 min
+                        }
+                        if (job.status === 'error') staleClass = 'job-error';
+
+                        // Details line
+                        let detailLine = '';
+                        if (job.details) {
+                            if (job.details.active_alerts !== undefined) {
+                                detailLine = `Active alerts: ${job.details.active_alerts}`;
+                            }
+                            if (job.details.error) {
+                                detailLine = job.details.error;
+                            }
                         }
 
                         return `
-                            <div class="activity-event">
-                                <div class="activity-icon ${eventType}">${icon}</div>
-                                <div class="activity-content">
-                                    <div class="activity-text">${text}</div>
-                                    <div class="activity-time">${timeAgo}</div>
+                            <div class="job-item ${staleClass}">
+                                <div class="job-indicator"></div>
+                                <div class="job-info">
+                                    <div class="job-name">${escapeHtml(name)}</div>
+                                    <div class="job-details">Last run: ${agoText || 'never'} (took ${durationS}s)${detailLine ? ' \u2022 ' + escapeHtml(detailLine) : ''}</div>
                                 </div>
                             </div>
                         `;
                     }).join('');
                 } else {
-                    activityList.innerHTML = '<div class="empty-state">No recent activity</div>';
+                    jobsList.innerHTML = '<div class="empty-state">No job data</div>';
                 }
             } catch (error) {
-                console.error('Failed to refresh activity:', error);
-                document.getElementById('activity-list').innerHTML = '<div class="empty-state">Activity unavailable</div>';
+                console.error('Failed to refresh jobs:', error);
+                document.getElementById('jobs-list').innerHTML = '<div class="empty-state">Jobs unavailable</div>';
             }
         }
 
@@ -5455,54 +5705,7 @@ Can you help me understand this issue further or suggest next steps?`;
         // Predictions
         // =====================================================================
 
-        async function refreshPredictions() {
-            try {
-                const response = await fetch('/api/predictions');
-                const data = await response.json();
-
-                const list = document.getElementById('predictions-list');
-                const badge = document.getElementById('predictions-badge');
-                const predictions = data.predictions || [];
-
-                if (predictions.length > 0) {
-                    badge.textContent = predictions.length;
-                    badge.style.display = 'inline';
-
-                    const resourceIcons = { disk: '\u{1F4BE}', memory: '\u{1F9E0}', cpu: '\u{2699}\u{FE0F}', connections: '\u{1F50C}' };
-
-                    list.innerHTML = predictions.map(p => {
-                        const icon = resourceIcons[p.resource_type] || '\u{1F4CA}';
-                        const hours = typeof p.hours_until_exhaustion === 'number' ? p.hours_until_exhaustion.toFixed(1) : '?';
-                        const pct = typeof p.threshold_value === 'number' ? Math.round(p.threshold_value * 100) : '?';
-                        const current = typeof p.current_value === 'number' ? Math.round(p.current_value * 100) : '?';
-
-                        return `
-                            <div class="prediction-item">
-                                <div class="prediction-resource">
-                                    <span class="resource-icon">${icon}</span>
-                                    ${escapeHtml(p.resource_type)} - ${escapeHtml(p.host_name || p.service_name || '')}
-                                    <span class="prediction-confidence ${p.confidence || 'low'}">${p.confidence || 'low'}</span>
-                                </div>
-                                <div class="prediction-detail">
-                                    Currently ${current}% &rarr; ${pct}% threshold in ~${hours}h
-                                    (slope: ${p.trend_slope ? p.trend_slope.toFixed(4) : '?'}/h, R&sup2;=${p.trend_r_squared ? p.trend_r_squared.toFixed(3) : '?'})
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
-                } else {
-                    badge.style.display = 'none';
-                    list.innerHTML = '<div class="empty-state">No active predictions</div>';
-                }
-            } catch (error) {
-                console.error('Failed to refresh predictions:', error);
-            }
-        }
-
-        // Poll predictions every 30s
-        setInterval(refreshPredictions, 30000);
-        // Also refresh on initial load
-        setTimeout(refreshPredictions, 2000);
+        // Predictions are now fetched as part of refreshAlerts() above
 
         // =====================================================================
         // Incident Context in Alert Modal

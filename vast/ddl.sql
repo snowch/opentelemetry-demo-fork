@@ -342,3 +342,13 @@ CREATE TABLE vast."csnow-db|otel".operation_metrics_5m (
    error_pct        double
 );
 
+-- Background job status tracking
+CREATE TABLE vast."csnow-db|otel".job_status (
+    job_name      varchar,
+    last_run_at   timestamp(9),
+    cycle_duration_ms bigint,
+    status        varchar,
+    details_json  varchar,
+    updated_at    timestamp(9)
+);
+

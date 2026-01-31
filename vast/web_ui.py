@@ -2740,6 +2740,30 @@ def get_predictions():
     return jsonify(data)
 
 
+@app.route('/api/jobs/status', methods=['GET'])
+def get_jobs_status():
+    """Get status of background services."""
+    executor = get_query_executor()
+    query = "SELECT job_name, last_run_at, cycle_duration_ms, status, details_json, updated_at FROM job_status ORDER BY job_name"
+    result = executor.execute_query(query)
+    jobs = []
+    if result['success']:
+        for row in result['rows']:
+            job = dict(row)
+            if job.get('details_json'):
+                try:
+                    job['details'] = json.loads(job['details_json'])
+                except Exception:
+                    job['details'] = {}
+                del job['details_json']
+            else:
+                job['details'] = {}
+                if 'details_json' in job:
+                    del job['details_json']
+            jobs.append(job)
+    return jsonify({'jobs': jobs})
+
+
 @app.route('/api/incidents/context/<alert_id>', methods=['GET'])
 def get_incident_context(alert_id):
     """Get incident context snapshot for an alert."""

@@ -2583,6 +2583,8 @@ RECOMMENDED ACTIONS:
 class PredictiveAlertsService:
     """Main service that orchestrates all components."""
 
+    JOB_NAME = 'predictive_alerts'
+
     def __init__(self, config: Config):
         self.config = config
         self.executor = TrinoExecutor(config)
@@ -2715,6 +2717,16 @@ class PredictiveAlertsService:
 
                 # Sleep for remaining interval time
                 elapsed = time.time() - loop_start
+
+                # Build details for job status
+                details = {"interval_seconds": self.config.detection_interval}
+                if self.last_baseline_update > 0:
+                    details["last_baseline_minutes_ago"] = round((time.time() - self.last_baseline_update) / 60, 1)
+                if self.last_trend_prediction > 0:
+                    details["last_trend_minutes_ago"] = round((time.time() - self.last_trend_prediction) / 60, 1)
+                details["active_alerts"] = len(self.alert_manager.active_alerts)
+                self._write_job_status(elapsed, details=details)
+
                 sleep_time = max(0, self.config.detection_interval - elapsed)
 
                 if sleep_time > 0:
@@ -2724,9 +2736,25 @@ class PredictiveAlertsService:
                 break
             except Exception as e:
                 print(f"[Service] Error in detection loop: {e}")
+                self._write_job_status(0, status='error', details={"error": str(e)[:200]})
                 time.sleep(5)  # Brief pause before retrying
 
         print("[Service] Stopped")
+
+    def _write_job_status(self, cycle_duration_s: float, status: str = 'ok', details: dict = None):
+        """Write job status to the job_status table."""
+        try:
+            details_str = json.dumps(details or {}).replace("'", "''")
+            self.executor.execute_write(
+                f"DELETE FROM job_status WHERE job_name = '{self.JOB_NAME}'"
+            )
+            self.executor.execute_write(
+                f"INSERT INTO job_status VALUES ("
+                f"'{self.JOB_NAME}', NOW(), {int(cycle_duration_s * 1000)}, "
+                f"'{status}', '{details_str}', NOW())"
+            )
+        except Exception as e:
+            print(f"[Service] Failed to write job status: {e}")
 
 
 # =============================================================================

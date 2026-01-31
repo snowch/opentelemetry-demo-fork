@@ -28,6 +28,7 @@ Environment Variables:
 
 import os
 import sys
+import json
 import time
 import signal
 import warnings
@@ -149,6 +150,8 @@ class TrinoExecutor:
 
 class TopologyInferenceService:
     """Materializes service topology into pre-computed tables."""
+
+    JOB_NAME = 'topology_inference'
 
     def __init__(self, config: Config):
         self.config = config
@@ -462,6 +465,8 @@ class TopologyInferenceService:
                 elapsed = time.time() - loop_start
                 print(f"[Service] Cycle complete in {elapsed:.1f}s\n")
 
+                self._write_job_status(elapsed, details={"interval_seconds": self.config.inference_interval})
+
                 sleep_time = max(0, self.config.inference_interval - elapsed)
                 if sleep_time > 0:
                     time.sleep(sleep_time)
@@ -470,9 +475,25 @@ class TopologyInferenceService:
                 break
             except Exception as e:
                 print(f"[Service] Error in materialization loop: {e}")
+                self._write_job_status(0, status='error', details={"error": str(e)[:200]})
                 time.sleep(5)
 
         print("[Service] Stopped")
+
+    def _write_job_status(self, cycle_duration_s: float, status: str = 'ok', details: dict = None):
+        """Write job status to the job_status table."""
+        try:
+            details_str = json.dumps(details or {}).replace("'", "''")
+            self.executor.execute_write(
+                f"DELETE FROM job_status WHERE job_name = '{self.JOB_NAME}'"
+            )
+            self.executor.execute_write(
+                f"INSERT INTO job_status VALUES ("
+                f"'{self.JOB_NAME}', NOW(), {int(cycle_duration_s * 1000)}, "
+                f"'{status}', '{details_str}', NOW())"
+            )
+        except Exception as e:
+            print(f"[Service] Failed to write job status: {e}")
 
 
 # =============================================================================

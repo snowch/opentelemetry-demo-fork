@@ -26,6 +26,7 @@ Environment Variables:
 import os
 import sys
 import time
+import json
 import signal
 import warnings
 from datetime import datetime, timezone
@@ -143,6 +144,8 @@ class TrinoExecutor:
 
 class MetricAggregatorService:
     """Pre-computes rollup tables for drill-down charts."""
+
+    JOB_NAME = 'metric_aggregator'
 
     def __init__(self, config: Config):
         self.config = config
@@ -381,6 +384,8 @@ class MetricAggregatorService:
                 elapsed = time.time() - loop_start
                 print(f"[Service] Cycle complete in {elapsed:.1f}s\n")
 
+                self._write_job_status(elapsed, details={"interval_seconds": self.config.aggregation_interval})
+
                 sleep_time = max(0, self.config.aggregation_interval - elapsed)
                 if sleep_time > 0:
                     time.sleep(sleep_time)
@@ -389,9 +394,25 @@ class MetricAggregatorService:
                 break
             except Exception as e:
                 print(f"[Service] Error in aggregation loop: {e}")
+                self._write_job_status(0, status='error', details={"error": str(e)[:200]})
                 time.sleep(5)
 
         print("[Service] Stopped")
+
+    def _write_job_status(self, cycle_duration_s: float, status: str = 'ok', details: dict = None):
+        """Write job status to the job_status table."""
+        try:
+            details_str = json.dumps(details or {}).replace("'", "''")
+            self.executor.execute_write(
+                f"DELETE FROM job_status WHERE job_name = '{self.JOB_NAME}'"
+            )
+            self.executor.execute_write(
+                f"INSERT INTO job_status VALUES ("
+                f"'{self.JOB_NAME}', NOW(), {int(cycle_duration_s * 1000)}, "
+                f"'{status}', '{details_str}', NOW())"
+            )
+        except Exception as e:
+            print(f"[Service] Failed to write job status: {e}")
 
 
 # =============================================================================
