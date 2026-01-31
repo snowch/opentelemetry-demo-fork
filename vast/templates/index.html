@@ -112,6 +112,40 @@
             letter-spacing: 1.2px;
             color: var(--text-muted);
         }
+        .sidebar-details {
+            width: 100%;
+        }
+        .sidebar-details summary {
+            cursor: pointer;
+            user-select: none;
+            list-style: none;
+        }
+        .sidebar-details summary::-webkit-details-marker { display: none; }
+        .sidebar-details summary .section-title::after {
+            content: ' +';
+            font-size: 12px;
+        }
+        .sidebar-details[open] summary .section-title::after {
+            content: ' −';
+        }
+        .detection-config-body {
+            margin-top: 8px;
+        }
+        .config-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            font-size: 11px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .config-row:last-child { border-bottom: none; }
+        .config-row-label {
+            color: var(--text-secondary);
+        }
+        .config-row-value {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
 
         .refresh-btn {
             background: none;
@@ -1866,6 +1900,98 @@
             animation: pulse 2s infinite;
         }
 
+        /* Thresholds tab */
+        .thresholds-container {
+            padding: 16px 24px;
+        }
+        .threshold-section {
+            margin-bottom: 20px;
+        }
+        .threshold-section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 10px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .threshold-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+        }
+        .threshold-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px 14px;
+        }
+        .threshold-card.threshold-sensitive {
+            border-color: rgba(245, 158, 11, 0.4);
+        }
+        .threshold-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .threshold-value {
+            font-size: 22px;
+            font-weight: 700;
+            color: #00d9ff;
+            margin-bottom: 4px;
+        }
+        .threshold-card.threshold-sensitive .threshold-value {
+            color: #f59e0b;
+        }
+        .threshold-desc {
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+        .threshold-details {
+            margin-top: 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .threshold-details-summary {
+            padding: 10px 16px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            background: var(--bg-tertiary);
+            cursor: pointer;
+            user-select: none;
+        }
+        .threshold-details-summary:hover {
+            color: var(--text-primary);
+        }
+        .threshold-details[open] .threshold-details-summary {
+            border-bottom: 1px solid var(--border-color);
+        }
+        .threshold-details .threshold-section {
+            padding: 0 16px 16px;
+        }
+        .baseline-table-container {
+            overflow-x: auto;
+        }
+        .baseline-table th, .baseline-table td {
+            font-size: 12px;
+            white-space: nowrap;
+        }
+        .threshold-alert-bound {
+            color: #f59e0b;
+            font-weight: 600;
+        }
+        .threshold-zscore-note {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-left: 6px;
+            font-weight: 400;
+        }
+
         /* Modal tabs */
         .modal-tabs {
             display: flex;
@@ -2606,6 +2732,13 @@
             border-radius: 6px;
         }
 
+        .sim-hold-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
         .sim-start-btn, .sim-stop-btn, .sim-undo-btn {
             padding: 6px 14px;
             border-radius: 6px;
@@ -2723,6 +2856,17 @@
             </div>
         </div>
 
+        <div class="sidebar-section">
+            <details class="sidebar-details" id="detection-config-details">
+                <summary class="section-header section-header-toggle">
+                    <span class="section-title">Detection Config</span>
+                </summary>
+                <div class="detection-config-body" id="detection-config-body">
+                    <div class="empty-state">Loading...</div>
+                </div>
+            </details>
+        </div>
+
         <div id="entity-sections">
             <!-- Populated dynamically by refreshStatus() -->
             <div class="sidebar-section">
@@ -2774,6 +2918,9 @@
                     <select id="sim-scenario-select" onchange="updateScenarioDescription()">
                         <option value="">Select scenario...</option>
                     </select>
+                    <label class="sim-hold-label" id="sim-hold-label" style="display:none;">Hold
+                        <input type="number" id="sim-hold-input" min="0" max="60" value="5" style="width:42px;padding:4px 6px;font-size:12px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-tertiary);color:var(--text-primary);text-align:center;">min
+                    </label>
                     <button class="sim-start-btn" id="sim-start-btn" onclick="startSimulation()" disabled>&#9654; Start</button>
                     <button class="sim-stop-btn" id="sim-stop-btn" onclick="stopSimulation()" style="display:none;">&#9632; Stop</button>
                     <button class="sim-undo-btn" id="sim-undo-btn" onclick="undoScenario()" disabled>&#8617; Stop &amp; Revert</button>
@@ -3113,6 +3260,10 @@
         let sidebarRefreshInterval = null;
         let entityModalAutoRefresh = false;
         let entityModalRefreshInterval = null;
+        let sidebarRefreshInFlight = false;
+        let modalRefreshInFlight = false;
+        let lastSidebarDataHash = '';
+        let pageVisible = true;
         let currentEntityType = null;
         let currentEntityName = null;
 
@@ -3152,6 +3303,7 @@
                     { id: 'traces', label: 'Traces', loader: 'loadEntityTraces', hasBadge: true },
                     { id: 'logs', label: 'Logs', loader: 'loadEntityLogs', hasBadge: true },
                     { id: 'metrics', label: 'Metrics', loader: 'loadEntityMetrics', hasBadge: true },
+                    { id: 'thresholds', label: 'Thresholds', loader: 'loadEntityThresholds' },
                 ],
                 defaultTab: 'charts',
                 chartsConfig: { latency: true, errors: true, throughput: true, topOperations: true },
@@ -3168,6 +3320,7 @@
                     { id: 'traces', label: 'Traces', loader: 'loadEntityTraces', hasBadge: true },
                     { id: 'logs', label: 'Logs', loader: 'loadEntityLogs', hasBadge: true },
                     { id: 'metrics', label: 'Metrics', loader: 'loadEntityMetrics', hasBadge: true },
+                    { id: 'thresholds', label: 'Thresholds', loader: 'loadEntityThresholds' },
                 ],
                 defaultTab: 'charts',
                 chartsConfig: { latency: true, errors: true, volume: true, slowQueries: true, deadlocks: true, dbSize: true },
@@ -3184,6 +3337,7 @@
                     { id: 'traces', label: 'Traces', loader: 'loadEntityTraces', hasBadge: true },
                     { id: 'logs', label: 'Logs', loader: 'loadEntityLogs', hasBadge: true },
                     { id: 'metrics', label: 'All Metrics', loader: 'loadEntityMetrics', hasBadge: true },
+                    { id: 'thresholds', label: 'Thresholds', loader: 'loadEntityThresholds' },
                 ],
                 defaultTab: 'overview',
                 chartsConfig: {},
@@ -3197,14 +3351,15 @@
                     { id: 'overview', label: 'Metrics', loader: 'loadContainerOverview' },
                     { id: 'logs', label: 'Logs', loader: 'loadEntityLogs', hasBadge: true },
                     { id: 'metrics', label: 'All Metrics', loader: 'loadEntityMetrics', hasBadge: true },
+                    { id: 'thresholds', label: 'Thresholds', loader: 'loadEntityThresholds' },
                 ],
                 defaultTab: 'overview',
                 chartsConfig: {},
                 sidebarRenderer: 'renderContainerItem',
             },
         };
-        const REFRESH_INTERVAL = 15000; // 15 seconds for sidebar
-        const MODAL_REFRESH_INTERVAL = 30000; // 30 seconds for drill-down modal (reads pre-computed rollups)
+        const REFRESH_INTERVAL = 30000; // 30 seconds for sidebar
+        const MODAL_REFRESH_INTERVAL = 60000; // 60 seconds for drill-down modal
 
         const chartColors = ['#00d9ff', '#7c3aed', '#10b981', '#f59e0b', '#ef4444', '#ec4899'];
 
@@ -3222,11 +3377,61 @@
             refreshStatus();
             startSidebarAutoRefresh();
             initSimulator();
+            loadDetectionConfig();
+        });
+
+        async function loadDetectionConfig() {
+            try {
+                const resp = await fetch('/api/alerts/thresholds');
+                const d = await resp.json();
+                const body = document.getElementById('detection-config-body');
+                const rows = [
+                    ['Z-Score Threshold', d.detection.zscore_threshold + 'σ'],
+                    ['Error Rate Warning', (d.detection.error_rate_warning * 100).toFixed(0) + '%'],
+                    ['Error Rate Critical', (d.detection.error_rate_critical * 100).toFixed(0) + '%'],
+                    ['Detection Interval', d.detection.detection_interval_seconds + 's'],
+                    ['Baseline Window', d.baselines.window_hours + 'h'],
+                    ['Min Samples', d.baselines.min_samples],
+                    ['Alert Cooldown', d.alert_behavior.cooldown_minutes + 'm'],
+                    ['Auto-Resolve', d.alert_behavior.auto_resolve_minutes + 'm'],
+                    ['LLM Max/Hour', d.investigation.max_per_hour],
+                    ['LLM Cooldown', d.investigation.service_cooldown_minutes + 'm'],
+                ];
+                // Show category multipliers that differ from 1.0
+                const cats = d.root_cause?.categories || {};
+                for (const [key, info] of Object.entries(cats)) {
+                    if (info.multiplier !== 1.0) {
+                        rows.push([info.description, info.effective + 'σ (×' + info.multiplier + ')']);
+                    }
+                }
+                body.innerHTML = rows.map(([label, value]) =>
+                    `<div class="config-row"><span class="config-row-label">${label}</span><span class="config-row-value">${value}</span></div>`
+                ).join('');
+            } catch (e) {
+                console.error('Failed to load detection config:', e);
+            }
+        }
+
+        // Pause all refresh timers when browser tab is hidden
+        document.addEventListener('visibilitychange', () => {
+            pageVisible = !document.hidden;
+            if (pageVisible) {
+                // Tab became visible — do one immediate refresh then restart timers
+                refreshStatus();
+                startSidebarAutoRefresh();
+                if (entityModalAutoRefresh && currentEntityName) {
+                    startEntityModalAutoRefresh();
+                }
+            } else {
+                // Tab hidden — stop all timers
+                if (sidebarRefreshInterval) { clearInterval(sidebarRefreshInterval); sidebarRefreshInterval = null; }
+                if (entityModalRefreshInterval) { clearInterval(entityModalRefreshInterval); entityModalRefreshInterval = null; }
+            }
         });
 
         function startSidebarAutoRefresh() {
             if (sidebarRefreshInterval) clearInterval(sidebarRefreshInterval);
-            if (sidebarAutoRefresh) {
+            if (sidebarAutoRefresh && pageVisible) {
                 sidebarRefreshInterval = setInterval(refreshStatus, REFRESH_INTERVAL);
             }
         }
@@ -3733,6 +3938,8 @@
         }
 
         async function refreshStatus() {
+            if (sidebarRefreshInFlight) return;
+            sidebarRefreshInFlight = true;
             try {
                 // Get selected time window for services
                 const timeSelector = document.getElementById('services-time-selector');
@@ -3741,8 +3948,28 @@
                 const response = await fetch(`/api/status?time=${timeWindow}`);
                 const data = await response.json();
 
-                // Data-driven entity sidebar rendering
+                // Skip DOM rebuild if data hasn't changed
+                const dataHash = JSON.stringify(data.entity_categories?.map(c => c.entities?.length) || [])
+                    + '_' + (data.error_summary?.total_errors || 0);
+                const dataChanged = dataHash !== lastSidebarDataHash;
+                lastSidebarDataHash = dataHash;
+
+                // Always update entity name lists (cheap)
                 if (data.entity_categories) {
+                    data.entity_categories.forEach(cat => {
+                        const entities = cat.entities || [];
+                        const nameField = cat.name_field;
+                        const sorted = [...entities].sort((a, b) =>
+                            (a[nameField] || '').localeCompare(b[nameField] || '')
+                        );
+                        availableEntities[cat.type] = sorted.map(e => e[nameField]);
+                        if (cat.type === 'service') availableServices = availableEntities[cat.type];
+                        if (cat.type === 'database') availableDatabases = availableEntities[cat.type];
+                    });
+                }
+
+                // Data-driven entity sidebar rendering (skip DOM rebuild if unchanged)
+                if (data.entity_categories && dataChanged) {
                     const sectionsContainer = document.getElementById('entity-sections');
 
                     let sectionsHtml = '';
@@ -3750,15 +3977,9 @@
                         const renderer = ENTITY_CONFIG[cat.type]?.sidebarRenderer || 'renderGenericItem';
                         const entities = cat.entities || [];
                         const nameField = cat.name_field;
-
-                        // Store entity names for dropdowns
                         const sorted = [...entities].sort((a, b) =>
                             (a[nameField] || '').localeCompare(b[nameField] || '')
                         );
-                        availableEntities[cat.type] = sorted.map(e => e[nameField]);
-                        // Legacy compat
-                        if (cat.type === 'service') availableServices = availableEntities[cat.type];
-                        if (cat.type === 'database') availableDatabases = availableEntities[cat.type];
 
                         let headerExtra = '';
 
@@ -3788,7 +4009,7 @@
                         `;
                     });
                     sectionsContainer.innerHTML = sectionsHtml;
-                } else {
+                } else if (!data.entity_categories) {
                     // Fallback: render legacy way
                     const servicesList = document.getElementById('services-list');
                     if (data.services && data.services.length > 0) {
@@ -3900,6 +4121,8 @@
 
             } catch (error) {
                 console.error('Failed to refresh status:', error);
+            } finally {
+                sidebarRefreshInFlight = false;
             }
         }
 
@@ -4640,7 +4863,7 @@ Can you help me understand this issue further or suggest next steps?`;
 
         function startEntityModalAutoRefresh() {
             if (entityModalRefreshInterval) clearInterval(entityModalRefreshInterval);
-            if (entityModalAutoRefresh && currentEntityName) {
+            if (entityModalAutoRefresh && currentEntityName && pageVisible) {
                 entityModalRefreshInterval = setInterval(() => refreshEntityModal(), MODAL_REFRESH_INTERVAL);
             }
         }
@@ -4654,19 +4877,25 @@ Can you help me understand this issue further or suggest next steps?`;
 
         async function refreshEntityModal() {
             if (!currentEntityType || !currentEntityName) return;
+            if (modalRefreshInFlight || !pageVisible) return;
+            modalRefreshInFlight = true;
             const btn = document.getElementById('entity-modal-refresh-btn');
             btn.classList.add('spinning');
             // Re-run the currently active tab's loader
-            const config = ENTITY_CONFIG[currentEntityType];
-            const activeTabEl = document.querySelector('#entity-modal-tabs .modal-tab.active');
-            if (activeTabEl) {
-                const match = activeTabEl.getAttribute('onclick')?.match(/switchEntityTab\('([^']+)'\)/);
-                if (match) {
-                    const tabConfig = config.tabs.find(t => t.id === match[1]);
-                    if (tabConfig && window[tabConfig.loader]) await window[tabConfig.loader]();
+            try {
+                const config = ENTITY_CONFIG[currentEntityType];
+                const activeTabEl = document.querySelector('#entity-modal-tabs .modal-tab.active');
+                if (activeTabEl) {
+                    const match = activeTabEl.getAttribute('onclick')?.match(/switchEntityTab\('([^']+)'\)/);
+                    if (match) {
+                        const tabConfig = config.tabs.find(t => t.id === match[1]);
+                        if (tabConfig && window[tabConfig.loader]) await window[tabConfig.loader]();
+                    }
                 }
+            } finally {
+                modalRefreshInFlight = false;
+                btn.classList.remove('spinning');
             }
-            btn.classList.remove('spinning');
         }
 
         // =================================================================
@@ -5362,6 +5591,224 @@ Can you help me understand this issue further or suggest next steps?`;
             } catch (err) {
                 console.error('Failed to load metric history:', err);
                 chartTr.querySelector('td').innerHTML = '<span style="color:var(--accent-error);font-size:12px;">Failed to load chart</span>';
+            }
+        }
+
+        // =================================================================
+        // Thresholds Tab
+        // =================================================================
+        const THRESHOLD_CATEGORIES_BY_TYPE = {
+            service: ['error_rate', 'latency', 'throughput', 'dependency_latency', 'dependency_error', 'exception_surge', 'new_exception'],
+            database: ['db_error', 'db_latency', 'error_rate', 'latency'],
+            host: [],  // host uses resource_predictions
+            container: [],  // container uses resource_predictions
+        };
+
+        function formatBaselineValue(val, metricType) {
+            if (val === null || val === undefined) return '-';
+            if (metricType.includes('latency')) return val < 1 ? `${(val * 1000).toFixed(1)}ms` : `${val.toFixed(2)}s`;
+            if (metricType.includes('error') || metricType.includes('rate')) return `${(val * 100).toFixed(2)}%`;
+            if (metricType.includes('throughput') || metricType.includes('count')) return val.toFixed(1);
+            return val.toFixed(4);
+        }
+
+        function metricTypeLabel(mt) {
+            return mt.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        }
+
+        async function loadEntityThresholds() {
+            const body = document.getElementById('entity-modal-body');
+            body.innerHTML = '<div class="loading-indicator">Loading thresholds...</div>';
+            try {
+                const [threshResp, baselineResp] = await Promise.all([
+                    fetch('/api/alerts/thresholds'),
+                    fetch(`/api/entity/${currentEntityType}/${encodeURIComponent(currentEntityName)}/baselines`),
+                ]);
+                const data = await threshResp.json();
+                const baselineData = await baselineResp.json();
+                const type = currentEntityType;
+                const baselines = baselineData.baselines || [];
+
+                let html = '<div class="thresholds-container">';
+
+                // --- Entity-specific baselines (the main content) ---
+                if (baselines.length > 0) {
+                    html += `<div class="threshold-section">
+                        <div class="threshold-section-title">Computed Baselines for ${escapeHtml(currentEntityName)}</div>
+                        <div class="baseline-table-container"><table class="data-table baseline-table">
+                            <thead><tr>
+                                <th>Metric</th><th>Mean</th><th>Std Dev</th>
+                                <th>P50</th><th>P95</th><th>P99</th>
+                                <th>Min</th><th>Max</th><th>Samples</th>
+                                <th>Alert Threshold</th>
+                            </tr></thead><tbody>`;
+                    for (const b of baselines) {
+                        const zscore = data.detection.zscore_threshold;
+                        let effectiveMult = 1.0;
+                        const cats = data.root_cause?.categories || {};
+                        for (const [catKey, catInfo] of Object.entries(cats)) {
+                            if (b.metric_type.includes(catKey) || catKey.split('_').every(p => b.metric_type.includes(p))) {
+                                effectiveMult = catInfo.multiplier;
+                                break;
+                            }
+                        }
+                        const effectiveZ = Math.max(1.0, zscore * effectiveMult);
+                        const alertBound = b.stddev !== null && b.mean !== null
+                            ? b.mean + effectiveZ * b.stddev : null;
+                        html += `<tr>
+                            <td><strong>${escapeHtml(metricTypeLabel(b.metric_type))}</strong></td>
+                            <td>${formatBaselineValue(b.mean, b.metric_type)}</td>
+                            <td>${formatBaselineValue(b.stddev, b.metric_type)}</td>
+                            <td>${formatBaselineValue(b.p50, b.metric_type)}</td>
+                            <td>${formatBaselineValue(b.p95, b.metric_type)}</td>
+                            <td>${formatBaselineValue(b.p99, b.metric_type)}</td>
+                            <td>${formatBaselineValue(b.min, b.metric_type)}</td>
+                            <td>${formatBaselineValue(b.max, b.metric_type)}</td>
+                            <td>${b.sample_count}</td>
+                            <td class="threshold-alert-bound">${alertBound !== null ? formatBaselineValue(alertBound, b.metric_type) : '-'}<span class="threshold-zscore-note">${effectiveZ.toFixed(1)}σ</span></td>
+                        </tr>`;
+                    }
+                    html += '</tbody></table></div></div>';
+                } else if (type === 'service' || type === 'database') {
+                    html += `<div class="threshold-section">
+                        <div class="threshold-section-title">Computed Baselines for ${escapeHtml(currentEntityName)}</div>
+                        <div class="empty-state" style="padding:12px 0;">No baselines computed yet. Baselines require ${data.baselines.min_samples}+ samples from the last ${data.baselines.window_hours}h.</div>
+                    </div>`;
+                }
+
+                // --- Category-specific thresholds (relevant to this entity type) ---
+                const relevantCategories = THRESHOLD_CATEGORIES_BY_TYPE[type] || [];
+                if (relevantCategories.length > 0 && data.root_cause && data.root_cause.categories) {
+                    html += `<div class="threshold-section">
+                        <div class="threshold-section-title">Detection Categories for ${ENTITY_CONFIG[type]?.displayName || type}s</div>
+                        <div class="threshold-grid">`;
+                    for (const catKey of relevantCategories) {
+                        const cat = data.root_cause.categories[catKey];
+                        if (!cat) continue;
+                        const multClass = cat.multiplier < 1.0 ? 'threshold-sensitive' : '';
+                        html += `<div class="threshold-card ${multClass}">
+                            <div class="threshold-label">${cat.description}</div>
+                            <div class="threshold-value">${cat.effective}σ</div>
+                            <div class="threshold-desc">Base: ${cat.base}σ × Multiplier: ${cat.multiplier}${cat.multiplier < 1.0 ? ' (more sensitive)' : ''}</div>
+                        </div>`;
+                    }
+                    html += '</div></div>';
+                }
+
+                // --- Resource predictions for host/container ---
+                if (type === 'host' || type === 'container') {
+                    const rp = data.resource_predictions;
+                    html += `<div class="threshold-section">
+                        <div class="threshold-section-title">Resource Exhaustion Predictions</div>
+                        <div class="threshold-grid">
+                            <div class="threshold-card">
+                                <div class="threshold-label">Disk Threshold</div>
+                                <div class="threshold-value">${(rp.disk_threshold * 100).toFixed(0)}%</div>
+                                <div class="threshold-desc">Alert when disk usage predicted to exceed this</div>
+                            </div>
+                            <div class="threshold-card">
+                                <div class="threshold-label">Memory Threshold</div>
+                                <div class="threshold-value">${(rp.memory_threshold * 100).toFixed(0)}%</div>
+                                <div class="threshold-desc">Alert when memory usage predicted to exceed this</div>
+                            </div>
+                            <div class="threshold-card">
+                                <div class="threshold-label">CPU Threshold</div>
+                                <div class="threshold-value">${(rp.cpu_threshold * 100).toFixed(0)}%</div>
+                                <div class="threshold-desc">Alert when CPU usage predicted to exceed this</div>
+                            </div>
+                            <div class="threshold-card">
+                                <div class="threshold-label">Trend Window</div>
+                                <div class="threshold-value">${rp.trend_window_hours}h</div>
+                                <div class="threshold-desc">Hours of data for linear regression</div>
+                            </div>
+                            <div class="threshold-card">
+                                <div class="threshold-label">Min R²</div>
+                                <div class="threshold-value">${rp.min_r_squared}</div>
+                                <div class="threshold-desc">Minimum regression fit to trust prediction</div>
+                            </div>
+                            <div class="threshold-card">
+                                <div class="threshold-label">Max Forecast</div>
+                                <div class="threshold-value">${rp.max_forecast_hours}h</div>
+                                <div class="threshold-desc">Maximum hours ahead to forecast</div>
+                            </div>
+                        </div>
+                    </div>`;
+                }
+
+                // --- Global settings (collapsed by default) ---
+                html += `<details class="threshold-details">
+                    <summary class="threshold-details-summary">Global Detection Settings</summary>
+                    <div class="threshold-section" style="margin-top:10px;">
+                        <div class="threshold-grid">
+                            <div class="threshold-card">
+                                <div class="threshold-label">Z-Score Threshold</div>
+                                <div class="threshold-value">${data.detection.zscore_threshold}σ</div>
+                                <div class="threshold-desc">Standard deviations from baseline to trigger anomaly</div>
+                            </div>
+                            <div class="threshold-card">
+                                <div class="threshold-label">Detection Interval</div>
+                                <div class="threshold-value">${data.detection.detection_interval_seconds}s</div>
+                                <div class="threshold-desc">How often anomaly detection runs</div>
+                            </div>
+                            <div class="threshold-card">
+                                <div class="threshold-label">Error Rate Warning</div>
+                                <div class="threshold-value">${(data.detection.error_rate_warning * 100).toFixed(0)}%</div>
+                                <div class="threshold-desc">Absolute error rate for warning severity</div>
+                            </div>
+                            <div class="threshold-card">
+                                <div class="threshold-label">Error Rate Critical</div>
+                                <div class="threshold-value">${(data.detection.error_rate_critical * 100).toFixed(0)}%</div>
+                                <div class="threshold-desc">Absolute error rate for critical severity</div>
+                            </div>
+                            <div class="threshold-card">
+                                <div class="threshold-label">Baseline Window</div>
+                                <div class="threshold-value">${data.baselines.window_hours}h</div>
+                                <div class="threshold-desc">Hours of history for baseline computation</div>
+                            </div>
+                            <div class="threshold-card">
+                                <div class="threshold-label">Baseline Recompute</div>
+                                <div class="threshold-value">${Math.round(data.baselines.recompute_interval_seconds / 60)}m</div>
+                                <div class="threshold-desc">How often baselines are recalculated</div>
+                            </div>
+                            <div class="threshold-card">
+                                <div class="threshold-label">Min Samples</div>
+                                <div class="threshold-value">${data.baselines.min_samples}</div>
+                                <div class="threshold-desc">Minimum data points for a valid baseline</div>
+                            </div>
+                            <div class="threshold-card">
+                                <div class="threshold-label">Alert Cooldown</div>
+                                <div class="threshold-value">${data.alert_behavior.cooldown_minutes}m</div>
+                                <div class="threshold-desc">Minutes before re-alerting on same issue</div>
+                            </div>
+                            <div class="threshold-card">
+                                <div class="threshold-label">Auto-Resolve</div>
+                                <div class="threshold-value">${data.alert_behavior.auto_resolve_minutes}m</div>
+                                <div class="threshold-desc">Minutes of no recurrence before auto-resolving</div>
+                            </div>
+                            <div class="threshold-card">
+                                <div class="threshold-label">LLM Max/Hour</div>
+                                <div class="threshold-value">${data.investigation.max_per_hour}</div>
+                                <div class="threshold-desc">Rate limit on LLM investigations</div>
+                            </div>
+                            <div class="threshold-card">
+                                <div class="threshold-label">LLM Cooldown</div>
+                                <div class="threshold-value">${data.investigation.service_cooldown_minutes}m</div>
+                                <div class="threshold-desc">Minutes before re-investigating same service</div>
+                            </div>
+                            <div class="threshold-card">
+                                <div class="threshold-label">Critical Only</div>
+                                <div class="threshold-value">${data.investigation.critical_only ? 'Yes' : 'No'}</div>
+                                <div class="threshold-desc">Only investigate critical severity alerts</div>
+                            </div>
+                        </div>
+                    </div>
+                </details>`;
+
+                html += '</div>';
+                body.innerHTML = html;
+            } catch (err) {
+                console.error('Failed to load thresholds:', err);
+                body.innerHTML = '<div class="empty-state">Failed to load thresholds</div>';
             }
         }
 
@@ -6224,7 +6671,7 @@ Can you help me understand this issue further or suggest next steps?`;
 
                 const select = document.getElementById('sim-scenario-select');
                 select.innerHTML = '<option value="">Select scenario...</option>' +
-                    simScenarios.map(s => `<option value="${s.id}" title="${escapeHtml(s.description)}">${escapeHtml(s.name)} (${s.duration_minutes}min)</option>`).join('');
+                    simScenarios.map(s => `<option value="${s.id}" title="${escapeHtml(s.description)}" data-hold="${s.hold_at_peak_minutes}">${escapeHtml(s.name)} (${s.duration_minutes}min)</option>`).join('');
 
                 // Check if a simulation is already running
                 await refreshSimulationStatus();
@@ -6236,7 +6683,16 @@ Can you help me understand this issue further or suggest next steps?`;
         function updateScenarioDescription() {
             const select = document.getElementById('sim-scenario-select');
             const startBtn = document.getElementById('sim-start-btn');
+            const holdLabel = document.getElementById('sim-hold-label');
+            const holdInput = document.getElementById('sim-hold-input');
             startBtn.disabled = !select.value;
+            if (select.value) {
+                const opt = select.options[select.selectedIndex];
+                holdInput.value = opt.dataset.hold || 5;
+                holdLabel.style.display = '';
+            } else {
+                holdLabel.style.display = 'none';
+            }
             updateUndoButton();
         }
 
@@ -6289,10 +6745,11 @@ Can you help me understand this issue further or suggest next steps?`;
             startBtn.innerHTML = 'Starting...';
 
             try {
+                const holdMinutes = parseInt(document.getElementById('sim-hold-input')?.value) || 5;
                 const response = await fetch('/api/simulation/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ scenario: scenarioId })
+                    body: JSON.stringify({ scenario: scenarioId, config: { hold_at_peak_minutes: holdMinutes } })
                 });
                 const data = await response.json();
 

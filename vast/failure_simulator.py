@@ -41,9 +41,9 @@ POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "otel")
 SCENARIOS = {
     "postgres_degradation": {
         "name": "PostgreSQL Degradation",
-        "description": "Progressively degrades PostgreSQL performance by adjusting configuration settings (work_mem, random_page_cost, effective_cache_size) over 12 minutes.",
+        "description": "Progressively degrades PostgreSQL performance by adjusting configuration settings (work_mem, random_page_cost, effective_cache_size).",
         "predicted_alerts": ["db_slow_queries", "latency_degradation"],
-        "duration_minutes": 12,
+        "hold_at_peak_minutes": 5,
         "steps": [
             {"delay_seconds": 0, "action": "pg_config_degrade", "params": {"settings": {"work_mem": "'256kB'", "random_page_cost": "20"}}, "label": "Reduce work_mem to 256kB, raise random_page_cost"},
             {"delay_seconds": 180, "action": "pg_config_degrade", "params": {"settings": {"work_mem": "'64kB'", "effective_cache_size": "'32MB'"}}, "label": "Reduce work_mem to 64kB, cache to 32MB"},
@@ -54,9 +54,9 @@ SCENARIOS = {
     },
     "cascading_payment": {
         "name": "Cascading Payment Failure",
-        "description": "Escalates payment service failure rate from 10% to 75% over 12 minutes, causing cascading errors to checkout and frontend.",
+        "description": "Escalates payment service failure rate from 10% to 75%, causing cascading errors to checkout and frontend.",
         "predicted_alerts": ["error_spike", "dependency_failure"],
-        "duration_minutes": 12,
+        "hold_at_peak_minutes": 5,
         "steps": [
             {"delay_seconds": 0, "action": "feature_flag", "params": {"flag": "paymentFailure", "variant": "10%"}, "label": "10% payment failures"},
             {"delay_seconds": 180, "action": "feature_flag", "params": {"flag": "paymentFailure", "variant": "25%"}, "label": "25% payment failures"},
@@ -69,7 +69,7 @@ SCENARIOS = {
         "name": "Memory Leak Simulation",
         "description": "Simulates a memory leak in the recommendation service by enabling cache failure.",
         "predicted_alerts": ["anomaly", "trend"],
-        "duration_minutes": 15,
+        "hold_at_peak_minutes": 5,
         "steps": [
             {"delay_seconds": 0, "action": "feature_flag", "params": {"flag": "recommendationCacheFailure", "variant": "on"}, "label": "Enable cache failure"},
         ],
@@ -79,7 +79,7 @@ SCENARIOS = {
         "name": "Disk Fill Simulation",
         "description": "Creates temporary files in the postgres data directory every 2 minutes to simulate disk exhaustion. PGDATA is a 250MB tmpfs.",
         "predicted_alerts": ["trend"],
-        "duration_minutes": 12,
+        "hold_at_peak_minutes": 5,
         "steps": [
             {"delay_seconds": 0, "action": "disk_fill_step", "params": {"size_mb": 40, "file_index": 1}, "label": "Write 40MB (1/6)"},
             {"delay_seconds": 120, "action": "disk_fill_step", "params": {"size_mb": 40, "file_index": 2}, "label": "Write 40MB (2/6)"},
@@ -94,7 +94,7 @@ SCENARIOS = {
         "name": "Kafka Saturation",
         "description": "Enables Kafka queue problems to simulate consumer lag growth and message backlog.",
         "predicted_alerts": ["anomaly", "trend"],
-        "duration_minutes": 10,
+        "hold_at_peak_minutes": 5,
         "steps": [
             {"delay_seconds": 0, "action": "feature_flag", "params": {"flag": "kafkaQueueProblems", "variant": "on"}, "label": "Enable queue problems"},
         ],
@@ -233,18 +233,24 @@ class SimulationManager:
 
     def list_scenarios(self) -> List[Dict]:
         """Return available scenarios with descriptions."""
-        return [
-            {
+        result = []
+        for sid, s in SCENARIOS.items():
+            last_step_delay = max((step["delay_seconds"] for step in s["steps"]), default=0)
+            hold = s.get("hold_at_peak_minutes", 5)
+            ramp_minutes = last_step_delay / 60
+            total_minutes = ramp_minutes + hold
+            result.append({
                 "id": sid,
                 "name": s["name"],
                 "description": s["description"],
-                "duration_minutes": s["duration_minutes"],
+                "duration_minutes": round(total_minutes),
+                "ramp_minutes": round(ramp_minutes),
+                "hold_at_peak_minutes": hold,
                 "steps": len(s["steps"]),
                 "predicted_alerts": s["predicted_alerts"],
                 "has_cleanup": "cleanup" in s,
-            }
-            for sid, s in SCENARIOS.items()
-        ]
+            })
+        return result
 
     def run_cleanup(self, scenario_id: str) -> bool:
         """Run the cleanup action for a scenario. Safe to call at any time."""
@@ -318,7 +324,10 @@ class SimulationManager:
             started = datetime.fromisoformat(run["started_at"])
             elapsed = (datetime.now(timezone.utc) - started).total_seconds()
             scenario = SCENARIOS.get(run["scenario_name"], {})
-            total_duration = scenario.get("duration_minutes", 10) * 60
+            steps = scenario.get("steps", [])
+            last_step_delay = max((s["delay_seconds"] for s in steps), default=0)
+            hold = run.get("config", {}).get("hold_at_peak_minutes", scenario.get("hold_at_peak_minutes", 5))
+            total_duration = last_step_delay + hold * 60
             run["elapsed_seconds"] = int(elapsed)
             run["progress_pct"] = min(100, int(elapsed / total_duration * 100)) if total_duration > 0 else 0
 
@@ -389,7 +398,12 @@ class SimulationManager:
         steps = scenario["steps"]
         start_time = time.time()
 
-        print(f"[Simulator] Starting scenario: {scenario['name']} (run_id={run_id})")
+        # Hold-at-peak: use config override if provided, else scenario default
+        with self._lock:
+            config = self._active_run.get("config", {}) if self._active_run else {}
+        hold_minutes = config.get("hold_at_peak_minutes", scenario.get("hold_at_peak_minutes", 5))
+
+        print(f"[Simulator] Starting scenario: {scenario['name']} (run_id={run_id}, hold_at_peak={hold_minutes}m)")
 
         try:
             for i, step in enumerate(steps):
@@ -420,12 +434,11 @@ class SimulationManager:
                             "executed_at": datetime.now(timezone.utc).isoformat(),
                         })
 
-            # All steps completed — wait for remaining scenario duration
-            total_duration = scenario["duration_minutes"] * 60
-            remaining = total_duration - (time.time() - start_time)
-            if remaining > 0:
-                print(f"[Simulator] All steps done, waiting {int(remaining)}s for scenario to complete")
-                end_time = time.time() + remaining
+            # Hold at peak for the configured duration
+            hold_seconds = hold_minutes * 60
+            if hold_seconds > 0:
+                print(f"[Simulator] All steps done, holding at peak for {hold_minutes}m")
+                end_time = time.time() + hold_seconds
                 while time.time() < end_time:
                     if self._stop_event.is_set():
                         break

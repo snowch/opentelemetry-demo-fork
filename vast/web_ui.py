@@ -2458,6 +2458,143 @@ def get_alerts_config():
     })
 
 
+@app.route('/api/alerts/thresholds', methods=['GET'])
+def get_alert_thresholds():
+    """Return current alert detection thresholds and configuration."""
+    zscore = float(os.getenv("ANOMALY_THRESHOLD", "3.0"))
+    multiplier_str = os.getenv("ROOT_CAUSE_THRESHOLDS", "db_error:0.8,dependency_error:0.9")
+    multipliers = {}
+    for pair in multiplier_str.split(","):
+        if ":" in pair:
+            k, v = pair.strip().split(":", 1)
+            try:
+                multipliers[k.strip()] = float(v.strip())
+            except ValueError:
+                pass
+
+    # Build effective thresholds per category
+    categories = {
+        "error_rate": {"description": "Service error rate spike", "base": zscore},
+        "latency": {"description": "Service latency degradation", "base": zscore},
+        "throughput": {"description": "Service throughput drop", "base": zscore},
+        "db_latency": {"description": "Database query latency", "base": zscore},
+        "db_error": {"description": "Database connection/query errors", "base": zscore},
+        "dependency_latency": {"description": "Downstream service latency", "base": zscore},
+        "dependency_error": {"description": "Downstream service errors", "base": zscore},
+        "exception_surge": {"description": "Exception rate surge", "base": zscore},
+        "new_exception": {"description": "Previously unseen exception type", "base": zscore},
+    }
+    for cat, info in categories.items():
+        mult = 1.0
+        for key, m in multipliers.items():
+            if cat.startswith(key) or key in cat:
+                mult = m
+                break
+        info["multiplier"] = mult
+        info["effective"] = round(max(1.0, zscore * mult), 2)
+
+    return jsonify({
+        "detection": {
+            "zscore_threshold": zscore,
+            "error_rate_warning": float(os.getenv("ERROR_RATE_WARNING", "0.05")),
+            "error_rate_critical": float(os.getenv("ERROR_RATE_CRITICAL", "0.20")),
+            "detection_interval_seconds": int(os.getenv("DETECTION_INTERVAL", "60")),
+        },
+        "baselines": {
+            "window_hours": int(os.getenv("BASELINE_WINDOW_HOURS", "24")),
+            "recompute_interval_seconds": int(os.getenv("BASELINE_INTERVAL", "3600")),
+            "min_samples": int(os.getenv("MIN_SAMPLES_FOR_BASELINE", "10")),
+        },
+        "alert_behavior": {
+            "cooldown_minutes": int(os.getenv("ALERT_COOLDOWN_MINUTES", "15")),
+            "auto_resolve_minutes": int(os.getenv("AUTO_RESOLVE_MINUTES", "30")),
+        },
+        "root_cause": {
+            "enabled": os.getenv("ROOT_CAUSE_ENABLED", "true").lower() == "true",
+            "adaptive_thresholds": os.getenv("ADAPTIVE_THRESHOLDS", "true").lower() == "true",
+            "categories": categories,
+        },
+        "investigation": {
+            "model": os.getenv("INVESTIGATION_MODEL", "claude-3-5-haiku-20241022"),
+            "critical_only": INVESTIGATE_CRITICAL_ONLY,
+            "max_per_hour": int(os.getenv("MAX_INVESTIGATIONS_PER_HOUR", "5")),
+            "service_cooldown_minutes": int(os.getenv("INVESTIGATION_SERVICE_COOLDOWN_MINUTES", "30")),
+        },
+        "resource_predictions": {
+            "disk_threshold": 0.95,
+            "memory_threshold": 0.95,
+            "cpu_threshold": 0.95,
+            "trend_window_hours": 2,
+            "min_r_squared": 0.7,
+            "max_forecast_hours": 24,
+        },
+    })
+
+
+@app.route('/api/entity/<entity_type>/<entity_name>/baselines', methods=['GET'])
+def get_entity_baselines(entity_type, entity_name):
+    """Return computed baselines for a specific entity (service/database)."""
+    executor = get_query_executor()
+    if not executor:
+        return jsonify({"baselines": [], "error": "No database connection"})
+
+    # For databases, baselines are stored under the services that use them
+    # with metric_type like db_<system>_latency, db_<system>_error_rate
+    if entity_type == 'database':
+        like_pattern = f"db_{entity_name}_%"
+        sql = f"""
+            SELECT service_name, metric_type, baseline_mean, baseline_stddev,
+                   baseline_min, baseline_max, baseline_p50, baseline_p95, baseline_p99,
+                   sample_count, computed_at
+            FROM service_baselines
+            WHERE metric_type LIKE '{like_pattern}'
+            AND computed_at > NOW() - INTERVAL '24' HOUR
+            ORDER BY computed_at DESC
+        """
+    else:
+        sql = f"""
+            SELECT service_name, metric_type, baseline_mean, baseline_stddev,
+                   baseline_min, baseline_max, baseline_p50, baseline_p95, baseline_p99,
+                   sample_count, computed_at
+            FROM service_baselines
+            WHERE service_name = '{entity_name}'
+            AND computed_at > NOW() - INTERVAL '24' HOUR
+            ORDER BY computed_at DESC
+        """
+
+    try:
+        result = executor.execute_query(sql)
+        if not result.get("success"):
+            return jsonify({"baselines": [], "error": result.get("error", "Query failed")})
+
+        # Deduplicate: keep only the latest baseline per metric_type
+        seen = {}
+        for row in result.get("rows", []):
+            key = f"{row.get('service_name', '')}:{row.get('metric_type', '')}"
+            if key not in seen:
+                def safe_float(v):
+                    try:
+                        return round(float(v), 4) if v is not None else None
+                    except (ValueError, TypeError):
+                        return None
+                seen[key] = {
+                    "service_name": row.get("service_name"),
+                    "metric_type": row.get("metric_type"),
+                    "mean": safe_float(row.get("baseline_mean")),
+                    "stddev": safe_float(row.get("baseline_stddev")),
+                    "min": safe_float(row.get("baseline_min")),
+                    "max": safe_float(row.get("baseline_max")),
+                    "p50": safe_float(row.get("baseline_p50")),
+                    "p95": safe_float(row.get("baseline_p95")),
+                    "p99": safe_float(row.get("baseline_p99")),
+                    "sample_count": int(row.get("sample_count", 0) or 0),
+                    "computed_at": str(row.get("computed_at")) if row.get("computed_at") else None,
+                }
+        return jsonify({"baselines": list(seen.values())})
+    except Exception as e:
+        return jsonify({"baselines": [], "error": str(e)})
+
+
 @app.route('/api/alerts', methods=['GET'])
 def get_alerts():
     """Get alerts with optional filtering."""
