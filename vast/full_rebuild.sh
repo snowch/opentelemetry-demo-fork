@@ -1,12 +1,27 @@
 #!/usr/bin/env bash
 #
-# Full rebuild: tear down everything, reset data, rebuild all images
-# from scratch, and bring the stack back up.
+# Full rebuild: tear down everything, reset data, rebuild images,
+# and bring the stack back up.
 #
-# Usage: ./vast/full_rebuild.sh
+# Usage:
+#   ./vast/full_rebuild.sh          # rebuild everything (--no-cache)
+#   ./vast/full_rebuild.sh --vast   # only --no-cache the vast services
 #
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+VAST_SERVICES=(
+  observability-agent
+  observability-ingester
+  observability-aggregator
+  observability-topology
+  observability-predictive
+)
+
+vast_only=false
+if [[ "${1:-}" == "--vast" ]]; then
+  vast_only=true
+fi
 
 echo "=== Full Rebuild ==="
 echo ""
@@ -20,10 +35,15 @@ echo ""
 echo "--- Running data reset ---"
 ./vast/reset_data.sh
 
-# --- 3. Rebuild all images with no cache ---
+# --- 3. Rebuild images ---
 echo ""
-echo "--- Building images (--no-cache) ---"
-docker compose build --no-cache
+if $vast_only; then
+  echo "--- Building vast services (--no-cache) ---"
+  docker compose build --no-cache "${VAST_SERVICES[@]}"
+else
+  echo "--- Building all images (--no-cache) ---"
+  docker compose build --no-cache
+fi
 
 # --- 4. Bring everything up ---
 echo ""

@@ -4392,6 +4392,16 @@ Can you help me understand this issue further or suggest next steps?`;
             indicator.classList.add('active');
             indicator.querySelector('span:last-child').textContent = 'Auto-refresh on';
 
+            // Stop any running auto-refresh from a previous entity before doing anything async
+            stopEntityModalAutoRefresh();
+
+            // Destroy any charts from the previous entity so loaders rebuild the skeleton
+            Object.values(modalCharts).forEach(c => c.destroy());
+            modalCharts = {};
+
+            // Clear the modal body so stale content from a previous entity type is never visible
+            document.getElementById('entity-modal-body').innerHTML = '';
+
             // Load default tab
             await switchEntityTab(config.defaultTab);
             startEntityModalAutoRefresh();

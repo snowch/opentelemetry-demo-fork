@@ -82,6 +82,19 @@ receivers:
       - type: move
         from: attributes.stream
         to: attributes["log.iostream"]
+  # Postgres tmpfs disk metrics (shared volume mounted at /pg-data)
+  hostmetrics/postgres:
+    collection_interval: 15s
+    scrapers:
+      filesystem:
+        include_virtual_filesystems: true
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
+        include_mount_points:
+          mount_points:
+            - /pg-data
+          match_type: strict
   # Host metrics
   hostmetrics:
     root_path: /hostfs
@@ -213,6 +226,12 @@ processors:
           enabled: false
         os.type:
           enabled: true
+  # Tag postgres tmpfs metrics so they associate with the postgresql database
+  resource/postgres:
+    attributes:
+      - key: db.system
+        value: postgresql
+        action: upsert
   # Add host.name to metrics that don't have it (like postgresql, redis)
   resource/add-host:
     attributes:
@@ -232,6 +251,20 @@ processors:
           # could be removed when https://github.com/vercel/next.js/pull/64852 is fixed upstream
           - replace_pattern(name, "\\?.*", "")
           - replace_match(name, "GET /api/products/*", "GET /api/products/{productId}")
+  # Rewrite postgres tmpfs metrics: fix mountpoint and rename to postgresql.* namespace
+  # so they appear in the database drill-down (metric_name LIKE 'postgresql.%')
+  # and don't create a spurious host entry in topology_hosts
+  transform/postgres:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(attributes["mountpoint"], "/var/lib/postgresql/data") where attributes["mountpoint"] == "/pg-data"
+      - context: metric
+        statements:
+          - set(name, "postgresql.filesystem.utilization") where name == "system.filesystem.utilization"
+          - set(name, "postgresql.filesystem.usage") where name == "system.filesystem.usage"
+          - set(name, "postgresql.filesystem.inodes.usage") where name == "system.filesystem.inodes.usage"
 
   batch:
     send_batch_max_size: 100  # <--- Prevents "MESSAGE_TOO_LARGE" error
@@ -250,6 +283,10 @@ service:
     metrics:
       receivers: [docker_stats, httpcheck/frontend-proxy, hostmetrics, kafkametrics, nginx, otlp, postgresql, redis, spanmetrics]
       processors: [resourcedetection, resource/add-host, memory_limiter, batch]
+      exporters: [otlphttp/prometheus, debug, kafka/metrics]
+    metrics/postgres:
+      receivers: [hostmetrics/postgres]
+      processors: [resource/postgres, transform/postgres, memory_limiter, batch]
       exporters: [otlphttp/prometheus, debug, kafka/metrics]
     logs:
       receivers: [otlp]

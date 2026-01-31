@@ -77,16 +77,16 @@ SCENARIOS = {
     },
     "disk_fill": {
         "name": "Disk Fill Simulation",
-        "description": "Creates large temporary files in the postgres container every 2 minutes to simulate disk exhaustion.",
+        "description": "Creates temporary files in the postgres data directory every 2 minutes to simulate disk exhaustion. PGDATA is a 250MB tmpfs.",
         "predicted_alerts": ["trend"],
         "duration_minutes": 12,
         "steps": [
-            {"delay_seconds": 0, "action": "disk_fill_step", "params": {"size_mb": 4500, "file_index": 1}, "label": "Write 4.5GB (1/6)"},
-            {"delay_seconds": 120, "action": "disk_fill_step", "params": {"size_mb": 4500, "file_index": 2}, "label": "Write 4.5GB (2/6)"},
-            {"delay_seconds": 240, "action": "disk_fill_step", "params": {"size_mb": 4500, "file_index": 3}, "label": "Write 4.5GB (3/6)"},
-            {"delay_seconds": 360, "action": "disk_fill_step", "params": {"size_mb": 4500, "file_index": 4}, "label": "Write 4.5GB (4/6)"},
-            {"delay_seconds": 480, "action": "disk_fill_step", "params": {"size_mb": 4500, "file_index": 5}, "label": "Write 4.5GB (5/6)"},
-            {"delay_seconds": 600, "action": "disk_fill_step", "params": {"size_mb": 4500, "file_index": 6}, "label": "Write 4.5GB (6/6)"},
+            {"delay_seconds": 0, "action": "disk_fill_step", "params": {"size_mb": 30, "file_index": 1}, "label": "Write 30MB (1/6)"},
+            {"delay_seconds": 120, "action": "disk_fill_step", "params": {"size_mb": 30, "file_index": 2}, "label": "Write 30MB (2/6)"},
+            {"delay_seconds": 240, "action": "disk_fill_step", "params": {"size_mb": 30, "file_index": 3}, "label": "Write 30MB (3/6)"},
+            {"delay_seconds": 360, "action": "disk_fill_step", "params": {"size_mb": 30, "file_index": 4}, "label": "Write 30MB (4/6)"},
+            {"delay_seconds": 480, "action": "disk_fill_step", "params": {"size_mb": 30, "file_index": 5}, "label": "Write 30MB (5/6)"},
+            {"delay_seconds": 600, "action": "disk_fill_step", "params": {"size_mb": 30, "file_index": 6}, "label": "Write 30MB (6/6)"},
         ],
         "cleanup": {"action": "disk_fill_cleanup"},
     },
@@ -205,12 +205,12 @@ def execute_action(action: str, params: Dict) -> bool:
         file_index = params["file_index"]
         return _run_docker_exec(
             "postgresql",
-            ["dd", "if=/dev/zero", f"of=/tmp/sim_fill_{file_index}.dat", "bs=1M", f"count={size_mb}"],
+            ["dd", "if=/dev/zero", f"of=/var/lib/postgresql/data/sim_fill_{file_index}.dat", "bs=1M", f"count={size_mb}"],
             timeout=300
         )
 
     elif action == "disk_fill_cleanup":
-        return _run_docker_exec("postgresql", ["sh", "-c", "rm -f /tmp/sim_fill_*.dat"], timeout=10)
+        return _run_docker_exec("postgresql", ["sh", "-c", "rm -f /var/lib/postgresql/data/sim_fill_*.dat"], timeout=10)
 
     else:
         print(f"[Simulator] Unknown action: {action}")

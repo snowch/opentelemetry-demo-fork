@@ -23,6 +23,7 @@ DROP TABLE IF EXISTS vast."csnow-db|otel".simulation_runs;
 DROP TABLE IF EXISTS vast."csnow-db|otel".service_metrics_1m;
 DROP TABLE IF EXISTS vast."csnow-db|otel".db_metrics_1m;
 DROP TABLE IF EXISTS vast."csnow-db|otel".operation_metrics_5m;
+DROP TABLE IF EXISTS vast."csnow-db|otel".job_status;
 
 -- vast."csnow-db|otel".logs_otel_analytic definition
 

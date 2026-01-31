@@ -949,6 +949,7 @@ services:
       - POSTGRES_DB
     volumes:
       - ./src/postgresql/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - pg-data:/var/lib/postgresql/data
     healthcheck:
       test: pg_isready -U root -d ${POSTGRES_DB}
       interval: 5s
@@ -1033,6 +1034,7 @@ services:
       - ${DOCKER_SOCK}:/var/run/docker.sock:ro
       - ${OTEL_COLLECTOR_CONFIG}:/etc/otelcol-config.yml
       - ${OTEL_COLLECTOR_CONFIG_EXTRAS}:/etc/otelcol-config-extras.yml
+      - pg-data:/pg-data:ro
     ports:
       - "${OTEL_COLLECTOR_PORT_GRPC}"
       - "${OTEL_COLLECTOR_PORT_HTTP}"
@@ -1124,3 +1126,12 @@ services:
   #     timeout: 10s
   #     retries: 10
   #   logging: *logging
+
+volumes:
+  pg-data:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=250m
+
