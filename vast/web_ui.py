@@ -133,6 +133,46 @@ def parse_time_interval(time_param, default="'5' MINUTE"):
     return default
 
 
+def parse_time_range(req, default_preset='5m'):
+    """Parse start/end or time query params into a time range dict.
+
+    Returns dict with either:
+      {'mode': 'absolute', 'start': "TIMESTAMP '...'", 'end': "TIMESTAMP '...'"}
+      {'mode': 'relative', 'interval': "<sql interval>"}
+    """
+    start = req.args.get('start', '').strip()
+    end = req.args.get('end', '').strip()
+    if start and end:
+        # datetime-local format: YYYY-MM-DDTHH:MM -> Trino TIMESTAMP
+        start_ts = start.replace('T', ' ')
+        end_ts = end.replace('T', ' ')
+        if len(start_ts) == 16:  # YYYY-MM-DD HH:MM
+            start_ts += ':00'
+        if len(end_ts) == 16:
+            end_ts += ':00'
+        return {
+            'mode': 'absolute',
+            'start': f"TIMESTAMP '{start_ts}'",
+            'end': f"TIMESTAMP '{end_ts}'",
+        }
+    interval = parse_time_interval(req.args.get('time', default_preset))
+    return {'mode': 'relative', 'interval': interval}
+
+
+def time_filter_sql(tr, field):
+    """Generate a SQL WHERE fragment for the given time range dict and field name."""
+    if tr['mode'] == 'absolute':
+        return f"{field} BETWEEN {tr['start']} AND {tr['end']}"
+    return f"{field} > NOW() - INTERVAL {tr['interval']}"
+
+
+def time_range_to_interval(tr):
+    """Return the raw SQL interval string from a time range (for filters that embed interval)."""
+    if tr['mode'] == 'absolute':
+        return tr['interval'] if 'interval' in tr else "'1' HOUR"
+    return tr['interval']
+
+
 def build_trace_filters(req):
     """Build extra WHERE clause fragments from request params for trace queries."""
     extra = ''
@@ -1006,7 +1046,16 @@ def service_details(service_name):
     is empty or missing.
     """
     executor = get_query_executor()
-    time_range = request.args.get('range', '1')  # hours
+    # Support start/end params or fall back to range (hours)
+    start = request.args.get('start', '').strip()
+    end = request.args.get('end', '').strip()
+    if start and end:
+        tr = parse_time_range(request)
+    else:
+        time_range = request.args.get('range', '1')  # hours
+        tr = {'mode': 'relative', 'interval': f"'{time_range}' HOUR"}
+    time_cond_bucket = time_filter_sql(tr, 'time_bucket')
+    time_cond_start = time_filter_sql(tr, 'start_time')
 
     data = {
         'service_name': service_name,
@@ -1023,7 +1072,7 @@ def service_details(service_name):
            request_count, error_count, error_pct
     FROM service_metrics_1m
     WHERE service_name = '{service_name}'
-      AND time_bucket > NOW() - INTERVAL '{time_range}' HOUR
+      AND {time_cond_bucket}
     ORDER BY time_bucket
     """
     result = executor.execute_query(rollup_query)
@@ -1053,7 +1102,7 @@ def service_details(service_name):
             COUNT(*) as request_count
         FROM traces_otel_analytic
         WHERE service_name = '{service_name}'
-          AND start_time > NOW() - INTERVAL '{time_range}' HOUR
+          AND {time_cond_start}
         GROUP BY date_trunc('minute', start_time)
         ORDER BY time_bucket
         """
@@ -1069,7 +1118,7 @@ def service_details(service_name):
             ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) / COUNT(*), 2) as error_pct
         FROM traces_otel_analytic
         WHERE service_name = '{service_name}'
-          AND start_time > NOW() - INTERVAL '{time_range}' HOUR
+          AND {time_cond_start}
         GROUP BY date_trunc('minute', start_time)
         ORDER BY time_bucket
         """
@@ -1084,7 +1133,7 @@ def service_details(service_name):
     FROM traces_otel_analytic
     WHERE service_name = '{service_name}'
       AND status_code = 'ERROR'
-      AND start_time > NOW() - INTERVAL '{time_range}' HOUR
+      AND {time_cond_start}
     ORDER BY start_time DESC
     LIMIT 10
     """
@@ -1100,7 +1149,7 @@ def service_details(service_name):
            ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) / COUNT(*), 2) as error_pct
     FROM traces_otel_analytic
     WHERE service_name = '{service_name}'
-      AND start_time > NOW() - INTERVAL '{time_range}' HOUR
+      AND {time_cond_start}
     GROUP BY span_name
     ORDER BY call_count DESC
     LIMIT 10
@@ -1261,23 +1310,25 @@ def service_operations(service_name):
     window is >= 5 minutes, falling back to raw traces otherwise.
     """
     executor = get_query_executor()
+    tr = parse_time_range(request)
     time_param = request.args.get('time', '5m')
 
-    # Parse time parameter (e.g., "10s", "1m", "5m", "1h")
-    time_value = int(time_param[:-1])
-    time_unit = time_param[-1]
-
-    if time_unit == 's':
-        interval = f"'{time_value}' SECOND"
-    elif time_unit == 'm':
-        interval = f"'{time_value}' MINUTE"
-    elif time_unit == 'h':
-        interval = f"'{time_value}' HOUR"
+    if tr['mode'] == 'relative':
+        interval = tr['interval']
+        # Determine rollup eligibility from original time param
+        try:
+            time_value = int(time_param[:-1])
+            time_unit = time_param[-1]
+        except (ValueError, IndexError):
+            time_value, time_unit = 5, 'm'
+        use_rollup = (time_unit == 'h') or (time_unit == 'm' and time_value >= 5)
     else:
-        interval = "'5' MINUTE"  # default
+        interval = "'1' HOUR"
+        use_rollup = True  # absolute ranges are always large enough
 
-    # Use rollup table for windows >= 5 minutes
-    use_rollup = (time_unit == 'h') or (time_unit == 'm' and time_value >= 5)
+    time_cond_bucket = time_filter_sql(tr, 'time_bucket')
+    time_cond_start = time_filter_sql(tr, 'start_time')
+
     if use_rollup:
         rollup_query = f"""
         SELECT span_name,
@@ -1286,7 +1337,7 @@ def service_operations(service_name):
                ROUND(100.0 * SUM(error_count) / NULLIF(SUM(call_count), 0), 2) as error_pct
         FROM operation_metrics_5m
         WHERE service_name = '{service_name}'
-          AND time_bucket > NOW() - INTERVAL {interval}
+          AND {time_cond_bucket}
         GROUP BY span_name
         ORDER BY call_count DESC
         LIMIT 10
@@ -1303,7 +1354,7 @@ def service_operations(service_name):
            ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) as error_pct
     FROM traces_otel_analytic
     WHERE service_name = '{service_name}'
-      AND start_time > NOW() - INTERVAL {interval}
+      AND {time_cond_start}
     GROUP BY span_name
     ORDER BY call_count DESC
     LIMIT 10
@@ -1325,7 +1376,17 @@ def database_details(db_system):
     table is empty or missing.
     """
     executor = get_query_executor()
-    time_range = request.args.get('range', '1')  # hours
+    # Support start/end params or fall back to range (hours)
+    start = request.args.get('start', '').strip()
+    end = request.args.get('end', '').strip()
+    if start and end:
+        tr = parse_time_range(request)
+    else:
+        time_range = request.args.get('range', '1')  # hours
+        tr = {'mode': 'relative', 'interval': f"'{time_range}' HOUR"}
+    time_cond_bucket = time_filter_sql(tr, 'time_bucket')
+    time_cond_start = time_filter_sql(tr, 'start_time')
+    time_cond_ts = time_filter_sql(tr, 'timestamp')
 
     data = {
         'db_system': db_system,
@@ -1342,7 +1403,7 @@ def database_details(db_system):
            query_count, error_count, error_pct
     FROM db_metrics_1m
     WHERE db_system = '{db_system}'
-      AND time_bucket > NOW() - INTERVAL '{time_range}' HOUR
+      AND {time_cond_bucket}
     ORDER BY time_bucket
     """
     result = executor.execute_query(rollup_query)
@@ -1372,7 +1433,7 @@ def database_details(db_system):
             COUNT(*) as query_count
         FROM traces_otel_analytic
         WHERE db_system = '{db_system}'
-          AND start_time > NOW() - INTERVAL '{time_range}' HOUR
+          AND {time_cond_start}
         GROUP BY date_trunc('minute', start_time)
         ORDER BY time_bucket
         """
@@ -1388,7 +1449,7 @@ def database_details(db_system):
             ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) as error_pct
         FROM traces_otel_analytic
         WHERE db_system = '{db_system}'
-          AND start_time > NOW() - INTERVAL '{time_range}' HOUR
+          AND {time_cond_start}
         GROUP BY date_trunc('minute', start_time)
         ORDER BY time_bucket
         """
@@ -1404,7 +1465,7 @@ def database_details(db_system):
            ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) as error_pct
     FROM traces_otel_analytic
     WHERE db_system = '{db_system}'
-      AND start_time > NOW() - INTERVAL '{time_range}' HOUR
+      AND {time_cond_start}
     GROUP BY service_name, span_name
     ORDER BY avg_latency_ms DESC
     LIMIT 10
@@ -1420,7 +1481,7 @@ def database_details(db_system):
         MAX(value_double) as deadlock_count
     FROM metrics_otel_analytic
     WHERE metric_name = '{db_system}.deadlocks'
-      AND timestamp > NOW() - INTERVAL '{time_range}' HOUR
+      AND {time_cond_ts}
     GROUP BY date_trunc('minute', timestamp)
     ORDER BY time_bucket
     """
@@ -1435,7 +1496,7 @@ def database_details(db_system):
         ROUND(MAX(value_double) / 1048576.0, 2) as size_mb
     FROM metrics_otel_analytic
     WHERE metric_name = '{db_system}.db_size'
-      AND timestamp > NOW() - INTERVAL '{time_range}' HOUR
+      AND {time_cond_ts}
     GROUP BY date_trunc('minute', timestamp)
     ORDER BY time_bucket
     """
@@ -1686,8 +1747,10 @@ def host_services(host_name):
 
 @app.route('/api/host/<host_name>/resource-history', methods=['GET'])
 def host_resource_history(host_name):
-    """Get 1-minute bucketed CPU, memory, disk utilization over the last hour."""
+    """Get 1-minute bucketed CPU, memory, disk utilization."""
     executor = get_query_executor()
+    tr = parse_time_range(request, default_preset='1h')
+    time_cond = time_filter_sql(tr, 'timestamp')
 
     query = f"""
     SELECT date_trunc('minute', timestamp) as time_bucket,
@@ -1700,7 +1763,7 @@ def host_resource_history(host_name):
             THEN ROUND(value_double*100,1) END) as disk_pct
     FROM metrics_otel_analytic
     WHERE metric_name IN ('system.cpu.utilization','system.memory.utilization','system.filesystem.utilization')
-      AND timestamp > NOW() - INTERVAL '1' HOUR
+      AND {time_cond}
       AND attributes_flat LIKE '%host.name={host_name}%'
     GROUP BY date_trunc('minute', timestamp)
     ORDER BY time_bucket
@@ -2023,12 +2086,14 @@ def entity_traces(entity_type, name):
     config = ENTITY_TYPES[entity_type]
     executor = get_query_executor()
     limit = min(int(request.args.get('limit', '50')), 1000)
-    interval = parse_time_interval(request.args.get('time', '5m'))
+    tr = parse_time_range(request)
+    interval = tr['interval'] if tr['mode'] == 'relative' else "'1' HOUR"
     extra_where = build_trace_filters(request)
 
     traces_filter = config['traces_filter'].format(name=name, interval=interval)
     table = config['traces_table']
     time_field = config['traces_time_field']
+    time_cond = time_filter_sql(tr, time_field)
 
     # For service, we don't need service_name in SELECT since it's the filter
     if entity_type == 'service':
@@ -2038,7 +2103,7 @@ def entity_traces(entity_type, name):
                start_time, db_system
         FROM {table}
         WHERE {traces_filter}
-          AND {time_field} > NOW() - INTERVAL {interval}
+          AND {time_cond}
           {extra_where}
         ORDER BY {time_field} DESC
         LIMIT {limit}
@@ -2050,7 +2115,7 @@ def entity_traces(entity_type, name):
                {time_field} as start_time
         FROM {table}
         WHERE {traces_filter}
-          AND {time_field} > NOW() - INTERVAL {interval}
+          AND {time_cond}
           {extra_where}
         ORDER BY {time_field} DESC
         LIMIT {limit}
@@ -2071,17 +2136,19 @@ def entity_logs(entity_type, name):
     config = ENTITY_TYPES[entity_type]
     executor = get_query_executor()
     limit = min(int(request.args.get('limit', '50')), 1000)
-    interval = parse_time_interval(request.args.get('time', '5m'))
+    tr = parse_time_range(request)
+    interval = tr['interval'] if tr['mode'] == 'relative' else "'1' HOUR"
 
     if config['logs_filter']:
         # Direct filter (service)
         extra_where = build_log_filters(request)
         logs_filter = config['logs_filter'].format(name=name, interval=interval)
+        time_cond = time_filter_sql(tr, 'timestamp')
         logs_query = f"""
         SELECT timestamp, severity_text, body, trace_id, span_id
         FROM logs_otel_analytic
         WHERE {logs_filter}
-          AND timestamp > NOW() - INTERVAL {interval}
+          AND {time_cond}
           {extra_where}
         ORDER BY timestamp DESC
         LIMIT {limit}
@@ -2090,11 +2157,12 @@ def entity_logs(entity_type, name):
         # Subquery join (database, host)
         extra_where = build_log_filters(request, 'l')
         join_filter = config['logs_join'].format(name=name, interval=interval)
+        time_cond = time_filter_sql(tr, 'l.timestamp')
         logs_query = f"""
         SELECT l.timestamp, l.service_name, l.severity_text, l.body, l.trace_id, l.span_id
         FROM logs_otel_analytic l
         WHERE {join_filter}
-          AND l.timestamp > NOW() - INTERVAL {interval}
+          AND {time_cond}
           {extra_where}
         ORDER BY l.timestamp DESC
         LIMIT {limit}
@@ -2117,7 +2185,8 @@ def entity_metrics(entity_type, name):
     config = ENTITY_TYPES[entity_type]
     executor = get_query_executor()
     limit = min(int(request.args.get('limit', '50')), 1000)
-    interval = parse_time_interval(request.args.get('time', '5m'))
+    tr = parse_time_range(request)
+    interval = tr['interval'] if tr['mode'] == 'relative' else "'1' HOUR"
 
     extra_where = ''
     search_filter = request.args.get('search', '')
@@ -2125,6 +2194,7 @@ def entity_metrics(entity_type, name):
         extra_where += f" AND LOWER(metric_name) LIKE LOWER('%{search_filter}%')"
 
     metrics_filter = config['metrics_filter'].format(name=name, interval=interval)
+    time_cond = time_filter_sql(tr, 'timestamp')
 
     metrics_query = f"""
     SELECT metric_name,
@@ -2135,7 +2205,7 @@ def entity_metrics(entity_type, name):
            MAX(timestamp) as last_seen
     FROM metrics_otel_analytic
     WHERE {metrics_filter}
-      AND timestamp > NOW() - INTERVAL {interval}
+      AND {time_cond}
       {extra_where}
     GROUP BY metric_name
     ORDER BY data_points DESC
@@ -2190,8 +2260,10 @@ def entity_metric_history(entity_type, name):
 
     config = ENTITY_TYPES[entity_type]
     executor = get_query_executor()
-    interval = parse_time_interval(request.args.get('time', '5m'))
+    tr = parse_time_range(request)
+    interval = tr['interval'] if tr['mode'] == 'relative' else "'1' HOUR"
     metrics_filter = config['metrics_filter'].format(name=name, interval=interval)
+    time_cond = time_filter_sql(tr, 'timestamp')
 
     # First, find top 10 attribute combos by data-point count
     top_attrs_query = f"""
@@ -2199,7 +2271,7 @@ def entity_metric_history(entity_type, name):
     FROM metrics_otel_analytic
     WHERE {metrics_filter}
       AND metric_name = '{metric}'
-      AND timestamp > NOW() - INTERVAL {interval}
+      AND {time_cond}
     GROUP BY attributes_flat
     ORDER BY cnt DESC
     LIMIT 10
@@ -2219,7 +2291,7 @@ def entity_metric_history(entity_type, name):
     FROM metrics_otel_analytic
     WHERE {metrics_filter}
       AND metric_name = '{metric}'
-      AND timestamp > NOW() - INTERVAL {interval}
+      AND {time_cond}
       AND attributes_flat IN ({in_list})
     GROUP BY date_trunc('minute', timestamp), attributes_flat
     ORDER BY bucket

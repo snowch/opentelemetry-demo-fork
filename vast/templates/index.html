@@ -1785,6 +1785,87 @@
         .legend-dot.external { background: #f59e0b; }
         .legend-dot.error { background: #ef4444; }
 
+        /* Entity time bar */
+        .entity-time-bar {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 8px 24px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+        }
+        .time-presets {
+            display: flex;
+            gap: 4px;
+        }
+        .time-preset-btn {
+            padding: 4px 12px;
+            font-size: 12px;
+            font-weight: 500;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .time-preset-btn:hover {
+            border-color: rgba(0,217,255,0.4);
+            color: var(--text-primary);
+        }
+        .time-preset-btn.active {
+            background: rgba(0,217,255,0.15);
+            border-color: rgba(0,217,255,0.5);
+            color: #00d9ff;
+        }
+        .time-custom {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .time-input {
+            padding: 4px 8px;
+            font-size: 11px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            color-scheme: dark;
+        }
+        .time-apply-btn {
+            padding: 4px 12px;
+            font-size: 11px;
+            font-weight: 500;
+            border: 1px solid rgba(0,217,255,0.4);
+            border-radius: 4px;
+            background: rgba(0,217,255,0.1);
+            color: #00d9ff;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .time-apply-btn:hover {
+            background: rgba(0,217,255,0.2);
+        }
+        .entity-live-indicator {
+            display: none;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #10b981;
+            margin-right: 8px;
+        }
+        .entity-live-indicator.active {
+            display: flex;
+        }
+        .entity-live-indicator .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #10b981;
+            animation: pulse 2s infinite;
+        }
+
         /* Modal tabs */
         .modal-tabs {
             display: flex;
@@ -2762,13 +2843,9 @@
                     </select>
                 </div>
                 <div class="modal-refresh-controls">
-                    <div class="auto-refresh-indicator" id="entity-modal-auto-indicator">
+                    <div class="entity-live-indicator" id="entity-live-indicator">
                         <span class="dot"></span>
-                        <span>Auto-refresh off</span>
-                    </div>
-                    <div class="toggle-container">
-                        <span class="toggle-label">Auto</span>
-                        <div class="toggle-switch" id="entity-modal-auto-toggle" onclick="toggleEntityModalAutoRefresh()"></div>
+                        <span>Live</span>
                     </div>
                     <button class="modal-refresh-btn" id="entity-modal-refresh-btn" onclick="refreshEntityModal()">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2783,6 +2860,21 @@
                         Ask
                     </button>
                     <button class="modal-close" onclick="closeEntityModal()">&times;</button>
+                </div>
+            </div>
+            <div class="entity-time-bar">
+                <div class="time-presets">
+                    <button class="time-preset-btn active" data-preset="5m" onclick="setEntityTimePreset('5m')">5m</button>
+                    <button class="time-preset-btn" data-preset="15m" onclick="setEntityTimePreset('15m')">15m</button>
+                    <button class="time-preset-btn" data-preset="1h" onclick="setEntityTimePreset('1h')">1h</button>
+                    <button class="time-preset-btn" data-preset="6h" onclick="setEntityTimePreset('6h')">6h</button>
+                    <button class="time-preset-btn" data-preset="24h" onclick="setEntityTimePreset('24h')">24h</button>
+                </div>
+                <div class="time-custom">
+                    <input type="datetime-local" class="time-input" id="entity-time-custom-start" step="60">
+                    <span style="color:var(--text-muted);">to</span>
+                    <input type="datetime-local" class="time-input" id="entity-time-custom-end" step="60">
+                    <button class="time-apply-btn" onclick="applyCustomTimeRange()">Apply</button>
                 </div>
             </div>
             <div class="modal-tabs" id="entity-modal-tabs">
@@ -3023,6 +3115,13 @@
         let entityModalRefreshInterval = null;
         let currentEntityType = null;
         let currentEntityName = null;
+
+        // Global entity time controls
+        let entityTimeMode = 'preset';   // 'preset' | 'custom'
+        let entityTimePreset = '5m';
+        let entityTimeStart = null;
+        let entityTimeEnd = null;
+
         // Legacy compat aliases
         let modalAutoRefresh = false;
         let modalRefreshInterval = null;
@@ -4393,12 +4492,9 @@ Can you help me understand this issue further or suggest next steps?`;
                 return `<div class="modal-tab${activeClass}" onclick="switchEntityTab('${tab.id}')">${tab.label}${badge}</div>`;
             }).join('');
 
-            // Enable auto-refresh
+            // Reset time controls and enable auto-refresh
+            resetEntityTimeControls();
             entityModalAutoRefresh = true;
-            document.getElementById('entity-modal-auto-toggle').classList.add('active');
-            const indicator = document.getElementById('entity-modal-auto-indicator');
-            indicator.classList.add('active');
-            indicator.querySelector('span:last-child').textContent = 'Auto-refresh on';
 
             // Stop any running auto-refresh from a previous entity before doing anything async
             stopEntityModalAutoRefresh();
@@ -4423,8 +4519,16 @@ Can you help me understand this issue further or suggest next steps?`;
                 if (type === 'service') currentModalService = name;
                 if (type === 'database') currentModalDatabase = name;
                 if (type === 'host') currentModalHost = name;
+                resetEntityTimeControls();
+                entityModalAutoRefresh = true;
+                stopEntityModalAutoRefresh();
+                Object.values(modalCharts).forEach(c => c.destroy());
+                modalCharts = {};
+                destroyActiveMetricChart();
+                document.getElementById('entity-modal-body').innerHTML = '';
                 const config = ENTITY_CONFIG[type];
                 switchEntityTab(config.defaultTab);
+                startEntityModalAutoRefresh();
             }
         }
 
@@ -4457,18 +4561,81 @@ Can you help me understand this issue further or suggest next steps?`;
             entityModalAutoRefresh = false;
         }
 
-        function toggleEntityModalAutoRefresh() {
-            entityModalAutoRefresh = !entityModalAutoRefresh;
-            const toggle = document.getElementById('entity-modal-auto-toggle');
-            const indicator = document.getElementById('entity-modal-auto-indicator');
-            toggle.classList.toggle('active', entityModalAutoRefresh);
-            indicator.classList.toggle('active', entityModalAutoRefresh);
-            indicator.querySelector('span:last-child').textContent = entityModalAutoRefresh ? 'Auto-refresh on' : 'Auto-refresh off';
-            if (entityModalAutoRefresh && currentEntityName) {
-                startEntityModalAutoRefresh();
-            } else {
-                stopEntityModalAutoRefresh();
+        // --- Global entity time helpers ---
+        function getEntityTimeParams() {
+            if (entityTimeMode === 'custom' && entityTimeStart && entityTimeEnd) {
+                return `start=${encodeURIComponent(entityTimeStart)}&end=${encodeURIComponent(entityTimeEnd)}`;
             }
+            return `time=${entityTimePreset}`;
+        }
+
+        function getEntityRangeParam() {
+            if (entityTimeMode === 'custom' && entityTimeStart && entityTimeEnd) {
+                return `start=${encodeURIComponent(entityTimeStart)}&end=${encodeURIComponent(entityTimeEnd)}`;
+            }
+            const presetHoursMap = {'5m': 1, '15m': 1, '1h': 1, '6h': 6, '24h': 24};
+            return `range=${presetHoursMap[entityTimePreset] || 1}`;
+        }
+
+        function setEntityTimePreset(preset) {
+            entityTimeMode = 'preset';
+            entityTimePreset = preset;
+            entityTimeStart = null;
+            entityTimeEnd = null;
+            // Highlight active button
+            document.querySelectorAll('.time-preset-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.preset === preset);
+            });
+            // Clear custom inputs
+            const startInput = document.getElementById('entity-time-custom-start');
+            const endInput = document.getElementById('entity-time-custom-end');
+            if (startInput) startInput.value = '';
+            if (endInput) endInput.value = '';
+            // Enable auto-refresh (implicit for presets = live)
+            entityModalAutoRefresh = true;
+            updateLiveIndicator(true);
+            startEntityModalAutoRefresh();
+            refreshEntityModal();
+        }
+
+        function applyCustomTimeRange() {
+            const startInput = document.getElementById('entity-time-custom-start');
+            const endInput = document.getElementById('entity-time-custom-end');
+            if (!startInput?.value || !endInput?.value) return;
+            if (startInput.value >= endInput.value) {
+                alert('Start must be before End');
+                return;
+            }
+            entityTimeMode = 'custom';
+            entityTimeStart = startInput.value;
+            entityTimeEnd = endInput.value;
+            // Deactivate preset buttons
+            document.querySelectorAll('.time-preset-btn').forEach(btn => btn.classList.remove('active'));
+            // Stop auto-refresh (fixed range)
+            entityModalAutoRefresh = false;
+            updateLiveIndicator(false);
+            stopEntityModalAutoRefresh();
+            refreshEntityModal();
+        }
+
+        function resetEntityTimeControls() {
+            entityTimeMode = 'preset';
+            entityTimePreset = '5m';
+            entityTimeStart = null;
+            entityTimeEnd = null;
+            document.querySelectorAll('.time-preset-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.preset === '5m');
+            });
+            const startInput = document.getElementById('entity-time-custom-start');
+            const endInput = document.getElementById('entity-time-custom-end');
+            if (startInput) startInput.value = '';
+            if (endInput) endInput.value = '';
+            updateLiveIndicator(true);
+        }
+
+        function updateLiveIndicator(isLive) {
+            const indicator = document.getElementById('entity-live-indicator');
+            if (indicator) indicator.classList.toggle('active', isLive);
         }
 
         function startEntityModalAutoRefresh() {
@@ -4529,11 +4696,6 @@ Can you help me understand this issue further or suggest next steps?`;
                             <div class="chart-card">
                                 <div class="chart-card-header">
                                     <h4>Top Operations</h4>
-                                    <select class="time-selector" id="ops-time-selector" onchange="refreshTopOperations()">
-                                        <option value="10s">Last 10s</option><option value="30s">Last 30s</option>
-                                        <option value="1m">Last 1m</option><option value="5m" selected>Last 5m</option>
-                                        <option value="15m">Last 15m</option><option value="1h">Last 1h</option>
-                                    </select>
                                 </div>
                                 <table class="ops-table" id="ops-table"><thead><tr><th>Operation</th><th>Calls</th><th>Avg Latency</th><th>Error %</th></tr></thead><tbody></tbody></table>
                             </div>
@@ -4580,7 +4742,7 @@ Can you help me understand this issue further or suggest next steps?`;
 
         async function loadServiceChartsData() {
             try {
-                const response = await fetch(`/api/entity/service/${encodeURIComponent(currentEntityName)}?range=1`);
+                const response = await fetch(`/api/entity/service/${encodeURIComponent(currentEntityName)}?${getEntityRangeParam()}`);
                 const data = await response.json();
 
                 if (data.latency_history && data.latency_history.length > 0) {
@@ -4629,10 +4791,8 @@ Can you help me understand this issue further or suggest next steps?`;
 
         async function refreshTopOperations() {
             if (!currentEntityName || currentEntityType !== 'service') return;
-            const timeSelector = document.getElementById('ops-time-selector');
-            const timeWindow = timeSelector ? timeSelector.value : '5m';
             try {
-                const response = await fetch(`/api/service/${encodeURIComponent(currentEntityName)}/operations?time=${timeWindow}`);
+                const response = await fetch(`/api/service/${encodeURIComponent(currentEntityName)}/operations?${getEntityTimeParams()}`);
                 const data = await response.json();
                 const opsTable = document.getElementById('ops-table')?.querySelector('tbody');
                 if (!opsTable) return;
@@ -4650,7 +4810,7 @@ Can you help me understand this issue further or suggest next steps?`;
 
         async function loadDatabaseChartsData() {
             try {
-                const response = await fetch(`/api/entity/database/${encodeURIComponent(currentEntityName)}?range=1`);
+                const response = await fetch(`/api/entity/database/${encodeURIComponent(currentEntityName)}?${getEntityRangeParam()}`);
                 const data = await response.json();
 
                 if (data.latency_history && data.latency_history.length > 0) {
@@ -4771,7 +4931,7 @@ Can you help me understand this issue further or suggest next steps?`;
 
         async function loadHostResourceHistory(hostName) {
             try {
-                const response = await fetch(`/api/host/${encodeURIComponent(hostName)}/resource-history`);
+                const response = await fetch(`/api/host/${encodeURIComponent(hostName)}/resource-history?${getEntityTimeParams()}`);
                 const data = await response.json();
                 if (!data.history || data.history.length === 0) return;
 
@@ -4823,7 +4983,7 @@ Can you help me understand this issue further or suggest next steps?`;
                 </div>
             `;
             try {
-                const response = await fetch(`/api/entity/container/${encodeURIComponent(currentEntityName)}/metrics?time=5m`);
+                const response = await fetch(`/api/entity/container/${encodeURIComponent(currentEntityName)}/metrics?${getEntityTimeParams()}`);
                 const data = await response.json();
                 const metricsDiv = document.getElementById('container-current-metrics');
                 if (data.success && data.rows && data.rows.length > 0) {
@@ -4921,10 +5081,6 @@ Can you help me understand this issue further or suggest next steps?`;
         function buildTracesFilterBar() {
             return `<div class="tab-controls">
                 <span class="tab-title">Recent Traces</span>
-                <select class="time-selector" id="entity-traces-time" onchange="loadEntityTraces()">
-                    <option value="1m">Last 1m</option><option value="5m" selected>Last 5m</option>
-                    <option value="15m">Last 15m</option><option value="1h">Last 1h</option>
-                </select>
             </div>
             <div class="filter-bar">
                 <input type="text" id="entity-traces-search" placeholder="Search span name..." onkeydown="if(event.key==='Enter') loadEntityTraces()">
@@ -4955,7 +5111,6 @@ Can you help me understand this issue further or suggest next steps?`;
                     </div></div>`;
             }
 
-            const timeWindow = document.getElementById('entity-traces-time')?.value || '5m';
             let filterParams = '';
             const searchVal = document.getElementById('entity-traces-search')?.value?.trim();
             const statusVal = document.getElementById('entity-traces-status')?.value;
@@ -4966,7 +5121,7 @@ Can you help me understand this issue further or suggest next steps?`;
             const limitVal = document.getElementById('entity-traces-limit')?.value || '50';
 
             try {
-                const response = await fetch(`/api/entity/${currentEntityType}/${encodeURIComponent(currentEntityName)}/traces?time=${timeWindow}&limit=${limitVal}${filterParams}`);
+                const response = await fetch(`/api/entity/${currentEntityType}/${encodeURIComponent(currentEntityName)}/traces?${getEntityTimeParams()}&limit=${limitVal}${filterParams}`);
                 const data = await response.json();
                 const tbody = document.getElementById('entity-traces-table').querySelector('tbody');
                 const countBadge = document.getElementById('entity-traces-count');
@@ -5002,10 +5157,6 @@ Can you help me understand this issue further or suggest next steps?`;
         function buildLogsFilterBar() {
             return `<div class="tab-controls">
                 <span class="tab-title">Recent Logs</span>
-                <select class="time-selector" id="entity-logs-time" onchange="loadEntityLogs()">
-                    <option value="1m">Last 1m</option><option value="5m" selected>Last 5m</option>
-                    <option value="15m">Last 15m</option><option value="1h">Last 1h</option>
-                </select>
             </div>
             <div class="filter-bar">
                 <input type="text" id="entity-logs-search" placeholder="Search log body..." onkeydown="if(event.key==='Enter') loadEntityLogs()">
@@ -5035,7 +5186,6 @@ Can you help me understand this issue further or suggest next steps?`;
                     </div></div>`;
             }
 
-            const timeWindow = document.getElementById('entity-logs-time')?.value || '5m';
             let filterParams = '';
             const searchVal = document.getElementById('entity-logs-search')?.value?.trim();
             const severityVal = document.getElementById('entity-logs-severity')?.value;
@@ -5044,7 +5194,7 @@ Can you help me understand this issue further or suggest next steps?`;
             const limitVal = document.getElementById('entity-logs-limit')?.value || '50';
 
             try {
-                const response = await fetch(`/api/entity/${currentEntityType}/${encodeURIComponent(currentEntityName)}/logs?time=${timeWindow}&limit=${limitVal}${filterParams}`);
+                const response = await fetch(`/api/entity/${currentEntityType}/${encodeURIComponent(currentEntityName)}/logs?${getEntityTimeParams()}&limit=${limitVal}${filterParams}`);
                 const data = await response.json();
                 const tbody = document.getElementById('entity-logs-table').querySelector('tbody');
                 const countBadge = document.getElementById('entity-logs-count');
@@ -5082,10 +5232,6 @@ Can you help me understand this issue further or suggest next steps?`;
         function buildMetricsFilterBar() {
             return `<div class="tab-controls">
                 <span class="tab-title">Metrics</span>
-                <select class="time-selector" id="entity-metrics-time" onchange="loadEntityMetrics()">
-                    <option value="1m">Last 1m</option><option value="5m" selected>Last 5m</option>
-                    <option value="15m">Last 15m</option><option value="1h">Last 1h</option>
-                </select>
             </div>
             <div class="filter-bar">
                 <input type="text" id="entity-metrics-search" placeholder="Search metric name..." onkeydown="if(event.key==='Enter') loadEntityMetrics()">
@@ -5110,14 +5256,13 @@ Can you help me understand this issue further or suggest next steps?`;
                     </div></div>`;
             }
 
-            const timeWindow = document.getElementById('entity-metrics-time')?.value || '5m';
             let filterParams = '';
             const searchVal = document.getElementById('entity-metrics-search')?.value?.trim();
             if (searchVal) filterParams += `&search=${encodeURIComponent(searchVal)}`;
             const limitVal = document.getElementById('entity-metrics-limit')?.value || '50';
 
             try {
-                const response = await fetch(`/api/entity/${currentEntityType}/${encodeURIComponent(currentEntityName)}/metrics?time=${timeWindow}&limit=${limitVal}${filterParams}`);
+                const response = await fetch(`/api/entity/${currentEntityType}/${encodeURIComponent(currentEntityName)}/metrics?${getEntityTimeParams()}&limit=${limitVal}${filterParams}`);
                 const data = await response.json();
                 const tbody = document.getElementById('entity-metrics-table').querySelector('tbody');
                 const countBadge = document.getElementById('entity-metrics-count');
@@ -5171,9 +5316,8 @@ Can you help me understand this issue further or suggest next steps?`;
             row.after(chartTr);
             const canvas = chartTr.querySelector('canvas');
 
-            const timeWindow = document.getElementById('entity-metrics-time')?.value || '5m';
             try {
-                const resp = await fetch(`/api/entity/${currentEntityType}/${encodeURIComponent(currentEntityName)}/metric-history?metric=${encodeURIComponent(metric)}&time=${timeWindow}`);
+                const resp = await fetch(`/api/entity/${currentEntityType}/${encodeURIComponent(currentEntityName)}/metric-history?metric=${encodeURIComponent(metric)}&${getEntityTimeParams()}`);
                 const json = await resp.json();
                 if (!json.series || json.series.length === 0) {
                     chartTr.querySelector('td').innerHTML = '<span style="color:var(--text-muted);font-size:12px;">No time-series data available</span>';
@@ -5316,7 +5460,7 @@ Can you help me understand this issue further or suggest next steps?`;
 
                     // Fetch data
                     try {
-                        const dataResp = await fetch(`/api/entity/${currentEntityType}/${encodeURIComponent(currentEntityName)}/metric-history?metric=${encodeURIComponent(pin.metric_name)}&time=5m`);
+                        const dataResp = await fetch(`/api/entity/${currentEntityType}/${encodeURIComponent(currentEntityName)}/metric-history?metric=${encodeURIComponent(pin.metric_name)}&${getEntityTimeParams()}`);
                         const data = await dataResp.json();
                         if (!data.series || data.series.length === 0) continue;
 
@@ -5375,9 +5519,9 @@ Can you help me understand this issue further or suggest next steps?`;
         function switchHostModalTab(tab) { switchEntityTab(tab); }
         function switchService(name) { switchEntity(name); }
         function switchDatabase(name) { switchEntity(name); }
-        function toggleModalAutoRefresh() { toggleEntityModalAutoRefresh(); }
-        function toggleDbModalAutoRefresh() { toggleEntityModalAutoRefresh(); }
-        function toggleHostModalAutoRefresh() { toggleEntityModalAutoRefresh(); }
+        function toggleModalAutoRefresh() { }
+        function toggleDbModalAutoRefresh() { }
+        function toggleHostModalAutoRefresh() { }
         function startModalAutoRefresh() { startEntityModalAutoRefresh(); }
         function stopModalAutoRefresh() { stopEntityModalAutoRefresh(); }
         function startDbModalAutoRefresh() { startEntityModalAutoRefresh(); }
