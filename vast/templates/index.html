@@ -1887,6 +1887,12 @@
             background: rgba(239, 68, 68, 0.08);
         }
 
+        .metric-row { cursor: pointer; }
+        .metric-row:hover td { background: rgba(0, 217, 255, 0.06); }
+        .metric-expand-icon { display: inline-block; width: 14px; font-size: 10px; color: var(--text-muted); margin-right: 4px; }
+        .metric-chart-row td { background: rgba(0, 0, 0, 0.25); padding: 8px 12px !important; }
+        .metric-chart-row canvas { max-height: 200px; }
+
         .data-table-wrapper {
             max-height: 400px;
             overflow-y: auto;
@@ -2598,9 +2604,14 @@
             <span class="logo-text">Observability</span>
         </div>
 
-        <div class="sidebar-section">
+        <div class="sidebar-section" style="padding-bottom:0;">
             <div class="section-header">
-                <span class="section-title">Recent Errors</span>
+                <select class="time-selector" id="services-time-selector" onchange="refreshStatus()">
+                    <option value="1m">1m</option>
+                    <option value="5m">5m</option>
+                    <option value="15m">15m</option>
+                    <option value="1h" selected>1h</option>
+                </select>
                 <div class="refresh-controls">
                     <div class="toggle-container">
                         <span class="toggle-label">Auto</span>
@@ -2608,6 +2619,12 @@
                     </div>
                     <button class="refresh-btn" onclick="refreshStatus()">Refresh</button>
                 </div>
+            </div>
+        </div>
+
+        <div class="sidebar-section">
+            <div class="section-header">
+                <span class="section-title">Recent Errors</span>
             </div>
             <div id="error-summary" class="error-summary-card">
                 <div class="empty-state">Loading...</div>
@@ -2630,12 +2647,6 @@
             <div class="sidebar-section">
                 <div class="section-header">
                     <span class="section-title">Services</span>
-                    <select class="time-selector" id="services-time-selector" onchange="refreshStatus()">
-                        <option value="1m">1m</option>
-                        <option value="5m">5m</option>
-                        <option value="15m">15m</option>
-                        <option value="1h" selected>1h</option>
-                    </select>
                 </div>
                 <div class="status-card">
                     <div class="status-card-title">Click to drill down</div>
@@ -2684,7 +2695,7 @@
                     </select>
                     <button class="sim-start-btn" id="sim-start-btn" onclick="startSimulation()" disabled>&#9654; Start</button>
                     <button class="sim-stop-btn" id="sim-stop-btn" onclick="stopSimulation()" style="display:none;">&#9632; Stop</button>
-                    <button class="sim-undo-btn" id="sim-undo-btn" onclick="undoScenario()" disabled>&#8617; Undo</button>
+                    <button class="sim-undo-btn" id="sim-undo-btn" onclick="undoScenario()" disabled>&#8617; Stop &amp; Revert</button>
                     <div class="sim-header-progress" id="sim-header-progress" style="display:none;">
                         <div class="sim-progress-bar">
                             <div class="sim-progress-fill" id="sim-progress-fill" style="width:0%"></div>
@@ -2720,6 +2731,7 @@
                         <li onclick="setPrompt('Chart error rates by service over the last hour')">Chart error rates by service over the last hour</li>
                         <li onclick="setPrompt('Show me the topology for PostgreSQL - what depends on it?')">Show me the topology for PostgreSQL - what depends on it?</li>
                         <li onclick="setPrompt('What does the frontend depend on?')">What does the frontend depend on? (show upstream deps)</li>
+                        <li onclick="setPrompt('Look for the root cause of the error for trace id aca9c51a5913b0b73ec552ac6b11c49e')">Look for the root cause of the error for trace id aca9c...</li>
                     </ul>
                     <p>What would you like to investigate?</p>
                 </div>
@@ -2994,6 +3006,8 @@
         const sessionId = 'session_' + Math.random().toString(36).substr(2, 9);
         let isLoading = false;
         let modalCharts = {};
+        let activeMetricChart = null;
+        let activeMetricRow = null;
         let chatCharts = [];
 
         // History buffers for sidebar persistence
@@ -3541,16 +3555,21 @@
 
             // Lists - convert to temp markers, strip extra whitespace
             // Note: Using <oli>/<uli> tags instead of {{OLI}}/{{ULI}} to avoid Jinja2 conflicts
-            text = text.replace(/^[ \t]*(\d+)[\.\)] (.*$)/gm, '<oli>$2</oli>');
+            // Preserve original number so non-consecutive items keep correct numbering
+            text = text.replace(/^[ \t]*(\d+)[\.\)] (.*$)/gm, '<oli data-n="$1">$2</oli>');
             text = text.replace(/^[ \t]*[a-z][\.\)] (.*$)/gm, '<oli>$1</oli>');
             text = text.replace(/^[ \t]*[-*•] (.*$)/gm, '<uli>$1</uli>');
 
             // Wrap consecutive list items (handling newlines between them)
-            text = text.replace(/((?:<oli>.*?<\/oli>\n*)+)/g, '<ol>$1</ol>');
+            text = text.replace(/((?:<oli[^>]*>.*?<\/oli>\n*)+)/g, '<ol>$1</ol>');
             text = text.replace(/((?:<uli>.*?<\/uli>\n*)+)/g, '<ul>$1</ul>');
 
+            // Set <ol start="N"> from the first item's original number
+            text = text.replace(/<ol><oli data-n="(\d+)">/g, (_, n) =>
+                n === '1' ? '<ol><li>' : `<ol start="${n}"><li>`);
+
             // Convert markers to actual tags
-            text = text.replace(/<oli>/g, '<li>').replace(/<\/oli>/g, '</li>');
+            text = text.replace(/<oli[^>]*>/g, '<li>').replace(/<\/oli>/g, '</li>');
             text = text.replace(/<uli>/g, '<li>').replace(/<\/uli>/g, '</li>');
 
             // Clean whitespace inside lists
@@ -3626,9 +3645,6 @@
                 // Data-driven entity sidebar rendering
                 if (data.entity_categories) {
                     const sectionsContainer = document.getElementById('entity-sections');
-                    // Preserve time selector value
-                    const oldTimeSelector = document.getElementById('services-time-selector');
-                    const savedTimeValue = oldTimeSelector ? oldTimeSelector.value : '1h';
 
                     let sectionsHtml = '';
                     data.entity_categories.forEach(cat => {
@@ -3646,14 +3662,6 @@
                         if (cat.type === 'database') availableDatabases = availableEntities[cat.type];
 
                         let headerExtra = '';
-                        if (cat.type === 'service') {
-                            headerExtra = `<select class="time-selector" id="services-time-selector" onchange="refreshStatus()">
-                                <option value="1m" ${savedTimeValue==='1m'?'selected':''}>1m</option>
-                                <option value="5m" ${savedTimeValue==='5m'?'selected':''}>5m</option>
-                                <option value="15m" ${savedTimeValue==='15m'?'selected':''}>15m</option>
-                                <option value="1h" ${savedTimeValue==='1h'?'selected':''}>1h</option>
-                            </select>`;
-                        }
 
                         let subtitle = 'Click to drill down';
                         if (cat.type === 'host') subtitle = 'System resources';
@@ -4398,6 +4406,7 @@ Can you help me understand this issue further or suggest next steps?`;
             // Destroy any charts from the previous entity so loaders rebuild the skeleton
             Object.values(modalCharts).forEach(c => c.destroy());
             modalCharts = {};
+            destroyActiveMetricChart();
 
             // Clear the modal body so stale content from a previous entity type is never visible
             document.getElementById('entity-modal-body').innerHTML = '';
@@ -4502,7 +4511,7 @@ Can you help me understand this issue further or suggest next steps?`;
 
             // On first load (no existing charts), build the HTML skeleton.
             // On refresh, skip the rebuild so charts update in-place.
-            const hasCharts = Object.keys(modalCharts).length > 0;
+            const hasCharts = !!document.getElementById('entity-latency-chart');
 
             if (!hasCharts) {
                 Object.values(modalCharts).forEach(chart => chart.destroy());
@@ -4556,6 +4565,7 @@ Can you help me understand this issue further or suggest next steps?`;
             } else if (currentEntityType === 'database') {
                 await loadDatabaseChartsData();
             }
+            await loadPinnedCharts();
         }
 
         function updateChartInPlace(chart, labels, datasets) {
@@ -4756,6 +4766,7 @@ Can you help me understand this issue further or suggest next steps?`;
             }
             await loadHostData(currentEntityName);
             await loadHostResourceHistory(currentEntityName);
+            await loadPinnedCharts();
         }
 
         async function loadHostResourceHistory(hostName) {
@@ -4849,6 +4860,7 @@ Can you help me understand this issue further or suggest next steps?`;
                 console.error('Failed to load container overview:', error);
                 document.getElementById('container-current-metrics').innerHTML = '<div class="empty-state">Failed to load metrics</div>';
             }
+            await loadPinnedCharts();
         }
 
         async function loadEntityServices() {
@@ -5086,6 +5098,7 @@ Can you help me understand this issue further or suggest next steps?`;
 
         async function loadEntityMetrics() {
             if (!currentEntityType || !currentEntityName) return;
+            destroyActiveMetricChart();
             const body = document.getElementById('entity-modal-body');
 
             if (!document.getElementById('entity-metrics-table')) {
@@ -5113,7 +5126,7 @@ Can you help me understand this issue further or suggest next steps?`;
                     if (countBadge) countBadge.textContent = data.metrics.length;
                     tbody.innerHTML = data.metrics.map(m => {
                         const lastSeen = m.last_seen ? new Date(m.last_seen).toLocaleTimeString() : '-';
-                        return `<tr><td title="${escapeHtml(m.metric_name)}">${escapeHtml(m.metric_name || '-')}</td>
+                        return `<tr class="metric-row" data-metric="${escapeHtml(m.metric_name)}" onclick="toggleMetricChart(this)"><td title="${escapeHtml(m.metric_name)}"><span class="metric-expand-icon">▶</span>${escapeHtml(m.metric_name || '-')}</td>
                             <td>${m.data_points}</td><td>${m.avg_value !== null ? m.avg_value : '-'}</td>
                             <td>${m.min_value !== null ? m.min_value : '-'}</td><td>${m.max_value !== null ? m.max_value : '-'}</td>
                             <td>${lastSeen}</td></tr>`;
@@ -5123,6 +5136,229 @@ Can you help me understand this issue further or suggest next steps?`;
                     tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No metrics found</td></tr>';
                 }
             } catch (error) { console.error('Failed to load metrics:', error); }
+        }
+
+        function destroyActiveMetricChart() {
+            if (activeMetricChart) { activeMetricChart.destroy(); activeMetricChart = null; }
+            if (activeMetricRow) {
+                const icon = activeMetricRow.querySelector('.metric-expand-icon');
+                if (icon) icon.textContent = '▶';
+                const chartRow = activeMetricRow.nextElementSibling;
+                if (chartRow && chartRow.classList.contains('metric-chart-row')) chartRow.remove();
+                activeMetricRow = null;
+            }
+        }
+
+        async function toggleMetricChart(row) {
+            const metric = row.dataset.metric;
+            if (activeMetricRow === row) {
+                destroyActiveMetricChart();
+                return;
+            }
+            destroyActiveMetricChart();
+            activeMetricRow = row;
+            const icon = row.querySelector('.metric-expand-icon');
+            if (icon) icon.textContent = '▼';
+
+            const chartTr = document.createElement('tr');
+            chartTr.className = 'metric-chart-row';
+            chartTr.innerHTML = `<td colspan="6">
+                <div style="display:flex;justify-content:flex-end;margin-bottom:4px;">
+                    <button class="pin-chart-btn" onclick="event.stopPropagation();pinMetricToCharts('${metric.replace(/'/g, "\\'")}')" style="font-size:11px;padding:2px 10px;background:transparent;border:1px solid #444;color:#a0a0b0;border-radius:4px;cursor:pointer;">Pin to Charts</button>
+                </div>
+                <canvas></canvas>
+            </td>`;
+            row.after(chartTr);
+            const canvas = chartTr.querySelector('canvas');
+
+            const timeWindow = document.getElementById('entity-metrics-time')?.value || '5m';
+            try {
+                const resp = await fetch(`/api/entity/${currentEntityType}/${encodeURIComponent(currentEntityName)}/metric-history?metric=${encodeURIComponent(metric)}&time=${timeWindow}`);
+                const json = await resp.json();
+                if (!json.series || json.series.length === 0) {
+                    chartTr.querySelector('td').innerHTML = '<span style="color:var(--text-muted);font-size:12px;">No time-series data available</span>';
+                    return;
+                }
+                // Build unified labels from all series timestamps
+                const labelSet = new Set();
+                json.series.forEach(s => s.data.forEach(d => labelSet.add(d.time)));
+                const sortedTimes = [...labelSet].sort();
+                const labels = sortedTimes.map(t => new Date(t).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
+
+                const datasets = json.series.map((s, i) => {
+                    const timeMap = {};
+                    s.data.forEach(d => { timeMap[d.time] = d.value; });
+                    return {
+                        label: s.label,
+                        data: sortedTimes.map(t => timeMap[t] !== undefined ? timeMap[t] : null),
+                        borderColor: chartColors[i % chartColors.length],
+                        backgroundColor: chartColors[i % chartColors.length] + '20',
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        tension: 0.3,
+                        fill: json.series.length === 1,
+                        spanGaps: true,
+                    };
+                });
+                const opts = chartOptions();
+                opts.maintainAspectRatio = false;
+                opts.scales.y.beginAtZero = true;
+                // Legend: truncate long labels, brighter color
+                opts.plugins.legend.display = json.series.length > 1;
+                opts.plugins.legend.labels = {
+                    color: '#c0c0d0', font: { size: 11 },
+                    boxWidth: 12, padding: 6,
+                    filter: (item) => { if (item.text.length > 60) item.text = item.text.slice(0, 57) + '...'; return true; }
+                };
+                opts.plugins.legend.position = 'bottom';
+                // Metric name as chart title
+                opts.plugins.title = { display: true, text: metric, color: '#d0d0e0', font: { size: 12, weight: 'normal' }, padding: { bottom: 4 } };
+                canvas.style.height = json.series.length > 3 ? '240px' : '180px';
+                activeMetricChart = new Chart(canvas, { type: 'line', data: { labels, datasets }, options: opts });
+            } catch (err) {
+                console.error('Failed to load metric history:', err);
+                chartTr.querySelector('td').innerHTML = '<span style="color:var(--accent-error);font-size:12px;">Failed to load chart</span>';
+            }
+        }
+
+        // =================================================================
+        // Pinned Charts
+        // =================================================================
+        async function pinMetricToCharts(metricName) {
+            try {
+                const resp = await fetch(`/api/entity/${currentEntityType}/${encodeURIComponent(currentEntityName)}/pinned-charts`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({metric_name: metricName})
+                });
+                const json = await resp.json();
+                if (json.pin_id) {
+                    const btn = document.querySelector('.metric-chart-row .pin-chart-btn');
+                    if (btn) {
+                        btn.textContent = 'Pinned';
+                        btn.style.borderColor = '#10b981';
+                        btn.style.color = '#10b981';
+                        btn.disabled = true;
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to pin metric:', err);
+            }
+        }
+
+        async function unpinChart(pinId) {
+            try {
+                await fetch(`/api/entity/${currentEntityType}/${encodeURIComponent(currentEntityName)}/pinned-charts/${pinId}`, {method: 'DELETE'});
+                const chart = modalCharts['pinned_' + pinId];
+                if (chart) { chart.destroy(); delete modalCharts['pinned_' + pinId]; }
+                const card = document.getElementById('pinned-card-' + pinId);
+                if (card) card.remove();
+                // Remove header if no pinned cards remain
+                const container = document.getElementById('pinned-charts-container');
+                if (container && container.querySelectorAll('.chart-card').length === 0) {
+                    container.remove();
+                }
+            } catch (err) {
+                console.error('Failed to unpin chart:', err);
+            }
+        }
+
+        async function loadPinnedCharts() {
+            if (!currentEntityType || !currentEntityName) return;
+            try {
+                const resp = await fetch(`/api/entity/${currentEntityType}/${encodeURIComponent(currentEntityName)}/pinned-charts`);
+                const json = await resp.json();
+                const pins = json.pins || [];
+
+                // Clean up stale chart instances for pins that no longer exist
+                const activePinIds = new Set(pins.map(p => p.pin_id));
+                Object.keys(modalCharts).forEach(key => {
+                    if (key.startsWith('pinned_') && !activePinIds.has(key.replace('pinned_', ''))) {
+                        modalCharts[key].destroy();
+                        delete modalCharts[key];
+                    }
+                });
+
+                if (pins.length === 0) {
+                    const existing = document.getElementById('pinned-charts-container');
+                    if (existing) existing.remove();
+                    return;
+                }
+
+                const body = document.getElementById('entity-modal-body');
+                let container = document.getElementById('pinned-charts-container');
+                if (!container) {
+                    container = document.createElement('div');
+                    container.id = 'pinned-charts-container';
+                    container.innerHTML = '<h4 style="color:#a0a0b0;margin:18px 0 8px 0;font-weight:500;">Pinned Metrics</h4>';
+                    body.appendChild(container);
+                }
+
+                for (const pin of pins) {
+                    const chartKey = 'pinned_' + pin.pin_id;
+                    const canvasId = 'pinned-canvas-' + pin.pin_id;
+
+                    // Create card if it doesn't exist yet
+                    if (!document.getElementById('pinned-card-' + pin.pin_id)) {
+                        const row = document.createElement('div');
+                        row.className = 'chart-row';
+                        row.innerHTML = `
+                            <div class="chart-card" id="pinned-card-${pin.pin_id}" style="flex:1;">
+                                <div style="display:flex;justify-content:space-between;align-items:center;">
+                                    <h4>${pin.display_name || pin.metric_name}</h4>
+                                    <button onclick="unpinChart('${pin.pin_id}')" style="font-size:11px;padding:2px 10px;background:transparent;border:1px solid #555;color:#a0a0b0;border-radius:4px;cursor:pointer;">Unpin</button>
+                                </div>
+                                <canvas id="${canvasId}"></canvas>
+                            </div>
+                        `;
+                        container.appendChild(row);
+                    }
+
+                    // Fetch data
+                    try {
+                        const dataResp = await fetch(`/api/entity/${currentEntityType}/${encodeURIComponent(currentEntityName)}/metric-history?metric=${encodeURIComponent(pin.metric_name)}&time=5m`);
+                        const data = await dataResp.json();
+                        if (!data.series || data.series.length === 0) continue;
+
+                        const labelSet = new Set();
+                        data.series.forEach(s => s.data.forEach(d => labelSet.add(d.time)));
+                        const sortedTimes = [...labelSet].sort();
+                        const labels = sortedTimes.map(t => new Date(t).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
+
+                        const datasets = data.series.map((s, i) => {
+                            const timeMap = {};
+                            s.data.forEach(d => { timeMap[d.time] = d.value; });
+                            return {
+                                label: s.label,
+                                data: sortedTimes.map(t => timeMap[t] !== undefined ? timeMap[t] : null),
+                                borderColor: chartColors[i % chartColors.length],
+                                backgroundColor: chartColors[i % chartColors.length] + '20',
+                                borderWidth: 1.5,
+                                pointRadius: 0,
+                                tension: 0.3,
+                                fill: data.series.length === 1,
+                                spanGaps: true,
+                            };
+                        });
+
+                        if (modalCharts[chartKey]) {
+                            updateChartInPlace(modalCharts[chartKey], labels, datasets);
+                        } else {
+                            const canvas = document.getElementById(canvasId);
+                            if (!canvas) continue;
+                            const opts = chartOptions();
+                            opts.scales.y.beginAtZero = true;
+                            opts.plugins.legend.display = data.series.length > 1;
+                            opts.plugins.legend.position = 'bottom';
+                            modalCharts[chartKey] = new Chart(canvas, { type: 'line', data: { labels, datasets }, options: opts });
+                        }
+                    } catch (dataErr) {
+                        console.error('Failed to load pinned chart data:', dataErr);
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to load pinned charts:', err);
+            }
         }
 
         // =================================================================
@@ -5875,7 +6111,7 @@ Can you help me understand this issue further or suggest next steps?`;
 
             const undoBtn = document.getElementById('sim-undo-btn');
             undoBtn.disabled = true;
-            undoBtn.innerHTML = 'Undoing...';
+            undoBtn.innerHTML = 'Reverting...';
 
             try {
                 const response = await fetch('/api/simulation/cleanup', {
@@ -5887,15 +6123,15 @@ Can you help me understand this issue further or suggest next steps?`;
 
                 if (data.success) {
                     undoBtn.innerHTML = 'Done &#10003;';
-                    setTimeout(() => { undoBtn.innerHTML = '&#8617; Undo'; updateUndoButton(); }, 2000);
+                    setTimeout(() => { undoBtn.innerHTML = '&#8617; Stop &amp; Revert'; updateUndoButton(); }, 2000);
                 } else {
                     undoBtn.innerHTML = data.error || 'Failed';
-                    setTimeout(() => { undoBtn.innerHTML = '&#8617; Undo'; updateUndoButton(); }, 3000);
+                    setTimeout(() => { undoBtn.innerHTML = '&#8617; Stop &amp; Revert'; updateUndoButton(); }, 3000);
                 }
             } catch (error) {
                 console.error('Failed to undo scenario:', error);
                 undoBtn.innerHTML = 'Error';
-                setTimeout(() => { undoBtn.innerHTML = '&#8617; Undo'; updateUndoButton(); }, 3000);
+                setTimeout(() => { undoBtn.innerHTML = '&#8617; Stop &amp; Revert'; updateUndoButton(); }, 3000);
             }
         }
 

@@ -24,6 +24,7 @@ DROP TABLE IF EXISTS vast."csnow-db|otel".service_metrics_1m;
 DROP TABLE IF EXISTS vast."csnow-db|otel".db_metrics_1m;
 DROP TABLE IF EXISTS vast."csnow-db|otel".operation_metrics_5m;
 DROP TABLE IF EXISTS vast."csnow-db|otel".job_status;
+DROP TABLE IF EXISTS vast."csnow-db|otel".pinned_charts;
 
 -- vast."csnow-db|otel".logs_otel_analytic definition
 
@@ -351,5 +352,15 @@ CREATE TABLE vast."csnow-db|otel".job_status (
     status        varchar,
     details_json  varchar,
     updated_at    timestamp(9)
+);
+
+-- Pinned metric charts per entity
+CREATE TABLE vast."csnow-db|otel".pinned_charts (
+   pin_id        varchar,
+   entity_type   varchar,
+   entity_name   varchar,
+   metric_name   varchar,
+   display_name  varchar,
+   created_at    timestamp(9)
 );
 

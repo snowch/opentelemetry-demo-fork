@@ -392,6 +392,14 @@ When investigating an issue, cross-reference these data sources:
 - For slow requests: ORDER BY duration_ns DESC
 - For errors: WHERE status_code = 'ERROR' OR severity_text = 'ERROR'
 - Join traces with logs using trace_id for full context
+
+## CRITICAL Trino SQL Syntax Rules
+- **Timestamp literals MUST use a space, NOT 'T'**: `TIMESTAMP '2026-01-31 18:42:00'` (correct) vs `TIMESTAMP '2026-01-31T18:42:00'` (WRONG — Trino rejects this)
+- BETWEEN with timestamps: `timestamp BETWEEN TIMESTAMP '2026-01-31 18:40:00' AND TIMESTAMP '2026-01-31 18:45:00'`
+- NO semicolons at the end of queries
+- Interval syntax: `INTERVAL '15' MINUTE` (quoted number, unquoted unit)
+- When investigating a specific trace_id, query it WITHOUT a time filter to get all spans: `WHERE trace_id = '...'`
+- To query a time window around a known event, use BETWEEN with TIMESTAMP literals (space-separated, not T)
 """
 
 SYSTEM_PROMPT = f"""You are an expert Site Reliability Engineer (SRE) assistant helping support engineers diagnose issues in a distributed system. You have access to observability data (logs, metrics, and traces) stored in VastDB.
@@ -556,6 +564,68 @@ ORDER BY last_seen ASC
      - CRITICAL: If PRODUCER spans exist but no matching CONSUMER spans, consumers may be down (silent failure — same pattern as databases)
    - External services: HTTP client errors to external APIs
    - Infrastructure: Host down, network partition, resource exhaustion
+
+### CRITICAL: When Investigating a Specific Trace ID
+
+When a user asks you to investigate a specific trace_id, you MUST follow ALL of these steps IN ORDER.
+Do NOT skip any step. Do NOT conclude until all steps are done.
+
+1. **Get the full trace** (no time filter): `WHERE trace_id = '...' ORDER BY start_time`
+2. **Get exceptions**: Query span_events_otel_analytic for that trace_id
+3. **Extract the timestamp** from the trace's start_time (e.g., `2026-01-31 18:42:24`)
+4. **MANDATORY — run ALL THREE of these queries** (they have different attribute filters so they CANNOT be combined):
+
+Run these as SEPARATE queries (different metrics have different attribute filters):
+
+```sql
+-- Query A: PostgreSQL database-specific disk metrics (uses db.system= filter)
+SELECT metric_name, attributes_flat,
+       ROUND(AVG(value_double) * 100, 2) as avg_pct,
+       ROUND(MAX(value_double) * 100, 2) as max_pct
+FROM metrics_otel_analytic
+WHERE metric_name IN ('postgresql.filesystem.utilization', 'postgresql.filesystem.usage')
+  AND attributes_flat LIKE '%db.system=postgresql%'
+  AND timestamp BETWEEN TIMESTAMP '..start-5min..' AND TIMESTAMP '..start+5min..'
+GROUP BY metric_name, attributes_flat
+ORDER BY max_pct DESC
+```
+
+```sql
+-- Query B: Container metrics (uses container.name= filter)
+SELECT metric_name, attributes_flat,
+       ROUND(AVG(value_double), 2) as avg_val,
+       ROUND(MAX(value_double), 2) as max_val
+FROM metrics_otel_analytic
+WHERE metric_name IN ('container.cpu.percent', 'container.memory.percent')
+  AND attributes_flat LIKE '%container.name=postgres%'
+  AND timestamp BETWEEN TIMESTAMP '..start-5min..' AND TIMESTAMP '..start+5min..'
+GROUP BY metric_name, attributes_flat
+```
+
+```sql
+-- Query C: Host-level system metrics (NO attribute filter needed — check all hosts)
+SELECT metric_name,
+       ROUND(AVG(value_double) * 100, 2) as avg_pct,
+       ROUND(MAX(value_double) * 100, 2) as max_pct
+FROM metrics_otel_analytic
+WHERE metric_name IN ('system.filesystem.utilization', 'system.memory.utilization')
+  AND timestamp BETWEEN TIMESTAMP '..start-5min..' AND TIMESTAMP '..start+5min..'
+GROUP BY metric_name
+ORDER BY max_pct DESC
+```
+
+**You MUST run Query A even if Query B or C returns results.** Database disk pressure (postgresql.filesystem.utilization near 1.0) is the #1 cause of database connection errors and EndOfStreamExceptions.
+
+5. **Check the database host health** using topology_database_hosts to find the host, then query its metrics
+6. **Look for correlated errors** in other services during the same time window
+
+**IMPORTANT metric naming conventions:**
+- Database-specific metrics: `postgresql.filesystem.utilization`, `postgresql.filesystem.usage` (filter by `db.system=postgresql` in attributes_flat)
+- Container metrics: `container.cpu.percent`, `container.memory.percent` (filter by `container.name=postgres` in attributes_flat)
+- Host system metrics: `system.filesystem.utilization`, `system.cpu.utilization`, `system.memory.utilization` (filter by `host.name=...` in attributes_flat)
+- Do NOT assume the host.name matches the db_system name — use topology_database_hosts to look it up
+
+**NEVER conclude "transient network issue" or "temporary glitch" without first checking disk, memory, CPU, and filesystem metrics around the error time.** Connection errors, stream exceptions, and I/O errors are almost always caused by resource exhaustion (disk full, OOM, CPU saturation) — the metrics will tell you which one.
 
 ### Root Cause Analysis Methodology
 

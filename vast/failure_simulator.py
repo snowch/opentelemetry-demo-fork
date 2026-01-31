@@ -81,12 +81,12 @@ SCENARIOS = {
         "predicted_alerts": ["trend"],
         "duration_minutes": 12,
         "steps": [
-            {"delay_seconds": 0, "action": "disk_fill_step", "params": {"size_mb": 30, "file_index": 1}, "label": "Write 30MB (1/6)"},
-            {"delay_seconds": 120, "action": "disk_fill_step", "params": {"size_mb": 30, "file_index": 2}, "label": "Write 30MB (2/6)"},
-            {"delay_seconds": 240, "action": "disk_fill_step", "params": {"size_mb": 30, "file_index": 3}, "label": "Write 30MB (3/6)"},
-            {"delay_seconds": 360, "action": "disk_fill_step", "params": {"size_mb": 30, "file_index": 4}, "label": "Write 30MB (4/6)"},
-            {"delay_seconds": 480, "action": "disk_fill_step", "params": {"size_mb": 30, "file_index": 5}, "label": "Write 30MB (5/6)"},
-            {"delay_seconds": 600, "action": "disk_fill_step", "params": {"size_mb": 30, "file_index": 6}, "label": "Write 30MB (6/6)"},
+            {"delay_seconds": 0, "action": "disk_fill_step", "params": {"size_mb": 40, "file_index": 1}, "label": "Write 40MB (1/6)"},
+            {"delay_seconds": 120, "action": "disk_fill_step", "params": {"size_mb": 40, "file_index": 2}, "label": "Write 40MB (2/6)"},
+            {"delay_seconds": 240, "action": "disk_fill_step", "params": {"size_mb": 40, "file_index": 3}, "label": "Write 40MB (3/6)"},
+            {"delay_seconds": 360, "action": "disk_fill_step", "params": {"size_mb": 40, "file_index": 4}, "label": "Write 40MB (4/6)"},
+            {"delay_seconds": 480, "action": "disk_fill_step", "params": {"size_mb": 40, "file_index": 5}, "label": "Write 40MB (5/6)"},
+            {"delay_seconds": 600, "action": "disk_fill_step", "params": {"size_mb": 40, "file_index": 6}, "label": "Write 40MB (6/6)"},
         ],
         "cleanup": {"action": "disk_fill_cleanup"},
     },
@@ -205,7 +205,7 @@ def execute_action(action: str, params: Dict) -> bool:
         file_index = params["file_index"]
         return _run_docker_exec(
             "postgresql",
-            ["dd", "if=/dev/zero", f"of=/var/lib/postgresql/data/sim_fill_{file_index}.dat", "bs=1M", f"count={size_mb}"],
+            ["dd", "if=/dev/zero", f"of=/var/lib/postgresql/data/sim_fill_{file_index}.dat", "bs=10M", f"count={size_mb // 10 or 1}"],
             timeout=300
         )
 

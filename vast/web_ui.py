@@ -390,6 +390,104 @@ WHERE db_system IS NOT NULL AND db_system != ''
     }]
 
 
+def _prefetch_trace_context(executor, user_message):
+    """If the user message references a trace ID, pre-fetch trace + infrastructure context."""
+    import re as _re
+    match = _re.search(r'\b([a-f0-9]{32})\b', user_message)
+    if not match:
+        return None
+
+    trace_id = match.group(1)
+    context_parts = [f"[Pre-fetched context for trace {trace_id}]"]
+
+    # 1. Get all spans
+    spans = executor.execute_query(
+        f"SELECT service_name, span_name, span_kind, status_code, db_system, "
+        f"duration_ns/1000000.0 as duration_ms, start_time, attributes_json "
+        f"FROM traces_otel_analytic WHERE trace_id = '{trace_id}' ORDER BY start_time"
+    )
+    if spans['success'] and spans['rows']:
+        context_parts.append(f"Trace spans ({len(spans['rows'])} spans):")
+        for s in spans['rows']:
+            context_parts.append(f"  {s.get('start_time')} | {s.get('service_name')} | {s.get('span_name')} | "
+                                 f"{s.get('span_kind')} | status={s.get('status_code')} | {s.get('duration_ms')}ms | "
+                                 f"db_system={s.get('db_system', '')} | attrs={str(s.get('attributes_json', ''))[:200]}")
+
+        # Extract timestamp for infrastructure queries
+        first_time = spans['rows'][0].get('start_time', '')
+        if first_time:
+            try:
+                if isinstance(first_time, str):
+                    ts = datetime.fromisoformat(first_time.replace('Z', ''))
+                else:
+                    ts = first_time
+                from datetime import timedelta
+                t_start = (ts - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+                t_end = (ts + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+
+                # 2. Get exceptions
+                events = executor.execute_query(
+                    f"SELECT service_name, exception_type, exception_message "
+                    f"FROM span_events_otel_analytic WHERE trace_id = '{trace_id}' LIMIT 10"
+                )
+                if events['success'] and events['rows']:
+                    context_parts.append(f"\nExceptions:")
+                    for e in events['rows']:
+                        context_parts.append(f"  {e.get('exception_type')}: {str(e.get('exception_message', ''))[:200]}")
+
+                # 3. PostgreSQL filesystem metrics (the key one LLMs keep missing)
+                pg_fs = executor.execute_query(
+                    f"SELECT metric_name, attributes_flat, "
+                    f"ROUND(AVG(value_double) * 100, 2) as avg_pct, "
+                    f"ROUND(MAX(value_double) * 100, 2) as max_pct "
+                    f"FROM metrics_otel_analytic "
+                    f"WHERE metric_name IN ('postgresql.filesystem.utilization', 'postgresql.filesystem.usage') "
+                    f"AND attributes_flat LIKE '%db.system=postgresql%' "
+                    f"AND timestamp BETWEEN TIMESTAMP '{t_start}' AND TIMESTAMP '{t_end}' "
+                    f"GROUP BY metric_name, attributes_flat ORDER BY max_pct DESC"
+                )
+                if pg_fs['success'] and pg_fs['rows']:
+                    context_parts.append(f"\nPostgreSQL filesystem metrics ({t_start} to {t_end}):")
+                    for r in pg_fs['rows']:
+                        context_parts.append(f"  {r.get('metric_name')}: avg={r.get('avg_pct')}%, max={r.get('max_pct')}% | {str(r.get('attributes_flat', ''))[:150]}")
+
+                # 4. Host-level system metrics
+                sys_metrics = executor.execute_query(
+                    f"SELECT metric_name, "
+                    f"ROUND(AVG(value_double) * 100, 2) as avg_pct, "
+                    f"ROUND(MAX(value_double) * 100, 2) as max_pct "
+                    f"FROM metrics_otel_analytic "
+                    f"WHERE metric_name IN ('system.filesystem.utilization', 'system.memory.utilization') "
+                    f"AND timestamp BETWEEN TIMESTAMP '{t_start}' AND TIMESTAMP '{t_end}' "
+                    f"GROUP BY metric_name ORDER BY max_pct DESC"
+                )
+                if sys_metrics['success'] and sys_metrics['rows']:
+                    context_parts.append(f"\nHost system metrics ({t_start} to {t_end}):")
+                    for r in sys_metrics['rows']:
+                        context_parts.append(f"  {r.get('metric_name')}: avg={r.get('avg_pct')}%, max={r.get('max_pct')}%")
+
+                # 5. Container metrics
+                container_metrics = executor.execute_query(
+                    f"SELECT metric_name, attributes_flat, "
+                    f"ROUND(AVG(value_double), 2) as avg_val, "
+                    f"ROUND(MAX(value_double), 2) as max_val "
+                    f"FROM metrics_otel_analytic "
+                    f"WHERE metric_name IN ('container.cpu.percent', 'container.memory.percent') "
+                    f"AND attributes_flat LIKE '%container.name=postgres%' "
+                    f"AND timestamp BETWEEN TIMESTAMP '{t_start}' AND TIMESTAMP '{t_end}' "
+                    f"GROUP BY metric_name, attributes_flat"
+                )
+                if container_metrics['success'] and container_metrics['rows']:
+                    context_parts.append(f"\nPostgreSQL container metrics ({t_start} to {t_end}):")
+                    for r in container_metrics['rows']:
+                        context_parts.append(f"  {r.get('metric_name')}: avg={r.get('avg_val')}, max={r.get('max_val')}")
+
+            except Exception as e:
+                context_parts.append(f"\n[Error fetching infrastructure context: {e}]")
+
+    return "\n".join(context_parts) if len(context_parts) > 1 else None
+
+
 @app.route('/api/chat/stream', methods=['POST'])
 def chat_stream():
     """Handle chat messages with streaming progress updates via SSE."""
@@ -402,7 +500,14 @@ def chat_stream():
 
     def generate():
         conversation_history = get_or_create_session(session_id)
-        conversation_history.append({"role": "user", "content": user_message})
+
+        executor = get_query_executor()
+        # Pre-fetch trace context if user references a trace ID
+        trace_context = _prefetch_trace_context(executor, user_message)
+        enriched_message = user_message
+        if trace_context:
+            enriched_message = f"{user_message}\n\n{trace_context}"
+        conversation_history.append({"role": "user", "content": enriched_message})
 
         # Keep history manageable
         if len(conversation_history) > 20:
@@ -410,7 +515,6 @@ def chat_stream():
             chat_sessions[session_id] = conversation_history
 
         client = get_anthropic_client()
-        executor = get_query_executor()
         tools = get_chat_tools()
 
         executed_queries = []
@@ -541,7 +645,14 @@ def chat():
         return jsonify({'error': 'No message provided'}), 400
 
     conversation_history = get_or_create_session(session_id)
-    conversation_history.append({"role": "user", "content": user_message})
+
+    executor = get_query_executor()
+    # Pre-fetch trace context if user references a trace ID
+    trace_context = _prefetch_trace_context(executor, user_message)
+    enriched_message = user_message
+    if trace_context:
+        enriched_message = f"{user_message}\n\n{trace_context}"
+    conversation_history.append({"role": "user", "content": enriched_message})
 
     # Keep history manageable
     if len(conversation_history) > 20:
@@ -549,7 +660,6 @@ def chat():
         chat_sessions[session_id] = conversation_history
 
     client = get_anthropic_client()
-    executor = get_query_executor()
     tools = get_chat_tools()
 
     executed_queries = []
@@ -750,26 +860,26 @@ def system_status():
         status['databases'] = result['rows']
 
     # Get error summary stats
-    error_summary_query = """
+    error_summary_query = f"""
     SELECT
         COUNT(*) as total_errors,
         COUNT(DISTINCT service_name) as affected_services
     FROM traces_otel_analytic
     WHERE status_code = 'ERROR'
-      AND start_time > NOW() - INTERVAL '5' MINUTE
+      AND start_time > NOW() - INTERVAL {interval}
     """
     result = executor.execute_query(error_summary_query)
     if result['success'] and result['rows']:
         status['error_summary'] = result['rows'][0]
 
     # Get recent errors with trace_id and span_id for drill-down
-    error_query = """
+    error_query = f"""
     SELECT trace_id, span_id, service_name, span_name, status_code,
            duration_ns / 1000000.0 as duration_ms,
            start_time
     FROM traces_otel_analytic
     WHERE status_code = 'ERROR'
-      AND start_time > NOW() - INTERVAL '5' MINUTE
+      AND start_time > NOW() - INTERVAL {interval}
     ORDER BY start_time DESC
     LIMIT 10
     """
@@ -2038,6 +2148,179 @@ def entity_metrics(entity_type, name):
     return jsonify({'metrics': [], 'error': result.get('error')})
 
 
+# Attribute keys that are always noise in per-entity chart legends
+_NOISE_ATTR_PREFIXES = (
+    'host.name=', 'os.type=', 'service.namespace=', 'service.version=',
+    'service.name=', 'telemetry.sdk.', 'container.name=', 'container.id=',
+    'process.pid=', 'process.executable.', 'net.host.',
+)
+
+
+def _simplify_attrs_label(attrs_flat, entity_type, entity_name):
+    """Build a concise chart legend label from attributes_flat.
+
+    Strips noisy / redundant attributes so legend labels only show the
+    dimensions that actually differentiate the series.
+    """
+    if not attrs_flat:
+        return ''
+    parts = [p.strip() for p in attrs_flat.split(',') if p.strip()]
+    parts = [p for p in parts if not any(p.startswith(n) for n in _NOISE_ATTR_PREFIXES)]
+    # Shorten remaining keys: drop common prefixes like "postgresql."
+    shortened = []
+    for p in parts:
+        key, _, val = p.partition('=')
+        # e.g. "postgresql.table.name=foo" -> "table.name=foo"
+        segments = key.split('.')
+        if len(segments) > 2:
+            key = '.'.join(segments[-2:])
+        shortened.append(f'{key}={val}')
+    return ', '.join(shortened)
+
+
+@app.route('/api/entity/<entity_type>/<name>/metric-history', methods=['GET'])
+def entity_metric_history(entity_type, name):
+    """Return 1-minute-bucketed time series for a single metric inside an entity."""
+    if entity_type not in ENTITY_TYPES:
+        return jsonify({'error': f'Unknown entity type: {entity_type}'}), 400
+
+    metric = request.args.get('metric')
+    if not metric:
+        return jsonify({'error': 'metric parameter required'}), 400
+
+    config = ENTITY_TYPES[entity_type]
+    executor = get_query_executor()
+    interval = parse_time_interval(request.args.get('time', '5m'))
+    metrics_filter = config['metrics_filter'].format(name=name, interval=interval)
+
+    # First, find top 10 attribute combos by data-point count
+    top_attrs_query = f"""
+    SELECT attributes_flat, COUNT(*) AS cnt
+    FROM metrics_otel_analytic
+    WHERE {metrics_filter}
+      AND metric_name = '{metric}'
+      AND timestamp > NOW() - INTERVAL {interval}
+    GROUP BY attributes_flat
+    ORDER BY cnt DESC
+    LIMIT 10
+    """
+    top_result = executor.execute_query(top_attrs_query)
+    if not top_result['success'] or not top_result['rows']:
+        return jsonify({'series': [], 'metric_name': metric})
+
+    attr_values = [row['attributes_flat'] for row in top_result['rows']]
+    # Build IN clause — use empty string for NULL/empty
+    in_list = ', '.join(f"'{v}'" for v in attr_values)
+
+    query = f"""
+    SELECT date_trunc('minute', timestamp) AS bucket,
+           attributes_flat,
+           ROUND(AVG(value_double), 6) AS avg_value
+    FROM metrics_otel_analytic
+    WHERE {metrics_filter}
+      AND metric_name = '{metric}'
+      AND timestamp > NOW() - INTERVAL {interval}
+      AND attributes_flat IN ({in_list})
+    GROUP BY date_trunc('minute', timestamp), attributes_flat
+    ORDER BY bucket
+    """
+
+    result = executor.execute_query(query)
+    if not result['success']:
+        return jsonify({'series': [], 'error': result.get('error')})
+
+    # Group rows by attributes_flat into separate series
+    series_map = {}
+    for row in result['rows']:
+        key = row.get('attributes_flat', '')
+        if key not in series_map:
+            label = _simplify_attrs_label(key, entity_type, name)
+            series_map[key] = {'label': label or metric, 'data': []}
+        series_map[key]['data'].append({
+            'time': row['bucket'],
+            'value': row['avg_value'],
+        })
+
+    return jsonify({
+        'series': list(series_map.values()),
+        'metric_name': metric,
+    })
+
+
+@app.route('/api/entity/<entity_type>/<name>/pinned-charts', methods=['GET'])
+def get_pinned_charts(entity_type, name):
+    """Return pinned charts for an entity."""
+    executor = get_query_executor()
+    sql = f"""
+    SELECT pin_id, metric_name, display_name, created_at
+    FROM pinned_charts
+    WHERE entity_type = '{entity_type}'
+      AND entity_name = '{name}'
+    ORDER BY created_at
+    """
+    result = executor.execute_query(sql)
+    if not result['success']:
+        return jsonify({'pins': [], 'error': result.get('error')}), 500
+    return jsonify({'pins': result.get('rows', [])})
+
+
+@app.route('/api/entity/<entity_type>/<name>/pinned-charts', methods=['POST'])
+def create_pinned_chart(entity_type, name):
+    """Pin a metric chart to an entity's Charts tab."""
+    import uuid
+    body = request.get_json(force=True)
+    metric_name = body.get('metric_name', '')
+    if not metric_name:
+        return jsonify({'error': 'metric_name required'}), 400
+
+    executor = get_query_executor()
+
+    # Dedup check
+    check_sql = f"""
+    SELECT pin_id FROM pinned_charts
+    WHERE entity_type = '{entity_type}'
+      AND entity_name = '{name}'
+      AND metric_name = '{metric_name}'
+    LIMIT 1
+    """
+    check = executor.execute_query(check_sql)
+    if check['success'] and check.get('rows'):
+        return jsonify({'pin_id': check['rows'][0]['pin_id'], 'already_existed': True})
+
+    pin_id = str(uuid.uuid4())[:8]
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    display_name = metric_name
+
+    insert_sql = f"""
+    INSERT INTO pinned_charts (pin_id, entity_type, entity_name, metric_name, display_name, created_at)
+    VALUES ('{pin_id}', '{entity_type}', '{name}', '{metric_name}', '{display_name}', TIMESTAMP '{now}')
+    """
+    try:
+        cursor = executor.conn.cursor()
+        cursor.execute(insert_sql)
+        return jsonify({'pin_id': pin_id, 'already_existed': False})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/entity/<entity_type>/<name>/pinned-charts/<pin_id>', methods=['DELETE'])
+def delete_pinned_chart(entity_type, name, pin_id):
+    """Unpin a chart from an entity."""
+    executor = get_query_executor()
+    sql = f"""
+    DELETE FROM pinned_charts
+    WHERE pin_id = '{pin_id}'
+      AND entity_type = '{entity_type}'
+      AND entity_name = '{name}'
+    """
+    try:
+        cursor = executor.conn.cursor()
+        cursor.execute(sql)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/entity/<entity_type>/<name>/dependencies', methods=['GET'])
 def entity_dependencies(entity_type, name):
     """Get dependencies for any entity type."""
@@ -2270,7 +2553,7 @@ def investigate_alert(alert_id):
 
     # Get alert details
     alert_query = f"""
-    SELECT alert_id, service_name, alert_type, severity, title, description
+    SELECT alert_id, service_name, alert_type, severity, title, description, created_at
     FROM alerts
     WHERE alert_id = '{alert_id}'
     """
@@ -2305,15 +2588,44 @@ def run_alert_investigation(executor, alert):
     alert_type = alert.get('alert_type', '')
     alert_id = alert.get('alert_id', '')
     description = alert.get('description', '')
+    created_at = alert.get('created_at', '')
 
-    system_prompt = """You are an expert SRE assistant performing root cause analysis.
+    # Compute a time window anchored to when the alert fired, not "now".
+    # Use a 10-minute window before the alert and 5 minutes after.
+    if created_at:
+        from datetime import timedelta
+        try:
+            if isinstance(created_at, str):
+                # Handle ISO format from Trino
+                alert_time = datetime.fromisoformat(created_at.replace('Z', '+00:00').replace('+00:00', ''))
+            else:
+                alert_time = created_at
+            window_start = (alert_time - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+            window_end = (alert_time + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            window_start = None
+            window_end = None
+    else:
+        window_start = None
+        window_end = None
+
+    if window_start and window_end:
+        time_filter_traces = f"start_time BETWEEN TIMESTAMP '{window_start}' AND TIMESTAMP '{window_end}'"
+        time_filter_logs = f"timestamp BETWEEN TIMESTAMP '{window_start}' AND TIMESTAMP '{window_end}'"
+        time_context = f"Alert fired at: {created_at}\nTime window for queries: {window_start} to {window_end}"
+    else:
+        time_filter_traces = "start_time > current_timestamp - INTERVAL '15' MINUTE"
+        time_filter_logs = "timestamp > current_timestamp - INTERVAL '15' MINUTE"
+        time_context = "Time window: last 15 minutes from now"
+
+    system_prompt = f"""You are an expert SRE assistant performing root cause analysis.
 You have access to observability data via SQL queries (Trino/Presto dialect).
 
 Available tables and their EXACT columns (use ONLY these):
 
 traces_otel_analytic (time column: start_time):
   start_time, trace_id, span_id, parent_span_id, service_name, span_name,
-  span_kind, status_code, http_status, duration_ns, db_system
+  span_kind, status_code, http_status, duration_ns, db_system, attributes_json
 
 logs_otel_analytic (time column: timestamp):
   timestamp, service_name, severity_number, severity_text, body_text, trace_id, span_id
@@ -2322,12 +2634,46 @@ span_events_otel_analytic (time column: timestamp):
   timestamp, trace_id, span_id, service_name, span_name, event_name,
   exception_type, exception_message, exception_stacktrace
 
+metrics_otel_analytic (time column: timestamp):
+  timestamp, service_name, metric_name, metric_unit, value_double, attributes_flat
+  -- Contains infrastructure metrics: system.cpu.utilization, system.memory.utilization,
+  --   system.disk.utilization, system.filesystem.utilization, container.cpu.percent,
+  --   container.memory.percent, postgresql.* metrics, etc.
+  -- service_name is typically the collector name; use attributes_flat to filter by host/container.
+  -- attributes_flat contains key=value pairs like host.name=..., container.name=..., etc.
+
+topology_hosts (latest snapshot, no time column):
+  host_name, os_type, cpu_pct, memory_pct, disk_pct, last_seen, updated_at
+
+topology_containers (latest snapshot, no time column):
+  container_name, cpu_pct, memory_pct, memory_usage_mb, last_seen, updated_at
+
+topology_database_hosts (maps db to host):
+  db_system, host_name, last_seen, updated_at
+
+topology_host_services (maps host to services):
+  host_name, service_name, source, data_point_count, last_seen, updated_at
+
 CRITICAL SQL RULES:
-- For traces: WHERE start_time > current_timestamp - INTERVAL '15' MINUTE
-- For logs/events: WHERE timestamp > current_timestamp - INTERVAL '15' MINUTE
-- NO 'attributes' column exists - do not use it
+- Time filter for traces: WHERE {time_filter_traces}
+- Time filter for logs/events and metrics: WHERE {time_filter_logs}
+- When you find a specific trace_id, query ALL spans for that trace WITHOUT a time filter
+  to see the full request flow (e.g. WHERE trace_id = '...')
+- NO 'attributes' column exists - use attributes_json for trace attributes,
+  attributes_flat for metric attributes
 - NO semicolons, NO square brackets
-- Interval: INTERVAL '15' MINUTE (quoted number)
+- Interval syntax: INTERVAL '15' MINUTE (quoted number)
+- Timestamp literals MUST use a space, NOT 'T': TIMESTAMP '2026-01-31 18:42:00' (correct)
+  TIMESTAMP '2026-01-31T18:42:00' is INVALID in Trino and will error
+
+INVESTIGATION STRATEGY:
+1. First examine the error traces and exceptions to understand WHAT failed.
+2. Then check infrastructure metrics around the same time window to understand WHY:
+   - Was the host under CPU/memory/disk pressure?
+   - Were there resource spikes on the database host or container?
+   - Use topology_database_hosts to find which host runs the database,
+     then check that host's metrics.
+3. Check for correlated errors in other services during the same window.
 
 STRICT ANTI-HALLUCINATION RULES:
 - ONLY state facts that came from query results in THIS investigation.
@@ -2361,15 +2707,17 @@ RECOMMENDED ACTIONS:
 Service: {service}
 Alert Type: {alert_type}
 Description: {description}
+{time_context}
 
-Find the root cause by querying the data. Focus on the last 15 minutes."""
+Find the root cause by querying the data. Use the time window above for initial queries.
+When you find a relevant trace_id, query its full span tree (no time filter) to understand the complete request flow."""
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     messages = [{"role": "user", "content": user_prompt}]
     queries_executed = 0
     total_tokens = 0
 
-    for _ in range(5):
+    for _ in range(8):
         response = client.messages.create(
             model=ANTHROPIC_MODEL,
             max_tokens=2000,
