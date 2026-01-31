@@ -2430,7 +2430,7 @@
             border-radius: 6px;
         }
 
-        .sim-start-btn, .sim-stop-btn {
+        .sim-start-btn, .sim-stop-btn, .sim-undo-btn {
             padding: 6px 14px;
             border-radius: 6px;
             font-weight: 600;
@@ -2453,6 +2453,16 @@
         .sim-stop-btn {
             background: var(--accent-error);
             color: #fff;
+        }
+
+        .sim-undo-btn {
+            background: #d97706;
+            color: #fff;
+        }
+
+        .sim-undo-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
 
         .sim-header-progress {
@@ -2595,6 +2605,7 @@
                     </select>
                     <button class="sim-start-btn" id="sim-start-btn" onclick="startSimulation()" disabled>&#9654; Start</button>
                     <button class="sim-stop-btn" id="sim-stop-btn" onclick="stopSimulation()" style="display:none;">&#9632; Stop</button>
+                    <button class="sim-undo-btn" id="sim-undo-btn" onclick="undoScenario()" disabled>&#8617; Undo</button>
                     <div class="sim-header-progress" id="sim-header-progress" style="display:none;">
                         <div class="sim-progress-bar">
                             <div class="sim-progress-fill" id="sim-progress-fill" style="width:0%"></div>
@@ -5633,6 +5644,46 @@ Can you help me understand this issue further or suggest next steps?`;
             const select = document.getElementById('sim-scenario-select');
             const startBtn = document.getElementById('sim-start-btn');
             startBtn.disabled = !select.value;
+            updateUndoButton();
+        }
+
+        function updateUndoButton() {
+            const select = document.getElementById('sim-scenario-select');
+            const undoBtn = document.getElementById('sim-undo-btn');
+            const stopBtn = document.getElementById('sim-stop-btn');
+            const isRunning = stopBtn.style.display !== 'none';
+            undoBtn.disabled = !select.value || isRunning;
+        }
+
+        async function undoScenario() {
+            const select = document.getElementById('sim-scenario-select');
+            const scenarioId = select.value;
+            if (!scenarioId) return;
+
+            const undoBtn = document.getElementById('sim-undo-btn');
+            undoBtn.disabled = true;
+            undoBtn.innerHTML = 'Undoing...';
+
+            try {
+                const response = await fetch('/api/simulation/cleanup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ scenario: scenarioId })
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    undoBtn.innerHTML = 'Done &#10003;';
+                    setTimeout(() => { undoBtn.innerHTML = '&#8617; Undo'; updateUndoButton(); }, 2000);
+                } else {
+                    undoBtn.innerHTML = data.error || 'Failed';
+                    setTimeout(() => { undoBtn.innerHTML = '&#8617; Undo'; updateUndoButton(); }, 3000);
+                }
+            } catch (error) {
+                console.error('Failed to undo scenario:', error);
+                undoBtn.innerHTML = 'Error';
+                setTimeout(() => { undoBtn.innerHTML = '&#8617; Undo'; updateUndoButton(); }, 3000);
+            }
         }
 
         async function startSimulation() {
@@ -5710,6 +5761,7 @@ Can you help me understand this issue further or suggest next steps?`;
                     stopBtn.style.display = 'none';
                     progressDiv.style.display = 'none';
                     stepDiv.style.display = 'none';
+                    updateUndoButton();
                     return;
                 }
 
@@ -5734,6 +5786,7 @@ Can you help me understand this issue further or suggest next steps?`;
                     startBtn.style.display = 'none';
                     stopBtn.style.display = 'inline-block';
                     progressDiv.style.display = 'flex';
+                    updateUndoButton();
 
                     // Ensure polling is active (e.g. after page refresh)
                     if (!simPollInterval) {
@@ -5746,6 +5799,7 @@ Can you help me understand this issue further or suggest next steps?`;
                     startBtn.innerHTML = '&#9654; Start';
                     startBtn.disabled = !document.getElementById('sim-scenario-select').value;
                     stopBtn.style.display = 'none';
+                    updateUndoButton();
 
                     if (simPollInterval) {
                         clearInterval(simPollInterval);

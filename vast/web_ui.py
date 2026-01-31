@@ -2859,6 +2859,23 @@ def stop_simulation():
     return jsonify({'success': success})
 
 
+@app.route('/api/simulation/cleanup', methods=['POST'])
+def simulation_cleanup():
+    """Run cleanup/undo for a scenario, even when no simulation is running."""
+    mgr = get_simulation_manager()
+    body = request.get_json(silent=True) or {}
+    scenario = body.get('scenario', '')
+
+    if not scenario:
+        return jsonify({'success': False, 'error': 'Missing scenario name'}), 400
+
+    success = mgr.run_cleanup(scenario)
+    if not success:
+        return jsonify({'success': False, 'error': 'Cleanup failed or scenario not found'}), 400
+
+    return jsonify({'success': True})
+
+
 @app.route('/api/simulation/status', methods=['GET'])
 def simulation_status():
     """Get current simulation status."""

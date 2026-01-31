@@ -241,9 +241,18 @@ class SimulationManager:
                 "duration_minutes": s["duration_minutes"],
                 "steps": len(s["steps"]),
                 "predicted_alerts": s["predicted_alerts"],
+                "has_cleanup": "cleanup" in s,
             }
             for sid, s in SCENARIOS.items()
         ]
+
+    def run_cleanup(self, scenario_id: str) -> bool:
+        """Run the cleanup action for a scenario. Safe to call at any time."""
+        scenario = SCENARIOS.get(scenario_id)
+        if not scenario or "cleanup" not in scenario:
+            return False
+        cleanup = scenario["cleanup"]
+        return execute_action(cleanup["action"], cleanup.get("params", {}))
 
     def start_scenario(self, scenario_name: str, config: Optional[Dict] = None) -> Optional[str]:
         """Start a scenario. Returns run_id or None if already running."""
