@@ -2587,10 +2587,8 @@ def get_alert_thresholds():
         "error_rate": {"description": "Service error rate spike", "base": zscore},
         "latency": {"description": "Service latency degradation", "base": zscore},
         "throughput": {"description": "Service throughput drop", "base": zscore},
-        "db_latency": {"description": "Database query latency", "base": zscore},
-        "db_error": {"description": "Database connection/query errors", "base": zscore},
-        "dependency_latency": {"description": "Downstream service latency", "base": zscore},
-        "dependency_error": {"description": "Downstream service errors", "base": zscore},
+        "dependency_latency": {"description": "Dependency latency anomaly", "base": zscore},
+        "dependency_error": {"description": "Dependency error rate anomaly", "base": zscore},
         "exception_surge": {"description": "Exception rate surge", "base": zscore},
         "new_exception": {"description": "Previously unseen exception type", "base": zscore},
     }
@@ -2815,7 +2813,6 @@ def set_entity_threshold_override(entity_type, entity_name):
 
     valid_categories = {
         "error_rate", "latency", "throughput",
-        "db_latency", "db_error",
         "dependency_latency", "dependency_error",
         "exception_surge", "new_exception",
     }
@@ -3885,10 +3882,9 @@ def simulation_results(run_id):
 import uuid as _uuid
 
 _REMEDIATION_PLAYBOOKS_SEED = [
-    {"alert_type": "db_slow_queries",     "action_name": "Reset PostgreSQL Config",              "action_type": "pg_config_reset",  "action_params": "{}", "description": "Resets all PostgreSQL config parameters to defaults",                        "risk_level": "medium"},
-    {"alert_type": "db_connection_failure","action_name": "Reset PostgreSQL Config",              "action_type": "pg_config_reset",  "action_params": "{}", "description": "Resets all PostgreSQL config parameters to defaults",                        "risk_level": "medium"},
+    {"alert_type": "dependency_anomaly",  "action_name": "Reset PostgreSQL Config",              "action_type": "pg_config_reset",  "action_params": "{}", "description": "Resets all PostgreSQL config parameters to defaults",                        "risk_level": "medium"},
     {"alert_type": "error_spike",         "action_name": "Disable Payment Failure Flag",         "action_type": "feature_flag",     "action_params": '{"flag":"paymentFailure","variant":"off"}', "description": "Disables the payment failure feature flag to stop injected errors",     "risk_level": "low"},
-    {"alert_type": "dependency_failure",  "action_name": "Disable Payment Failure Flag",         "action_type": "feature_flag",     "action_params": '{"flag":"paymentFailure","variant":"off"}', "description": "Disables the payment failure feature flag to stop injected errors",     "risk_level": "low"},
+    {"alert_type": "dependency_anomaly",  "action_name": "Disable Payment Failure Flag",         "action_type": "feature_flag",     "action_params": '{"flag":"paymentFailure","variant":"off"}', "description": "Disables the payment failure feature flag to stop injected errors",     "risk_level": "low"},
     {"alert_type": "anomaly",            "action_name": "Disable Recommendation Cache Failure",  "action_type": "feature_flag",     "action_params": '{"flag":"recommendationCacheFailure","variant":"off"}', "description": "Disables the recommendation cache failure flag to restore normal memory usage", "risk_level": "low"},
     {"alert_type": "anomaly",            "action_name": "Disable Kafka Queue Problems",          "action_type": "feature_flag",     "action_params": '{"flag":"kafkaQueueProblems","variant":"off"}', "description": "Disables the Kafka queue problems flag to restore normal throughput",          "risk_level": "low"},
     {"alert_type": "trend",              "action_name": "Clean Disk Fill Temp Files",             "action_type": "disk_fill_cleanup","action_params": "{}", "description": "Removes temporary simulation files from the PostgreSQL data directory",         "risk_level": "low"},

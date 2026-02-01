@@ -124,7 +124,7 @@ curl -s http://localhost:5000/api/simulation/status | python3 -m json.tool
 - Error count card turns red with a non-zero count. Expanding it shows `product-reviews`, `checkout`, or other DB-dependent services with their failing operations.
 
 **Main Panel — Predictive Alerts:**
-- `db_slow_queries` or `latency_degradation` alerts may appear with CRITICAL or WARNING severity, showing the affected database and services.
+- `dependency_anomaly` or `latency_degradation` alerts may appear with CRITICAL or WARNING severity, showing the affected database and services.
 
 **Main Panel — Predictions:**
 - If the trend analysis detects sustained degradation, a prediction may appear for database-related resources with hours-until-exhaustion and confidence metrics.
@@ -195,7 +195,7 @@ print(data['flags']['paymentFailure']['defaultVariant'])"
 
 **Main Panel — Predictive Alerts:**
 - `error_spike` alert appears with CRITICAL severity for the `payment` service.
-- `dependency_failure` alert may appear identifying the cascade from `payment` to `checkout`.
+- `dependency_anomaly` alert may appear identifying the cascade from `payment` to `checkout`.
 
 **Main Panel — Alert Activity:**
 - Timeline shows "Created: payment error_spike" events, and if auto-investigation is enabled, "Investigation started" and "Root cause found" entries.
@@ -408,7 +408,7 @@ After a scenario completes (or is stopped), the results endpoint returns:
     {"index": 1, "label": "Reduce work_mem to 64kB", "success": true, "executed_at": "..."}
   ],
   "fired_alerts": [
-    {"alert_id": "...", "service_name": "product-reviews", "alert_type": "db_slow_queries", "severity": "critical"}
+    {"alert_id": "...", "service_name": "product-reviews", "alert_type": "dependency_anomaly", "severity": "critical"}
   ],
   "fired_predictions": [
     {"host_name": "...", "resource_type": "disk", "hours_until_exhaustion": 2.5, "confidence": "high"}

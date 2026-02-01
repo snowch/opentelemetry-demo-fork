@@ -42,7 +42,7 @@ SCENARIOS = {
     "postgres_degradation": {
         "name": "PostgreSQL Degradation",
         "description": "Progressively tightens PostgreSQL statement_timeout until queries start failing. Baseline queries run ~2ms, so timeouts below that cause visible errors.",
-        "predicted_alerts": ["db_slow_queries", "db_connection_failure"],
+        "predicted_alerts": ["dependency_anomaly"],
         "hold_at_peak_minutes": 5,
         "steps": [
             {"delay_seconds": 0, "action": "pg_config_degrade", "params": {"settings": {"statement_timeout": "'8ms'"}}, "label": "Set statement_timeout to 8ms (occasional timeouts)"},
@@ -55,7 +55,7 @@ SCENARIOS = {
     "cascading_payment": {
         "name": "Cascading Payment Failure",
         "description": "Escalates payment service failure rate from 10% to 75%, causing cascading errors to checkout and frontend.",
-        "predicted_alerts": ["error_spike", "dependency_failure"],
+        "predicted_alerts": ["error_spike", "dependency_anomaly"],
         "hold_at_peak_minutes": 5,
         "steps": [
             {"delay_seconds": 0, "action": "feature_flag", "params": {"flag": "paymentFailure", "variant": "10%"}, "label": "10% payment failures"},

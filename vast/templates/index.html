@@ -146,7 +146,6 @@
 
         .status-card {
             background: var(--bg-card);
-            backdrop-filter: blur(10px);
             border: 1px solid var(--border-color);
             border-radius: 16px;
             padding: 16px;
@@ -764,7 +763,6 @@
 
         .message.assistant .message-content {
             background: var(--bg-card);
-            backdrop-filter: blur(10px);
             border: 1px solid var(--border-color);
             color: var(--text-primary);
             border-bottom-left-radius: 6px;
@@ -1155,8 +1153,7 @@
             display: none;
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0, 0, 0, 0.8);
-            backdrop-filter: blur(4px);
+            background: rgba(0, 0, 0, 0.85);
             z-index: 1000;
             justify-content: center;
             align-items: center;
@@ -1175,6 +1172,8 @@
             border: 1px solid var(--border-color);
             box-shadow: var(--shadow-lg);
             animation: modalIn 0.3s ease;
+            contain: layout style;
+            will-change: scroll-position;
         }
 
         @keyframes modalIn {
@@ -5331,10 +5330,7 @@
 
         // Root cause alert types - these indicate underlying issues that can lead to symptoms
         const ROOT_CAUSE_ALERT_TYPES = [
-            'db_connection_failure',
-            'db_slow_queries',
-            'dependency_failure',
-            'dependency_latency',
+            'dependency_anomaly',
             'exception_surge',
             'new_exception_type'
         ];
@@ -5355,6 +5351,23 @@
             const diffHours = Math.floor(diffMins / 60);
             if (diffHours < 24) return `${diffHours}h ago`;
             return `${Math.floor(diffHours / 24)}d ago`;
+        }
+
+        function formatMetricValue(value, metricType) {
+            if (typeof value !== 'number' || isNaN(value)) return value;
+            const mt = (metricType || '').toLowerCase();
+            if (mt.includes('error') && !mt.includes('latency')) {
+                return (value * 100).toFixed(1) + '%';
+            } else if (mt.includes('latency') || mt.includes('duration')) {
+                if (value < 10) return value.toFixed(2) + ' ms';
+                if (value < 100) return value.toFixed(1) + ' ms';
+                return value.toFixed(0) + ' ms';
+            } else if (mt.includes('throughput')) {
+                return value.toFixed(0) + ' /min';
+            } else if (mt.includes('exception')) {
+                return value.toFixed(0) + ' /hr';
+            }
+            return value.toFixed(2);
         }
 
         function investigateAlert(alertId) {
@@ -5480,13 +5493,13 @@ ${escapeHtml(alert.supporting_evidence)}</div>
                     ${alert.current_value ? `
                     <div class="alert-meta-item">
                         <span class="alert-meta-label">Current Value</span>
-                        <span class="alert-meta-value">${typeof alert.current_value === 'number' ? alert.current_value.toFixed(2) : alert.current_value}</span>
+                        <span class="alert-meta-value">${formatMetricValue(alert.current_value, alert.metric_type)}</span>
                     </div>
                     ` : ''}
                     ${alert.baseline_value ? `
                     <div class="alert-meta-item">
                         <span class="alert-meta-label">Baseline</span>
-                        <span class="alert-meta-value">${typeof alert.baseline_value === 'number' ? alert.baseline_value.toFixed(2) : alert.baseline_value}</span>
+                        <span class="alert-meta-value">${formatMetricValue(alert.baseline_value, alert.metric_type)}</span>
                     </div>
                     ` : ''}
                 </div>
@@ -6695,7 +6708,7 @@ Can you help me understand this issue further or suggest next steps?`;
         // =================================================================
         const THRESHOLD_CATEGORIES_BY_TYPE = {
             service: ['error_rate', 'latency', 'throughput', 'dependency_latency', 'dependency_error', 'exception_surge', 'new_exception'],
-            database: ['db_error', 'db_latency', 'error_rate', 'latency'],
+            database: ['dependency_error', 'dependency_latency', 'error_rate', 'latency'],
             host: [],  // host uses resource_predictions
             container: [],  // container uses resource_predictions
         };
@@ -7216,6 +7229,7 @@ Can you help me understand this issue further or suggest next steps?`;
             return {
                 responsive: true,
                 maintainAspectRatio: true,
+                animation: false,
                 plugins: { legend: { labels: { color: '#a0a0b0', font: { size: 11 } } } },
                 scales: {
                     x: { ticks: { color: '#606070', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
@@ -7989,7 +8003,7 @@ Can you help me understand this issue further or suggest next steps?`;
         // Incident Context in Alert Modal
         // =====================================================================
 
-        async function loadIncidentContext(alertId) {
+        async function loadIncidentContext(alertId, metricType) {
             try {
                 const response = await fetch(`/api/incidents/context/${encodeURIComponent(alertId)}`);
                 const data = await response.json();
@@ -8085,7 +8099,7 @@ Can you help me understand this issue further or suggest next steps?`;
                             }
                             const val = parseFloat(a.current_value);
                             const base = parseFloat(a.baseline_value);
-                            const valText = (!isNaN(val) && !isNaN(base)) ? `${val.toFixed(1)} vs ${base.toFixed(1)}` : '';
+                            const valText = (!isNaN(val) && !isNaN(base)) ? `${formatMetricValue(val, metricType)} vs ${formatMetricValue(base, metricType)}` : '';
                             occHtml += `<div class="similar-occurrence-item" onclick="investigateAlert('${escapeHtml(a.alert_id)}')" style="cursor:pointer;">`;
                             occHtml += `<span class="occ-time">${time}</span>`;
                             occHtml += `<span class="occ-status ${statusCls}">${statusLabel}</span>`;
@@ -8100,6 +8114,47 @@ Can you help me understand this issue further or suggest next steps?`;
 
                     occHtml += '</div>';
                     similarContainer.innerHTML = occHtml;
+                }
+
+                // Update diagnostic verdict if this is a recurring auto-resolved alert.
+                // Use occurrence_count from the pattern (most authoritative), fall back to similar_alerts count.
+                const patternCount = pat ? (pat.occurrence_count || 0) : 0;
+                const effectiveCount = patternCount > 0 ? patternCount : similarAlerts.length;
+                if (effectiveCount > 1 && similarContainer) {
+                    // Navigate from the similarContainer up to the parent diagnostic-summary div
+                    const diagParent = similarContainer.closest('.diagnostic-summary')
+                                    || similarContainer.parentElement;
+                    if (diagParent) {
+                        const verdictEl = diagParent.querySelector('.diag-verdict')
+                                       || document.getElementById('diag-verdict-text');
+                        const bulletsEl = diagParent.querySelector('.diag-bullets')
+                                       || document.getElementById('diag-bullets-list');
+                        if (verdictEl && bulletsEl) {
+                            const curVerdict = verdictEl.textContent || '';
+                            if (curVerdict.indexOf('no action needed') !== -1) {
+                                verdictEl.textContent = 'Recurring issue \u2014 this has happened ' + effectiveCount + ' times, investigate root cause';
+                                diagParent.classList.remove('sev-ok');
+                                diagParent.classList.add('sev-warning');
+                                const allBullets = bulletsEl.querySelectorAll('li');
+                                for (var i = 0; i < allBullets.length; i++) {
+                                    var t = allBullets[i].textContent;
+                                    if (t.indexOf('transient spike') !== -1 || t.indexOf('likely no action needed') !== -1) {
+                                        allBullets[i].textContent = 'Recurred ' + effectiveCount + ' times \u2014 not transient, review underlying cause';
+                                        allBullets[i].className = 'bullet-amber';
+                                    } else if (t.indexOf('Auto-resolved') !== -1) {
+                                        allBullets[i].remove();
+                                        i--;
+                                    }
+                                }
+                                if (pat && pat.common_root_cause) {
+                                    var li = document.createElement('li');
+                                    li.className = 'bullet-amber';
+                                    li.textContent = 'Known pattern \u2014 common root cause: ' + pat.common_root_cause;
+                                    bulletsEl.appendChild(li);
+                                }
+                            }
+                        }
+                    }
                 }
 
             } catch (error) {
@@ -8152,7 +8207,7 @@ Can you help me understand this issue further or suggest next steps?`;
 
                         // Fetch remediations and incident context (eagerly, for similar occurrences in diagnostic summary)
                         loadRemediations(alert.alert_id || alertId);
-                        loadIncidentContext(alert.alert_id || alertId);
+                        loadIncidentContext(alert.alert_id || alertId, alert.metric_type);
                     }
                 }
             }
@@ -8171,6 +8226,9 @@ Can you help me understand this issue further or suggest next steps?`;
             const baseVal = parseFloat(alert.baseline_value) || 0;
             const zScore = parseFloat(alert.z_score) || 0;
             const devPct = baseVal !== 0 ? Math.round(((curVal - baseVal) / Math.abs(baseVal)) * 100) : 0;
+            const mt = alert.metric_type || '';
+            const fmtCur = formatMetricValue(curVal, mt);
+            const fmtBase = formatMetricValue(baseVal, mt);
 
             const bullets = [];
             let diagSeverity = 'ok';
@@ -8179,16 +8237,16 @@ Can you help me understand this issue further or suggest next steps?`;
             if (severity === 'critical') {
                 diagSeverity = 'critical';
                 if (Math.abs(devPct) > 50) {
-                    bullets.push({text: `${Math.abs(devPct)}% deviation from baseline — significant degradation`, cls: 'bullet-red'});
+                    bullets.push({text: `${Math.abs(devPct)}% deviation from baseline (${fmtCur} vs ${fmtBase}) — significant degradation`, cls: 'bullet-red'});
                 } else if (Math.abs(devPct) > 0) {
-                    bullets.push({text: `${Math.abs(devPct)}% deviation from baseline (z-score: ${zScore.toFixed(1)})`, cls: 'bullet-red'});
+                    bullets.push({text: `${Math.abs(devPct)}% deviation from baseline (${fmtCur} vs ${fmtBase}, z-score: ${zScore.toFixed(1)})`, cls: 'bullet-red'});
                 } else {
                     bullets.push({text: `Critical severity — immediate attention required`, cls: 'bullet-red'});
                 }
             } else if (severity === 'warning') {
                 diagSeverity = 'warning';
                 if (Math.abs(devPct) > 0) {
-                    bullets.push({text: `${Math.abs(devPct)}% deviation from baseline (z-score: ${zScore.toFixed(1)})`, cls: 'bullet-amber'});
+                    bullets.push({text: `${Math.abs(devPct)}% deviation from baseline (${fmtCur} vs ${fmtBase}, z-score: ${zScore.toFixed(1)})`, cls: 'bullet-amber'});
                 } else {
                     bullets.push({text: 'Warning level — monitor closely', cls: 'bullet-amber'});
                 }
@@ -8283,8 +8341,8 @@ Can you help me understand this issue further or suggest next steps?`;
 
             div.innerHTML = `
                 <h4>Diagnostic Summary</h4>
-                <div class="diag-verdict">${escapeHtml(verdict)}</div>
-                <ul class="diag-bullets">${bullets.map(b => `<li class="${b.cls}">${escapeHtml(b.text)}</li>`).join('')}</ul>
+                <div class="diag-verdict" id="diag-verdict-text">${escapeHtml(verdict)}</div>
+                <ul class="diag-bullets" id="diag-bullets-list">${bullets.map(b => `<li class="${b.cls}">${escapeHtml(b.text)}</li>`).join('')}</ul>
                 ${actionsHtml ? `<div class="diag-actions">${actionsHtml}</div>` : ''}
                 <div id="alert-similar-occurrences"></div>
             `;
