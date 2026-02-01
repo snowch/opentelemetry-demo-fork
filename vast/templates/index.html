@@ -3126,6 +3126,178 @@
             text-overflow: ellipsis;
             max-width: 100%;
         }
+
+        /* Collapsible sidebar sections */
+        .section-header.collapsible {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .section-header.collapsible:hover {
+            opacity: 0.8;
+        }
+
+        .section-arrow {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-right: 4px;
+        }
+
+        .section-count {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-left: 4px;
+        }
+
+        /* Remediation Actions */
+        .remediation-section {
+            margin: 16px 0;
+        }
+
+        .remediation-section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 10px;
+        }
+
+        .remediation-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-primary);
+            border-radius: 8px;
+            padding: 12px 14px;
+            margin-bottom: 8px;
+            border-left: 3px solid var(--text-muted);
+            transition: border-color 0.2s;
+        }
+
+        .remediation-card.risk-low {
+            border-left-color: #22c55e;
+        }
+
+        .remediation-card.risk-medium {
+            border-left-color: #f59e0b;
+        }
+
+        .remediation-card.risk-high {
+            border-left-color: #ef4444;
+        }
+
+        .remediation-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .remediation-card-name {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .remediation-execute-btn {
+            padding: 4px 12px;
+            border-radius: 4px;
+            border: none;
+            background: var(--accent-primary);
+            color: #fff;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: box-shadow 0.2s, opacity 0.2s;
+        }
+
+        .remediation-execute-btn:hover {
+            box-shadow: 0 0 8px rgba(0, 217, 255, 0.4);
+        }
+
+        .remediation-execute-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .remediation-card-meta {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 4px;
+            font-size: 11px;
+        }
+
+        .risk-badge {
+            padding: 1px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .risk-badge.low {
+            background: rgba(34, 197, 94, 0.15);
+            color: #22c55e;
+        }
+
+        .risk-badge.medium {
+            background: rgba(245, 158, 11, 0.15);
+            color: #f59e0b;
+        }
+
+        .risk-badge.high {
+            background: rgba(239, 68, 68, 0.15);
+            color: #ef4444;
+        }
+
+        .success-rate-bar {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            color: var(--text-muted);
+        }
+
+        .success-rate-bar-track {
+            width: 50px;
+            height: 4px;
+            background: var(--bg-tertiary);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .success-rate-bar-fill {
+            height: 100%;
+            background: #22c55e;
+            border-radius: 2px;
+        }
+
+        .remediation-card-desc {
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+
+        .remediation-result {
+            margin-top: 6px;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .remediation-result.success {
+            background: rgba(34, 197, 94, 0.1);
+            color: #22c55e;
+        }
+
+        .remediation-result.failed {
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+        }
+
+        .remediation-result.pending {
+            background: rgba(0, 217, 255, 0.1);
+            color: var(--accent-primary);
+        }
     </style>
 </head>
 <body>
@@ -3768,6 +3940,20 @@
             }
         }
 
+        // Track which entity sections are expanded (containers collapsed by default)
+        window._entitySectionExpanded = {};
+
+        function toggleEntitySection(type, headerEl) {
+            const body = document.getElementById('section-body-' + type);
+            if (!body) return;
+            const isHidden = body.style.display === 'none';
+            body.style.display = isHidden ? '' : 'none';
+            window._entitySectionExpanded[type] = isHidden;
+            const arrow = headerEl.querySelector('.section-arrow');
+            if (arrow) arrow.textContent = isHidden ? '\u25BC' : '\u25B6';
+            headerEl.classList.toggle('open', isHidden);
+        }
+
         function toggleSidebarAutoRefresh() {
             sidebarAutoRefresh = !sidebarAutoRefresh;
             const toggle = document.getElementById('sidebar-auto-toggle');
@@ -4313,13 +4499,19 @@
                             itemsHtml = emptyMsg;
                         }
 
+                        const collapsible = cat.type === 'container';
+                        const collapsed = collapsible && !window._entitySectionExpanded?.[cat.type];
+
                         sectionsHtml += `
                             <div class="sidebar-section">
-                                <div class="section-header">
+                                <div class="section-header${collapsible ? ' collapsible' : ''}${collapsed ? '' : ' open'}"
+                                     ${collapsible ? `onclick="toggleEntitySection('${cat.type}', this)"` : ''}>
+                                    ${collapsible ? `<span class="section-arrow">${collapsed ? '\u25B6' : '\u25BC'}</span>` : ''}
                                     <span class="section-title">${escapeHtml(cat.display_name)}</span>
+                                    ${collapsible ? `<span class="section-count">${sorted.length}</span>` : ''}
                                     ${headerExtra}
                                 </div>
-                                <div class="status-card">
+                                <div class="status-card" ${collapsed ? 'style="display:none"' : ''} id="section-body-${cat.type}">
                                     <div class="status-card-title">${subtitle}</div>
                                     <div id="${cat.type}s-list">${itemsHtml}</div>
                                 </div>
@@ -7297,17 +7489,25 @@ Can you help me understand this issue further or suggest next steps?`;
             }
         }
 
-        // Modify openAlertModal to include incident context section
+        // Modify openAlertModal to include incident context + remediation sections
         const _originalOpenAlertModal = openAlertModal;
         openAlertModal = function(alert, alertId) {
             _originalOpenAlertModal(alert, alertId);
 
-            // After the original modal renders, append the incident context section
+            // After the original modal renders, append extra sections
             if (alert) {
                 const content = document.getElementById('alert-modal-content');
                 if (content) {
                     const actionsDiv = content.querySelector('.alert-actions');
                     if (actionsDiv) {
+                        // Add remediation section
+                        const remediationSection = document.createElement('div');
+                        remediationSection.className = 'remediation-section';
+                        remediationSection.id = 'remediation-section';
+                        remediationSection.innerHTML = '<div style="font-size:11px; color: var(--text-muted);">Loading remediations...</div>';
+                        content.insertBefore(remediationSection, actionsDiv);
+
+                        // Add incident context section
                         const contextSection = document.createElement('div');
                         contextSection.className = 'incident-context-section';
                         contextSection.innerHTML = `
@@ -7319,10 +7519,91 @@ Can you help me understand this issue further or suggest next steps?`;
                             </div>
                         `;
                         content.insertBefore(contextSection, actionsDiv);
+
+                        // Fetch remediations
+                        loadRemediations(alert.alert_id || alertId);
                     }
                 }
             }
         };
+
+        async function loadRemediations(alertId) {
+            const container = document.getElementById('remediation-section');
+            if (!container) return;
+
+            try {
+                const response = await fetch(`/api/alerts/${alertId}/remediations`);
+                const data = await response.json();
+                const remediations = data.remediations || [];
+
+                if (remediations.length === 0) {
+                    container.innerHTML = '';
+                    return;
+                }
+
+                let html = '<div class="remediation-section-title">Remediation Actions</div>';
+                for (const r of remediations) {
+                    const riskClass = (r.risk_level || 'low').toLowerCase();
+                    const rateHtml = r.success_rate !== null
+                        ? `<span class="success-rate-bar"><span class="success-rate-bar-track"><span class="success-rate-bar-fill" style="width:${r.success_rate}%"></span></span>${r.success_rate}% (${r.times_executed})</span>`
+                        : '<span style="color:var(--text-muted)">No runs yet</span>';
+
+                    html += `
+                        <div class="remediation-card risk-${riskClass}">
+                            <div class="remediation-card-header">
+                                <span class="remediation-card-name">${escapeHtml(r.action_name)}</span>
+                                <button class="remediation-execute-btn" id="rem-btn-${r.playbook_id}"
+                                    onclick="executeRemediation('${alertId}', '${r.playbook_id}', this)">
+                                    Execute
+                                </button>
+                            </div>
+                            <div class="remediation-card-meta">
+                                <span class="risk-badge ${riskClass}">${riskClass}</span>
+                                ${rateHtml}
+                            </div>
+                            <div class="remediation-card-desc">${escapeHtml(r.description || '')}</div>
+                            <div id="rem-result-${r.playbook_id}"></div>
+                        </div>
+                    `;
+                }
+                container.innerHTML = html;
+            } catch (err) {
+                console.error('Failed to load remediations:', err);
+                container.innerHTML = '';
+            }
+        }
+
+        async function executeRemediation(alertId, playbookId, btn) {
+            btn.disabled = true;
+            btn.textContent = 'Executing...';
+            const resultDiv = document.getElementById(`rem-result-${playbookId}`);
+
+            try {
+                const response = await fetch(`/api/alerts/${alertId}/remediate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ playbook_id: playbookId })
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    resultDiv.innerHTML = '<div class="remediation-result success">Action executed successfully. Monitoring...</div>';
+                    btn.textContent = 'Done';
+                    // Auto-refresh alert status after a delay
+                    setTimeout(() => {
+                        if (typeof refreshSidebarData === 'function') refreshSidebarData();
+                    }, 5000);
+                } else {
+                    resultDiv.innerHTML = `<div class="remediation-result failed">Failed: ${escapeHtml(data.message || data.error || 'Unknown error')}</div>`;
+                    btn.textContent = 'Retry';
+                    btn.disabled = false;
+                }
+            } catch (err) {
+                resultDiv.innerHTML = `<div class="remediation-result failed">Error: ${escapeHtml(err.message)}</div>`;
+                btn.textContent = 'Retry';
+                btn.disabled = false;
+            }
+        }
 
         function toggleIncidentContext(el) {
             el.classList.toggle('open');

@@ -1534,7 +1534,12 @@ class AnomalyDetector:
                 current_count = results[0].get("exception_count", 0)
                 current_hourly_rate = current_count * 12
 
-                if baseline["stddev"] > 0 and current_hourly_rate > 0:
+                # Require minimum 3 exceptions in 5 min to avoid noise from single events
+                # and hourly rate must be at least 2x baseline mean
+                min_count = 3
+                min_rate_multiplier = 2.0
+                if (baseline["stddev"] > 0 and current_count >= min_count
+                        and current_hourly_rate > baseline["mean"] * min_rate_multiplier):
                     z_score = (current_hourly_rate - baseline["mean"]) / baseline["stddev"]
                     threshold = self.threshold_manager.get_threshold("exception_surge")
 

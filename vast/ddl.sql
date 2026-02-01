@@ -26,6 +26,8 @@ DROP TABLE IF EXISTS vast."csnow-db|otel".operation_metrics_5m;
 DROP TABLE IF EXISTS vast."csnow-db|otel".job_status;
 DROP TABLE IF EXISTS vast."csnow-db|otel".pinned_charts;
 DROP TABLE IF EXISTS vast."csnow-db|otel".threshold_overrides;
+DROP TABLE IF EXISTS vast."csnow-db|otel".remediation_playbooks;
+DROP TABLE IF EXISTS vast."csnow-db|otel".remediation_log;
 
 -- vast."csnow-db|otel".logs_otel_analytic definition
 
@@ -377,5 +379,38 @@ CREATE TABLE vast."csnow-db|otel".pinned_charts (
    metric_name   varchar,
    display_name  varchar,
    created_at    timestamp(9)
+);
+
+-- =============================================================================
+-- Remediation Playbooks
+-- =============================================================================
+
+-- Pre-defined catalog of fix actions mapped to alert types
+CREATE TABLE vast."csnow-db|otel".remediation_playbooks (
+    playbook_id     varchar,
+    alert_type      varchar,
+    action_name     varchar,
+    action_type     varchar,
+    action_params   varchar,
+    description     varchar,
+    risk_level      varchar,
+    created_at      timestamp(9)
+);
+
+-- Tracks every execution of a playbook action with outcome
+CREATE TABLE vast."csnow-db|otel".remediation_log (
+    execution_id    varchar,
+    playbook_id     varchar,
+    alert_id        varchar,
+    service_name    varchar,
+    alert_type      varchar,
+    action_name     varchar,
+    action_type     varchar,
+    action_params   varchar,
+    executed_at     timestamp(9),
+    executed_by     varchar,
+    status          varchar,
+    result_message  varchar,
+    alert_resolved_within_minutes double
 );
 

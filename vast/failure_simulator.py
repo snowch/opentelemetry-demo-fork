@@ -6,7 +6,7 @@ Provides 5 built-in multi-step scenarios that can be triggered from the web UI
 to demonstrate predictive alerting capabilities.
 
 Scenarios:
-  - postgres_degradation: Gradual latency increase via tc netem
+  - postgres_degradation: Progressive statement_timeout tightening
   - cascading_payment: Escalating payment failures via feature flags
   - memory_leak: Memory growth via recommendation cache failure flag
   - disk_fill: Create temp files in postgres container
@@ -41,16 +41,16 @@ POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "otel")
 SCENARIOS = {
     "postgres_degradation": {
         "name": "PostgreSQL Degradation",
-        "description": "Progressively degrades PostgreSQL performance by adjusting configuration settings (work_mem, random_page_cost, effective_cache_size).",
-        "predicted_alerts": ["db_slow_queries", "latency_degradation"],
+        "description": "Progressively tightens PostgreSQL statement_timeout until queries start failing. Baseline queries run ~2ms, so timeouts below that cause visible errors.",
+        "predicted_alerts": ["db_slow_queries", "db_connection_failure"],
         "hold_at_peak_minutes": 5,
         "steps": [
-            {"delay_seconds": 0, "action": "pg_config_degrade", "params": {"settings": {"work_mem": "'256kB'", "random_page_cost": "20"}}, "label": "Reduce work_mem to 256kB, raise random_page_cost"},
-            {"delay_seconds": 180, "action": "pg_config_degrade", "params": {"settings": {"work_mem": "'64kB'", "effective_cache_size": "'32MB'"}}, "label": "Reduce work_mem to 64kB, cache to 32MB"},
-            {"delay_seconds": 360, "action": "pg_config_degrade", "params": {"settings": {"work_mem": "'64kB'", "random_page_cost": "100", "effective_cache_size": "'1MB'"}}, "label": "Extreme: random_page_cost=100, cache=1MB"},
-            {"delay_seconds": 540, "action": "pg_config_degrade", "params": {"settings": {"work_mem": "'64kB'", "random_page_cost": "100", "effective_cache_size": "'1MB'", "statement_timeout": "'200ms'"}}, "label": "Add 200ms statement timeout"},
+            {"delay_seconds": 0, "action": "pg_config_degrade", "params": {"settings": {"statement_timeout": "'8ms'"}}, "label": "Set statement_timeout to 8ms (occasional timeouts)"},
+            {"delay_seconds": 120, "action": "pg_config_degrade", "params": {"settings": {"statement_timeout": "'4ms'"}}, "label": "Tighten to 4ms (more frequent timeouts)"},
+            {"delay_seconds": 240, "action": "pg_config_degrade", "params": {"settings": {"statement_timeout": "'2ms'"}}, "label": "Tighten to 2ms (frequent query failures)"},
+            {"delay_seconds": 360, "action": "pg_config_degrade", "params": {"settings": {"statement_timeout": "'1ms'"}}, "label": "Tighten to 1ms (most queries fail)"},
         ],
-        "cleanup": {"action": "pg_config_reset"},
+        "cleanup": {"action": "pg_degradation_cleanup"},
     },
     "cascading_payment": {
         "name": "Cascading Payment Failure",
@@ -186,6 +186,7 @@ def _call_feature_flag(flag_name: str, variant: str) -> bool:
         return False
 
 
+
 def execute_action(action: str, params: Dict) -> bool:
     """Execute a single simulation action."""
     if action == "feature_flag":
@@ -198,6 +199,9 @@ def execute_action(action: str, params: Dict) -> bool:
         return _run_pg_sql(stmts)
 
     elif action == "pg_config_reset":
+        return _run_pg_sql(["ALTER SYSTEM RESET ALL", "SELECT pg_reload_conf()"])
+
+    elif action == "pg_degradation_cleanup":
         return _run_pg_sql(["ALTER SYSTEM RESET ALL", "SELECT pg_reload_conf()"])
 
     elif action == "disk_fill_step":
@@ -215,6 +219,15 @@ def execute_action(action: str, params: Dict) -> bool:
     else:
         print(f"[Simulator] Unknown action: {action}")
         return False
+
+
+def execute_remediation(action_type: str, params: dict) -> dict:
+    """Execute a remediation action. Returns {"success": bool, "message": str}."""
+    try:
+        success = execute_action(action_type, params)
+        return {"success": success, "message": "Action executed" if success else "Action failed"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
 
 
 # =============================================================================

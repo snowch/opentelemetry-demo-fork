@@ -2964,6 +2964,7 @@ def resolve_alert(alert_id):
     try:
         cursor = executor.conn.cursor()
         cursor.execute(sql)
+        _update_remediation_resolution(executor, alert_id)
         return jsonify({'success': True, 'message': f'Alert {alert_id} resolved'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3769,6 +3770,217 @@ def simulation_results(run_id):
 
 
 # =============================================================================
+# Remediation Playbooks
+# =============================================================================
+
+import uuid as _uuid
+
+_REMEDIATION_PLAYBOOKS_SEED = [
+    {"alert_type": "db_slow_queries",     "action_name": "Reset PostgreSQL Config",              "action_type": "pg_config_reset",  "action_params": "{}", "description": "Resets all PostgreSQL config parameters to defaults",                        "risk_level": "medium"},
+    {"alert_type": "db_connection_failure","action_name": "Reset PostgreSQL Config",              "action_type": "pg_config_reset",  "action_params": "{}", "description": "Resets all PostgreSQL config parameters to defaults",                        "risk_level": "medium"},
+    {"alert_type": "error_spike",         "action_name": "Disable Payment Failure Flag",         "action_type": "feature_flag",     "action_params": '{"flag":"paymentFailure","variant":"off"}', "description": "Disables the payment failure feature flag to stop injected errors",     "risk_level": "low"},
+    {"alert_type": "dependency_failure",  "action_name": "Disable Payment Failure Flag",         "action_type": "feature_flag",     "action_params": '{"flag":"paymentFailure","variant":"off"}', "description": "Disables the payment failure feature flag to stop injected errors",     "risk_level": "low"},
+    {"alert_type": "anomaly",            "action_name": "Disable Recommendation Cache Failure",  "action_type": "feature_flag",     "action_params": '{"flag":"recommendationCacheFailure","variant":"off"}', "description": "Disables the recommendation cache failure flag to restore normal memory usage", "risk_level": "low"},
+    {"alert_type": "anomaly",            "action_name": "Disable Kafka Queue Problems",          "action_type": "feature_flag",     "action_params": '{"flag":"kafkaQueueProblems","variant":"off"}', "description": "Disables the Kafka queue problems flag to restore normal throughput",          "risk_level": "low"},
+    {"alert_type": "trend",              "action_name": "Clean Disk Fill Temp Files",             "action_type": "disk_fill_cleanup","action_params": "{}", "description": "Removes temporary simulation files from the PostgreSQL data directory",         "risk_level": "low"},
+    {"alert_type": "trend",              "action_name": "Clean Disk Fill Temp Files (resource)",  "action_type": "disk_fill_cleanup","action_params": "{}", "description": "Removes temporary simulation files to free disk space",                        "risk_level": "low"},
+]
+
+
+def _seed_remediation_playbooks():
+    """Seed the remediation_playbooks table if empty. Called once at startup."""
+    try:
+        executor = get_query_executor()
+        result = executor.execute_query("SELECT COUNT(*) as cnt FROM remediation_playbooks LIMIT 1")
+        if result['success'] and result['rows'] and result['rows'][0].get('cnt', 0) > 0:
+            print("[WebUI] Remediation playbooks already seeded")
+            return
+
+        now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        for pb in _REMEDIATION_PLAYBOOKS_SEED:
+            pid = str(_uuid.uuid4())[:8]
+            params_escaped = pb['action_params'].replace("'", "''")
+            desc_escaped = pb['description'].replace("'", "''")
+            sql = f"""
+                INSERT INTO remediation_playbooks (
+                    playbook_id, alert_type, action_name, action_type,
+                    action_params, description, risk_level, created_at
+                ) VALUES (
+                    '{pid}', '{pb["alert_type"]}', '{pb["action_name"]}', '{pb["action_type"]}',
+                    '{params_escaped}', '{desc_escaped}', '{pb["risk_level"]}',
+                    TIMESTAMP '{now_str}'
+                )
+            """
+            executor.execute_write(sql)
+        print(f"[WebUI] Seeded {len(_REMEDIATION_PLAYBOOKS_SEED)} remediation playbooks")
+    except Exception as e:
+        print(f"[WebUI] Failed to seed remediation playbooks: {e}")
+
+
+def _update_remediation_resolution(executor, alert_id):
+    """When an alert resolves, update any pending remediation_log entries with resolution time."""
+    try:
+        update_sql = f"""
+            UPDATE remediation_log
+            SET alert_resolved_within_minutes = (
+                EXTRACT(EPOCH FROM (NOW() - executed_at)) / 60.0
+            )
+            WHERE alert_id = '{alert_id}'
+              AND alert_resolved_within_minutes IS NULL
+        """
+        executor.execute_write(update_sql)
+    except Exception as e:
+        print(f"[WebUI] Failed to update remediation resolution: {e}")
+
+
+@app.route('/api/alerts/<alert_id>/remediations', methods=['GET'])
+def get_alert_remediations(alert_id):
+    """Get available remediation actions for an alert."""
+    executor = get_query_executor()
+
+    # Look up the alert to get its type
+    alert_result = executor.execute_query(
+        f"SELECT alert_type, service_name FROM alerts WHERE alert_id = '{alert_id}' LIMIT 1"
+    )
+    if not alert_result['success'] or not alert_result['rows']:
+        return jsonify({'remediations': []})
+
+    alert_type = alert_result['rows'][0].get('alert_type', '')
+
+    # Get matching playbooks
+    playbooks_result = executor.execute_query(f"""
+        SELECT playbook_id, action_name, action_type, action_params,
+               description, risk_level
+        FROM remediation_playbooks
+        WHERE alert_type = '{alert_type}'
+    """)
+    if not playbooks_result['success']:
+        return jsonify({'remediations': []})
+
+    remediations = []
+    for pb in playbooks_result['rows']:
+        pid = pb['playbook_id']
+        # Get success rate for this playbook
+        stats_result = executor.execute_query(f"""
+            SELECT COUNT(*) as total,
+                   SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as successes
+            FROM remediation_log
+            WHERE playbook_id = '{pid}'
+        """)
+        total = 0
+        successes = 0
+        if stats_result['success'] and stats_result['rows']:
+            total = stats_result['rows'][0].get('total', 0) or 0
+            successes = stats_result['rows'][0].get('successes', 0) or 0
+
+        success_rate = round(successes / total * 100) if total > 0 else None
+
+        remediations.append({
+            'playbook_id': pid,
+            'action_name': pb.get('action_name'),
+            'action_type': pb.get('action_type'),
+            'description': pb.get('description'),
+            'risk_level': pb.get('risk_level'),
+            'success_rate': success_rate,
+            'times_executed': total,
+        })
+
+    return jsonify({'remediations': remediations})
+
+
+@app.route('/api/alerts/<alert_id>/remediate', methods=['POST'])
+def remediate_alert(alert_id):
+    """Execute a remediation action for an alert."""
+    data = request.json or {}
+    playbook_id = data.get('playbook_id', '')
+    if not playbook_id:
+        return jsonify({'success': False, 'error': 'playbook_id is required'}), 400
+
+    executor = get_query_executor()
+
+    # Look up playbook
+    pb_result = executor.execute_query(
+        f"SELECT action_name, action_type, action_params, risk_level FROM remediation_playbooks WHERE playbook_id = '{playbook_id}' LIMIT 1"
+    )
+    if not pb_result['success'] or not pb_result['rows']:
+        return jsonify({'success': False, 'error': 'Playbook not found'}), 404
+    pb = pb_result['rows'][0]
+
+    # Look up alert
+    alert_result = executor.execute_query(
+        f"SELECT alert_id, service_name, alert_type FROM alerts WHERE alert_id = '{alert_id}' LIMIT 1"
+    )
+    if not alert_result['success'] or not alert_result['rows']:
+        return jsonify({'success': False, 'error': 'Alert not found'}), 404
+    alert = alert_result['rows'][0]
+
+    # Parse action_params
+    try:
+        params = json.loads(pb.get('action_params', '{}'))
+    except (json.JSONDecodeError, TypeError):
+        params = {}
+
+    # Execute remediation
+    from failure_simulator import execute_remediation
+    result = execute_remediation(pb['action_type'], params)
+
+    # Log the execution
+    exec_id = str(_uuid.uuid4())[:8]
+    now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    status = 'success' if result.get('success') else 'failed'
+    msg_escaped = result.get('message', '').replace("'", "''")
+    params_escaped = pb.get('action_params', '{}').replace("'", "''")
+
+    log_sql = f"""
+        INSERT INTO remediation_log (
+            execution_id, playbook_id, alert_id, service_name, alert_type,
+            action_name, action_type, action_params, executed_at,
+            executed_by, status, result_message
+        ) VALUES (
+            '{exec_id}', '{playbook_id}', '{alert_id}', '{alert.get("service_name", "")}',
+            '{alert.get("alert_type", "")}', '{pb.get("action_name", "")}',
+            '{pb.get("action_type", "")}', '{params_escaped}',
+            TIMESTAMP '{now_str}', 'user', '{status}', '{msg_escaped}'
+        )
+    """
+    executor.execute_write(log_sql)
+
+    return jsonify({
+        'success': result.get('success', False),
+        'message': result.get('message', ''),
+        'execution_id': exec_id,
+    })
+
+
+@app.route('/api/remediations/log', methods=['GET'])
+def get_remediation_log():
+    """Get recent remediation executions."""
+    executor = get_query_executor()
+    service = request.args.get('service', '')
+    limit = min(int(request.args.get('limit', 50)), 100)
+
+    conditions = []
+    if service:
+        conditions.append(f"service_name = '{service}'")
+
+    where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+
+    result = executor.execute_query(f"""
+        SELECT execution_id, playbook_id, alert_id, service_name, alert_type,
+               action_name, action_type, executed_at, executed_by,
+               status, result_message, alert_resolved_within_minutes
+        FROM remediation_log
+        {where_clause}
+        ORDER BY executed_at DESC
+        LIMIT {limit}
+    """)
+
+    if result['success']:
+        return jsonify({'log': result['rows']})
+    return jsonify({'log': []})
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
@@ -3791,6 +4003,13 @@ if __name__ == '__main__':
     print("Starting Observability Diagnostic Web UI...")
     print(f"Trino: {TRINO_HOST}:{TRINO_PORT}")
     print(f"Model: {ANTHROPIC_MODEL}")
+
+    # Seed remediation playbooks on startup
+    try:
+        _seed_remediation_playbooks()
+    except Exception as e:
+        print(f"[WebUI] Remediation seed skipped: {e}")
+
     print("\nOpen http://localhost:5000 in your browser\n")
 
     app.run(host='0.0.0.0', port=5000, debug=True)
