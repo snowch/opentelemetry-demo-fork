@@ -1522,6 +1522,189 @@
             color: var(--accent-error);
         }
 
+        .diagnostic-summary {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            border-left: 4px solid var(--accent-warning, #f59e0b);
+        }
+        .diagnostic-summary.sev-critical { border-left-color: #ef4444; }
+        .diagnostic-summary.sev-ok { border-left-color: #10b981; }
+        .diagnostic-summary h4 {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .diagnostic-summary .diag-verdict {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+        .diagnostic-summary .diag-bullets {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 12px 0;
+        }
+        .diagnostic-summary .diag-bullets li {
+            font-size: 12px;
+            color: var(--text-secondary);
+            padding: 3px 0;
+            padding-left: 16px;
+            position: relative;
+        }
+        .diagnostic-summary .diag-bullets li::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 9px;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--text-muted);
+        }
+        .diagnostic-summary .diag-bullets li.bullet-red::before { background: #ef4444; }
+        .diagnostic-summary .diag-bullets li.bullet-amber::before { background: #f59e0b; }
+        .diagnostic-summary .diag-bullets li.bullet-green::before { background: #10b981; }
+        .diagnostic-summary .diag-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .diag-action-btn {
+            font-size: 12px;
+            padding: 6px 14px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .diag-action-btn:hover { background: var(--bg-hover); }
+        .diag-action-btn.primary {
+            background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+            border-color: transparent;
+            color: #fff;
+        }
+        .diag-action-btn.primary:hover { opacity: 0.9; }
+
+        .error-stacktrace-toggle {
+            display: inline-block;
+            font-size: 12px;
+            color: var(--text-muted);
+            cursor: pointer;
+            margin-top: 8px;
+            user-select: none;
+        }
+        .error-stacktrace-toggle:hover { color: var(--text-primary); }
+
+        .error-stacktrace {
+            max-height: 300px;
+            overflow: auto;
+            background: var(--bg-tertiary);
+            border-left: 3px solid var(--accent-error);
+            padding: 10px 12px;
+            margin-top: 6px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            line-height: 1.5;
+            color: var(--text-secondary);
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .error-attributes-row {
+            display: flex;
+            margin-bottom: 4px;
+            font-size: 12px;
+        }
+        .error-attributes-row .attr-key {
+            color: var(--text-muted);
+            min-width: 160px;
+            flex-shrink: 0;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .error-attributes-row .attr-val {
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+            word-break: break-all;
+        }
+
+        .error-pattern-indicator {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .error-pattern-indicator.isolated { background: rgba(16,185,129,0.15); color: #10b981; }
+        .error-pattern-indicator.recurring { background: rgba(245,158,11,0.15); color: #f59e0b; }
+        .error-pattern-indicator.high-freq { background: rgba(239,68,68,0.15); color: #ef4444; }
+
+        .similar-count-badge {
+            display: inline-block;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            padding: 4px 10px;
+            margin-right: 10px;
+            font-size: 12px;
+        }
+        .similar-count-badge .count-num {
+            font-weight: 700;
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .alert-item-compact {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-size: 11px;
+            cursor: pointer;
+            margin: 3px 4px 3px 0;
+            border: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            transition: background 0.15s;
+        }
+        .alert-item-compact:hover { background: var(--bg-hover); }
+        .alert-item-compact .alert-sev {
+            width: 8px; height: 8px; border-radius: 50%;
+        }
+        .alert-item-compact .alert-sev.critical { background: #ef4444; }
+        .alert-item-compact .alert-sev.warning { background: #f59e0b; }
+        .alert-item-compact .alert-sev.info { background: #3b82f6; }
+
+        .health-metric-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 0;
+            font-size: 12px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .health-metric-row:last-child { border-bottom: none; }
+        .health-metric-row .metric-name {
+            min-width: 120px;
+            color: var(--text-muted);
+        }
+        .health-metric-row .metric-values {
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-primary);
+        }
+        .health-metric-row .metric-deviation {
+            font-weight: 600;
+            color: var(--accent-error);
+        }
+
         .trace-table {
             width: 100%;
             border-collapse: collapse;
@@ -3591,6 +3774,13 @@
                     </div>
                 </div>
 
+                <div class="diagnostic-summary" id="diagnostic-summary-card" style="display:none;">
+                    <h4>Diagnostic Summary</h4>
+                    <div class="diag-verdict" id="diag-verdict"></div>
+                    <ul class="diag-bullets" id="diag-bullets"></ul>
+                    <div class="diag-actions" id="diag-actions"></div>
+                </div>
+
                 <div class="error-detail-card" id="exception-card" style="display: none;">
                     <h4>Exception Details</h4>
                     <div class="error-detail-row">
@@ -3601,6 +3791,30 @@
                         <span class="error-detail-label">Message:</span>
                         <span class="error-detail-value error-text" id="exception-message">-</span>
                     </div>
+                    <div id="stacktrace-container" style="display:none;">
+                        <span class="error-stacktrace-toggle" id="stacktrace-toggle" onclick="toggleStacktrace()">&#9654; Show Stacktrace</span>
+                        <pre class="error-stacktrace" id="exception-stacktrace" style="display:none;"></pre>
+                    </div>
+                </div>
+
+                <div class="error-detail-card" id="attributes-card" style="display:none;">
+                    <h4>Span Attributes</h4>
+                    <div id="attributes-list"></div>
+                </div>
+
+                <div class="error-detail-card" id="similar-errors-card" style="display:none;">
+                    <h4>Similar Errors</h4>
+                    <div id="similar-errors-content"></div>
+                </div>
+
+                <div class="error-detail-card" id="related-alerts-card" style="display:none;">
+                    <h4>Related Alerts</h4>
+                    <div id="related-alerts-content"></div>
+                </div>
+
+                <div class="error-detail-card" id="service-health-card" style="display:none;">
+                    <h4>Service Health Anomalies</h4>
+                    <div id="service-health-content"></div>
                 </div>
 
                 <div class="error-detail-card">
@@ -7146,12 +7360,195 @@ Can you help me understand this issue further or suggest next steps?`;
 
                 // Exception details
                 const exceptionCard = document.getElementById('exception-card');
+                const stackContainer = document.getElementById('stacktrace-container');
+                const stackPre = document.getElementById('exception-stacktrace');
                 if (data.exception && data.exception.exception_type) {
                     exceptionCard.style.display = 'block';
                     document.getElementById('exception-type').textContent = data.exception.exception_type || '-';
                     document.getElementById('exception-message').textContent = data.exception.exception_message || '-';
+                    // Stacktrace
+                    if (data.exception.exception_stacktrace) {
+                        stackContainer.style.display = 'block';
+                        stackPre.textContent = data.exception.exception_stacktrace;
+                        stackPre.style.display = 'none';
+                        document.getElementById('stacktrace-toggle').innerHTML = '&#9654; Show Stacktrace';
+                    } else {
+                        stackContainer.style.display = 'none';
+                    }
                 } else {
                     exceptionCard.style.display = 'none';
+                }
+
+                // Span attributes
+                const attrsCard = document.getElementById('attributes-card');
+                const attrsList = document.getElementById('attributes-list');
+                if (data.attributes && Object.keys(data.attributes).length > 0) {
+                    attrsCard.style.display = 'block';
+                    attrsList.innerHTML = Object.entries(data.attributes).map(([k, v]) =>
+                        `<div class="error-attributes-row"><span class="attr-key">${escapeHtml(k)}</span><span class="attr-val">${escapeHtml(String(v))}</span></div>`
+                    ).join('');
+                } else {
+                    attrsCard.style.display = 'none';
+                }
+
+                // Similar errors
+                const similarCard = document.getElementById('similar-errors-card');
+                const similarContent = document.getElementById('similar-errors-content');
+                if (data.similar_errors) {
+                    const se = data.similar_errors;
+                    const c24 = se.count_24h || 0;
+                    const c1 = se.count_1h || 0;
+                    let patternClass, patternLabel;
+                    if (c24 <= 1) { patternClass = 'isolated'; patternLabel = 'Isolated'; }
+                    else if (c1 >= 10) { patternClass = 'high-freq'; patternLabel = 'High Frequency'; }
+                    else { patternClass = 'recurring'; patternLabel = 'Recurring'; }
+                    let html = `<span class="error-pattern-indicator ${patternClass}">${patternLabel}</span><br style="margin-bottom:8px;">`;
+                    html += `<span class="similar-count-badge">Last 1h: <span class="count-num">${c1}</span></span>`;
+                    html += `<span class="similar-count-badge">Last 24h: <span class="count-num">${c24}</span></span>`;
+                    if (se.first_seen) {
+                        html += `<br><span style="font-size:11px;color:var(--text-muted);margin-top:6px;display:inline-block;">First seen: ${new Date(se.first_seen).toLocaleString()}</span>`;
+                    }
+                    similarContent.innerHTML = html;
+                    similarCard.style.display = 'block';
+                } else {
+                    similarCard.style.display = 'none';
+                }
+
+                // Related alerts
+                const alertsCard = document.getElementById('related-alerts-card');
+                const alertsContent = document.getElementById('related-alerts-content');
+                if (data.related_alerts && data.related_alerts.length > 0) {
+                    alertsContent.innerHTML = data.related_alerts.map(a => {
+                        const sevClass = (a.severity || '').toLowerCase() === 'critical' ? 'critical' : (a.severity || '').toLowerCase() === 'warning' ? 'warning' : 'info';
+                        const time = a.created_at ? new Date(a.created_at).toLocaleTimeString() : '';
+                        return `<span class="alert-item-compact" onclick="investigateAlert('${a.alert_id}')"><span class="alert-sev ${sevClass}"></span>${escapeHtml(a.title || a.alert_type || 'Alert')} <span style="color:var(--text-muted)">${time}</span></span>`;
+                    }).join('');
+                    alertsCard.style.display = 'block';
+                } else {
+                    alertsCard.style.display = 'none';
+                }
+
+                // Service health anomalies
+                const healthCard = document.getElementById('service-health-card');
+                const healthContent = document.getElementById('service-health-content');
+                if (data.service_health && data.service_health.length > 0) {
+                    healthContent.innerHTML = data.service_health.map(h => {
+                        const cur = parseFloat(h.current_value) || 0;
+                        const exp = parseFloat(h.expected_value) || 1;
+                        const devPct = exp !== 0 ? Math.round(((cur - exp) / Math.abs(exp)) * 100) : 0;
+                        const zScore = parseFloat(h.z_score) || 0;
+                        return `<div class="health-metric-row"><span class="metric-name">${escapeHtml(h.metric_type)}</span><span class="metric-values">${cur.toFixed(2)} (expected ${exp.toFixed(2)})</span><span class="metric-deviation">${devPct > 0 ? '+' : ''}${devPct}% (z=${zScore.toFixed(1)})</span></div>`;
+                    }).join('');
+                    healthCard.style.display = 'block';
+                } else {
+                    healthCard.style.display = 'none';
+                }
+
+                // Diagnostic summary — synthesize all data into actionable guidance
+                const diagCard = document.getElementById('diagnostic-summary-card');
+                const diagVerdict = document.getElementById('diag-verdict');
+                const diagBullets = document.getElementById('diag-bullets');
+                const diagActions = document.getElementById('diag-actions');
+                if (data.error_info) {
+                    const info = data.error_info;
+                    const exc = data.exception || {};
+                    const se = data.similar_errors || {};
+                    const alerts = data.related_alerts || [];
+                    const health = data.service_health || [];
+                    const attrs = data.attributes || {};
+                    const bullets = [];
+                    let severity = 'ok'; // ok, warning, critical
+
+                    // Duration insight
+                    const dur = parseFloat(info.duration_ms) || 0;
+                    if (dur > 30000) {
+                        bullets.push({text: `Very long duration (${(dur/1000).toFixed(1)}s) — likely a timeout`, cls: 'bullet-red'});
+                        severity = 'critical';
+                    } else if (dur > 5000) {
+                        bullets.push({text: `Elevated duration (${(dur/1000).toFixed(1)}s)`, cls: 'bullet-amber'});
+                        if (severity === 'ok') severity = 'warning';
+                    }
+
+                    // Exception insight
+                    if (exc.exception_type) {
+                        const excType = exc.exception_type.split('.').pop();
+                        const msg = (exc.exception_message || '').toLowerCase();
+                        if (msg.includes('deadline') || msg.includes('timeout')) {
+                            bullets.push({text: `${excType}: upstream service or dependency did not respond in time`, cls: 'bullet-red'});
+                            severity = 'critical';
+                        } else if (msg.includes('connection') || msg.includes('refused') || msg.includes('unavailable')) {
+                            bullets.push({text: `${excType}: dependency appears unreachable`, cls: 'bullet-red'});
+                            severity = 'critical';
+                        } else if (msg.includes('permission') || msg.includes('denied') || msg.includes('auth')) {
+                            bullets.push({text: `${excType}: authentication or permission issue`, cls: 'bullet-amber'});
+                            if (severity === 'ok') severity = 'warning';
+                        } else {
+                            bullets.push({text: `${excType}: ${(exc.exception_message || '').substring(0, 100)}`, cls: 'bullet-amber'});
+                            if (severity === 'ok') severity = 'warning';
+                        }
+                    }
+
+                    // Frequency insight
+                    const c1h = se.count_1h || 0;
+                    const c24h = se.count_24h || 0;
+                    if (c1h >= 10) {
+                        bullets.push({text: `High frequency: ${c1h} occurrences in the last hour (${c24h} in 24h) — ongoing incident`, cls: 'bullet-red'});
+                        severity = 'critical';
+                    } else if (c24h > 1) {
+                        bullets.push({text: `Recurring: ${c24h} occurrences in 24h (${c1h} in last hour) — intermittent issue`, cls: 'bullet-amber'});
+                        if (severity === 'ok') severity = 'warning';
+                    } else if (c24h === 1 || c24h === 0) {
+                        bullets.push({text: 'First or isolated occurrence — may be transient', cls: 'bullet-green'});
+                    }
+
+                    // Related alerts insight
+                    if (alerts.length > 0) {
+                        const critAlerts = alerts.filter(a => (a.severity || '').toLowerCase() === 'critical');
+                        if (critAlerts.length > 0) {
+                            bullets.push({text: `${critAlerts.length} critical alert(s) on this service within ±5 min — likely part of an active incident`, cls: 'bullet-red'});
+                            severity = 'critical';
+                        } else {
+                            bullets.push({text: `${alerts.length} alert(s) on this service within ±5 min — check Related Alerts below`, cls: 'bullet-amber'});
+                            if (severity === 'ok') severity = 'warning';
+                        }
+                    }
+
+                    // Health anomalies insight
+                    if (health.length > 0) {
+                        const metrics = health.map(h => h.metric_type).join(', ');
+                        bullets.push({text: `Service health anomalies detected: ${metrics}`, cls: 'bullet-red'});
+                        severity = 'critical';
+                    }
+
+                    // Dependency hint from attributes
+                    if (attrs['rpc.system'] || attrs['db.system'] || attrs['messaging.system']) {
+                        const dep = attrs['rpc.service'] || attrs['db.system'] || attrs['messaging.system'] || attrs['rpc.system'];
+                        bullets.push({text: `Involves dependency: ${dep}`, cls: 'bullet-amber'});
+                    }
+
+                    // Build verdict
+                    let verdict;
+                    if (severity === 'critical') {
+                        verdict = 'Needs attention — active issue detected';
+                    } else if (severity === 'warning') {
+                        verdict = 'Worth investigating — potential issue';
+                    } else {
+                        verdict = 'Likely transient — monitor for recurrence';
+                    }
+
+                    diagVerdict.textContent = verdict;
+                    diagBullets.innerHTML = bullets.map(b => `<li class="${b.cls}">${escapeHtml(b.text)}</li>`).join('');
+                    diagCard.className = `diagnostic-summary sev-${severity}`;
+
+                    // Action buttons
+                    let actionsHtml = `<button class="diag-action-btn primary" onclick="investigateErrorInChat('${escapeHtml(info.service_name)}', '${escapeHtml(info.span_name)}', '${traceId}')">Investigate in Chat</button>`;
+                    if (c24h > 1) {
+                        actionsHtml += `<button class="diag-action-btn" onclick="investigateErrorPattern('${escapeHtml(info.service_name)}', '${escapeHtml(exc.exception_type || '')}')">Analyze Pattern</button>`;
+                    }
+                    diagActions.innerHTML = actionsHtml;
+                    diagCard.style.display = 'block';
+                } else {
+                    diagCard.style.display = 'none';
                 }
 
                 // Full trace
@@ -7177,6 +7574,30 @@ Can you help me understand this issue further or suggest next steps?`;
 
         function closeErrorModal() {
             document.getElementById('error-modal').classList.remove('active');
+        }
+
+        function investigateErrorInChat(service, operation, traceId) {
+            closeErrorModal();
+            setPrompt(`Investigate the error on ${service} (operation: ${operation}, trace: ${traceId}). What is the root cause and what should I do?`);
+            sendMessage();
+        }
+
+        function investigateErrorPattern(service, exceptionType) {
+            closeErrorModal();
+            setPrompt(`The error "${exceptionType}" keeps recurring on ${service}. Analyze the pattern — is this getting worse, what's causing it, and how do I fix it?`);
+            sendMessage();
+        }
+
+        function toggleStacktrace() {
+            const pre = document.getElementById('exception-stacktrace');
+            const toggle = document.getElementById('stacktrace-toggle');
+            if (pre.style.display === 'none') {
+                pre.style.display = 'block';
+                toggle.innerHTML = '&#9660; Hide Stacktrace';
+            } else {
+                pre.style.display = 'none';
+                toggle.innerHTML = '&#9654; Show Stacktrace';
+            }
         }
 
         // Host data loading functions (used by generic entity loaders)

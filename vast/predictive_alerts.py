@@ -1531,7 +1531,7 @@ class AnomalyDetector:
 
             if results:
                 # Normalize to hourly rate for comparison (5 min -> 1 hour = multiply by 12)
-                current_count = results[0].get("exception_count", 0)
+                current_count = int(results[0].get("exception_count", 0))
                 current_hourly_rate = current_count * 12
 
                 # Require minimum 3 exceptions in 5 min to avoid noise from single events

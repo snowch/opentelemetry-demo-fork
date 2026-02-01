@@ -1179,7 +1179,11 @@ def error_details(trace_id, span_id):
     data = {
         'error_info': None,
         'exception': None,
-        'trace': []
+        'trace': [],
+        'attributes': {},
+        'similar_errors': None,
+        'related_alerts': [],
+        'service_health': []
     }
 
     # Get error span info
@@ -1197,7 +1201,7 @@ def error_details(trace_id, span_id):
 
     # Get exception details from span_events
     exception_query = f"""
-    SELECT exception_type, exception_message
+    SELECT exception_type, exception_message, exception_stacktrace
     FROM span_events_otel_analytic
     WHERE trace_id = '{trace_id}' AND span_id = '{span_id}'
       AND exception_type IS NOT NULL AND exception_type != ''
@@ -1206,6 +1210,75 @@ def error_details(trace_id, span_id):
     result = executor.execute_query(exception_query)
     if result['success'] and result['rows']:
         data['exception'] = result['rows'][0]
+
+    # Get span attributes for diagnostic context
+    attrs_query = f"""
+    SELECT attributes_json FROM traces_otel_analytic
+    WHERE trace_id = '{trace_id}' AND span_id = '{span_id}' LIMIT 1
+    """
+    result = executor.execute_query(attrs_query)
+    if result['success'] and result['rows']:
+        raw = result['rows'][0].get('attributes_json', '')
+        if raw:
+            try:
+                all_attrs = json.loads(raw) if isinstance(raw, str) else raw
+                diag_prefixes = ('db.', 'http.', 'messaging.', 'rpc.', 'net.')
+                data['attributes'] = {k: v for k, v in all_attrs.items()
+                                      if any(k.startswith(p) for p in diag_prefixes)}
+            except (json.JSONDecodeError, AttributeError):
+                pass
+
+    # Similar errors frequency (only if we have exception info)
+    if data['exception'] and data['exception'].get('exception_type'):
+        exc_type = data['exception']['exception_type'].replace("'", "''")
+        svc = (data['error_info'] or {}).get('service_name', '').replace("'", "''")
+        if svc:
+            similar_query = f"""
+            SELECT
+              COUNT(*) FILTER (WHERE timestamp > NOW() - INTERVAL '1' HOUR) as count_1h,
+              COUNT(*) as count_24h,
+              MIN(timestamp) as first_seen
+            FROM span_events_otel_analytic
+            WHERE exception_type = '{exc_type}' AND service_name = '{svc}'
+              AND timestamp > NOW() - INTERVAL '24' HOUR
+            """
+            result = executor.execute_query(similar_query)
+            if result['success'] and result['rows']:
+                row = result['rows'][0]
+                data['similar_errors'] = {
+                    'count_1h': row.get('count_1h', 0) or 0,
+                    'count_24h': row.get('count_24h', 0) or 0,
+                    'first_seen': str(row.get('first_seen', '')) if row.get('first_seen') else None
+                }
+
+    # Related alerts within ±5 minutes
+    error_time = (data['error_info'] or {}).get('start_time')
+    svc = (data['error_info'] or {}).get('service_name', '').replace("'", "''")
+    if error_time and svc:
+        alerts_query = f"""
+        SELECT alert_id, alert_type, severity, title, created_at
+        FROM alerts
+        WHERE service_name = '{svc}'
+          AND created_at BETWEEN TIMESTAMP '{error_time}' - INTERVAL '5' MINUTE
+                             AND TIMESTAMP '{error_time}' + INTERVAL '5' MINUTE
+        ORDER BY created_at DESC LIMIT 5
+        """
+        result = executor.execute_query(alerts_query)
+        if result['success'] and result['rows']:
+            data['related_alerts'] = result['rows']
+
+    # Service health anomalies in last 10 minutes
+    if svc:
+        health_query = f"""
+        SELECT metric_type, current_value, expected_value, z_score
+        FROM anomaly_scores
+        WHERE service_name = '{svc}'
+          AND timestamp > NOW() - INTERVAL '10' MINUTE AND is_anomaly = true
+        ORDER BY z_score DESC LIMIT 5
+        """
+        result = executor.execute_query(health_query)
+        if result['success'] and result['rows']:
+            data['service_health'] = result['rows']
 
     # Get full trace for context
     trace_query = f"""
