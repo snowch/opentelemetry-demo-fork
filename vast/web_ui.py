@@ -1270,7 +1270,7 @@ def error_details(trace_id, span_id):
     # Service health anomalies in last 10 minutes
     if svc:
         health_query = f"""
-        SELECT metric_type, current_value, expected_value, z_score
+        SELECT metric_type, current_value, expected_value, z_score, timestamp
         FROM anomaly_scores
         WHERE service_name = '{svc}'
           AND timestamp > NOW() - INTERVAL '10' MINUTE AND is_anomaly = true
@@ -3450,9 +3450,28 @@ def get_error_history():
 
     total = sum(s.get('error_count', 0) for s in by_service)
 
+    # Error patterns: group by service + operation to identify recurring patterns
+    patterns_query = f"""
+    SELECT service_name, span_name,
+           COUNT(*) as count,
+           ROUND(AVG(duration_ns / 1000000.0), 1) as avg_duration_ms,
+           MIN(start_time) as first_seen,
+           MAX(start_time) as last_seen
+    FROM traces_otel_analytic
+    WHERE {where}
+    GROUP BY service_name, span_name
+    ORDER BY count DESC
+    LIMIT 10
+    """
+    error_patterns = []
+    result = executor.execute_query(patterns_query)
+    if result.get('success'):
+        error_patterns = result['rows']
+
     return jsonify({
         "errors": errors,
         "by_service": by_service,
+        "error_patterns": error_patterns,
         "total": total,
         "hours": hours,
     })
@@ -3692,7 +3711,7 @@ def get_incident_context(alert_id):
     """Get incident context snapshot for an alert."""
     executor = get_query_executor()
 
-    data = {'context': None, 'pattern': None}
+    data = {'context': None, 'pattern': None, 'similar_alerts': []}
 
     # Sanitize alert_id
     alert_id = alert_id.replace("'", "")[:20]
@@ -3738,6 +3757,23 @@ def get_incident_context(alert_id):
                     except (json.JSONDecodeError, TypeError):
                         pass
                 data['pattern'] = pat
+
+        # Get similar past alerts (same service + alert_type)
+        svc = ctx.get('service_name', '').replace("'", "''")
+        atype = ctx.get('alert_type', '').replace("'", "''")
+        if svc and atype:
+            similar_query = f"""
+            SELECT alert_id, created_at, resolved_at, severity, status,
+                   auto_resolved, current_value, baseline_value
+            FROM alerts
+            WHERE service_name = '{svc}' AND alert_type = '{atype}'
+              AND alert_id != '{alert_id}'
+            ORDER BY created_at DESC
+            LIMIT 10
+            """
+            sim_result = executor.execute_query(similar_query)
+            if sim_result['success']:
+                data['similar_alerts'] = sim_result['rows']
 
     return jsonify(data)
 

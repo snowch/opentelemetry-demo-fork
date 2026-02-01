@@ -527,6 +527,57 @@
         .history-item.severity-critical { border-left-color: var(--accent-error); }
         .history-item.severity-warning { border-left-color: var(--accent-warning); }
         .history-item.severity-info { border-left-color: var(--accent-primary); }
+
+        .error-triage-banner {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        .error-triage-title {
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+        .error-triage-row {
+            padding: 5px 0;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .error-triage-row:last-child { border-bottom: none; }
+        .error-triage-op {
+            font-size: 11px;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .error-triage-stats {
+            display: flex;
+            gap: 8px;
+            margin-top: 2px;
+        }
+        .triage-count {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--accent-error);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .triage-dur {
+            font-size: 10px;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .error-triage-hint {
+            font-size: 10px;
+            margin-top: 2px;
+        }
+        .error-triage-hint.triage-warn { color: #f59e0b; }
+        .error-triage-hint.triage-ok { color: #10b981; }
+        .error-triage-hint.triage-info { color: var(--text-muted); }
         .history-item.error-item-history { border-left-color: var(--accent-error); }
         .history-filter-row {
             display: flex;
@@ -1703,6 +1754,50 @@
         .health-metric-row .metric-deviation {
             font-weight: 600;
             color: var(--accent-error);
+        }
+
+        .similar-occurrences-section {
+            margin-top: 12px;
+            border-top: 1px solid var(--border-subtle);
+            padding-top: 10px;
+        }
+        .similar-occurrences-section .section-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+        .similar-occurrence-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 0;
+            font-size: 11px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .similar-occurrence-item:last-child { border-bottom: none; }
+        .similar-occurrence-item .occ-time {
+            color: var(--text-muted);
+            min-width: 130px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+        }
+        .similar-occurrence-item .occ-status {
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+        .similar-occurrence-item .occ-status.active { background: rgba(239,68,68,0.15); color: #ef4444; }
+        .similar-occurrence-item .occ-status.resolved { background: rgba(16,185,129,0.15); color: #10b981; }
+        .similar-occurrence-item .occ-duration {
+            color: var(--text-secondary);
+        }
+        .similar-occurrence-item .occ-value {
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
         }
 
         .trace-table {
@@ -5054,7 +5149,6 @@
             document.getElementById('errors-active-panel').style.display = tab === 'active' ? '' : 'none';
             document.getElementById('errors-history-panel').style.display = tab === 'history' ? '' : 'none';
             if (tab === 'history') {
-                populateErrorsServiceFilter();
                 loadErrorsHistory();
             }
         }
@@ -5067,21 +5161,25 @@
             if (tab === 'history') loadAlertsHistory();
         }
 
-        function populateErrorsServiceFilter() {
+        function populateErrorsServiceFilter(byService) {
             const select = document.getElementById('errors-history-service');
-            // Keep existing options if already populated
-            if (select.options.length > 1) return;
-            // Pull service names from the sidebar entity list
-            const serviceItems = document.querySelectorAll('#services-list .entity-item');
-            serviceItems.forEach(item => {
-                const name = item.getAttribute('data-name') || item.textContent.trim().split('\n')[0].trim();
-                if (name) {
-                    const opt = document.createElement('option');
-                    opt.value = name;
-                    opt.textContent = name;
-                    select.appendChild(opt);
-                }
-            });
+            const current = select.value;
+            // Clear existing options except "All services"
+            while (select.options.length > 1) select.remove(1);
+            // Populate from API by_service data
+            if (byService && byService.length > 0) {
+                byService.forEach(s => {
+                    const name = s.service_name;
+                    if (name) {
+                        const opt = document.createElement('option');
+                        opt.value = name;
+                        opt.textContent = `${name} (${s.error_count})`;
+                        select.appendChild(opt);
+                    }
+                });
+            }
+            // Restore selection
+            if (current) select.value = current;
         }
 
         async function loadErrorsHistory() {
@@ -5105,7 +5203,53 @@
 
                 document.getElementById('errors-tab-history').innerHTML = `History <span class="tab-count">${data.total}</span>`;
 
+                // Populate service filter from API data
+                populateErrorsServiceFilter(data.by_service);
+
                 let html = '';
+
+                // Error patterns triage banner
+                const patterns = data.error_patterns || [];
+                if (patterns.length > 0) {
+                    html += '<div class="error-triage-banner">';
+                    html += '<div class="error-triage-title">Error Patterns</div>';
+                    patterns.forEach(p => {
+                        const count = p.count || 0;
+                        const avgDur = p.avg_duration_ms ? Number(p.avg_duration_ms).toFixed(0) : '?';
+                        const services = data.by_service ? data.by_service.length : 0;
+                        const op = p.span_name || 'unknown';
+                        const svc = p.service_name || '';
+
+                        // Determine severity hint
+                        let hint = '';
+                        let hintClass = 'triage-info';
+                        const durMs = parseFloat(avgDur) || 0;
+                        if (durMs > 30000) {
+                            hint = 'Timeout pattern — likely upstream dependency issue';
+                            hintClass = 'triage-warn';
+                        } else if (count > 20) {
+                            hint = 'High frequency — investigate root cause';
+                            hintClass = 'triage-warn';
+                        } else if (count <= 2) {
+                            hint = 'Isolated — likely transient';
+                            hintClass = 'triage-ok';
+                        } else {
+                            hint = 'Recurring — monitor for escalation';
+                            hintClass = 'triage-info';
+                        }
+
+                        html += `<div class="error-triage-row">`;
+                        html += `<div class="error-triage-op" title="${escapeHtml(op)}"><strong>${escapeHtml(svc)}</strong> · ${escapeHtml(op.length > 40 ? '...' + op.slice(-37) : op)}</div>`;
+                        html += `<div class="error-triage-stats">`;
+                        html += `<span class="triage-count">${count}x</span>`;
+                        html += `<span class="triage-dur">avg ${avgDur}ms</span>`;
+                        html += `</div>`;
+                        html += `<div class="error-triage-hint ${hintClass}">${hint}</div>`;
+                        html += `</div>`;
+                    });
+                    html += '</div>';
+                }
+
                 // Summary by service
                 if (data.by_service && data.by_service.length > 0) {
                     html += '<div style="margin-bottom:8px;font-size:10px;color:var(--text-muted);">';
@@ -7437,7 +7581,8 @@ Can you help me understand this issue further or suggest next steps?`;
                         const exp = parseFloat(h.expected_value) || 1;
                         const devPct = exp !== 0 ? Math.round(((cur - exp) / Math.abs(exp)) * 100) : 0;
                         const zScore = parseFloat(h.z_score) || 0;
-                        return `<div class="health-metric-row"><span class="metric-name">${escapeHtml(h.metric_type)}</span><span class="metric-values">${cur.toFixed(2)} (expected ${exp.toFixed(2)})</span><span class="metric-deviation">${devPct > 0 ? '+' : ''}${devPct}% (z=${zScore.toFixed(1)})</span></div>`;
+                        const ts = h.timestamp ? new Date(h.timestamp).toLocaleTimeString() : '';
+                        return `<div class="health-metric-row"><span class="metric-name">${escapeHtml(h.metric_type)}</span><span class="metric-values">${cur.toFixed(2)} (expected ${exp.toFixed(2)})</span><span class="metric-deviation">${devPct > 0 ? '+' : ''}${devPct}% (z=${zScore.toFixed(1)})</span>${ts ? `<span style="color:var(--text-muted);font-size:10px;min-width:70px;text-align:right">${ts}</span>` : ''}</div>`;
                     }).join('');
                     healthCard.style.display = 'block';
                 } else {
@@ -7903,6 +8048,60 @@ Can you help me understand this issue further or suggest next steps?`;
 
                 container.innerHTML = html || '<div class="empty-state" style="font-size:11px;">No context data available.</div>';
 
+                // Populate similar occurrences in the diagnostic summary
+                const similarContainer = document.getElementById('alert-similar-occurrences');
+                const similarAlerts = data.similar_alerts || [];
+                const pat = data.pattern;
+                if (similarContainer && (similarAlerts.length > 0 || pat)) {
+                    let occHtml = '<div class="similar-occurrences-section">';
+                    occHtml += '<div class="section-label">Similar Occurrences</div>';
+
+                    // Pattern summary line
+                    if (pat) {
+                        const occCount = pat.occurrence_count || 0;
+                        const avgDur = pat.avg_duration_minutes ? pat.avg_duration_minutes.toFixed(1) : null;
+                        const rootCause = pat.common_root_cause || '';
+                        occHtml += `<div style="font-size:12px;margin-bottom:8px;color:var(--text-secondary);">`;
+                        occHtml += `This alert type has occurred <strong style="color:var(--text-primary)">${occCount}</strong> time(s) on this service`;
+                        if (avgDur) occHtml += ` (avg duration: ${avgDur} min)`;
+                        occHtml += '.';
+                        if (rootCause) {
+                            occHtml += `<br><span style="color:var(--text-muted);font-size:11px;">Common root cause: ${escapeHtml(rootCause)}</span>`;
+                        }
+                        occHtml += '</div>';
+                    }
+
+                    // Individual past alerts
+                    if (similarAlerts.length > 0) {
+                        similarAlerts.slice(0, 5).forEach(a => {
+                            const time = a.created_at ? new Date(a.created_at).toLocaleString() : '';
+                            const isActive = (a.status || '').toLowerCase() === 'active';
+                            const statusLabel = isActive ? 'active' : (a.auto_resolved ? 'auto-resolved' : 'resolved');
+                            const statusCls = isActive ? 'active' : 'resolved';
+                            let durText = '';
+                            if (a.resolved_at && a.created_at) {
+                                const durMin = Math.round((new Date(a.resolved_at) - new Date(a.created_at)) / 60000);
+                                durText = durMin < 60 ? `${durMin}m` : `${Math.floor(durMin/60)}h${durMin%60}m`;
+                            }
+                            const val = parseFloat(a.current_value);
+                            const base = parseFloat(a.baseline_value);
+                            const valText = (!isNaN(val) && !isNaN(base)) ? `${val.toFixed(1)} vs ${base.toFixed(1)}` : '';
+                            occHtml += `<div class="similar-occurrence-item" onclick="investigateAlert('${escapeHtml(a.alert_id)}')" style="cursor:pointer;">`;
+                            occHtml += `<span class="occ-time">${time}</span>`;
+                            occHtml += `<span class="occ-status ${statusCls}">${statusLabel}</span>`;
+                            if (durText) occHtml += `<span class="occ-duration">${durText}</span>`;
+                            if (valText) occHtml += `<span class="occ-value">${valText}</span>`;
+                            occHtml += '</div>';
+                        });
+                        if (similarAlerts.length > 5) {
+                            occHtml += `<div style="font-size:10px;color:var(--text-muted);margin-top:4px;">+ ${similarAlerts.length - 5} more</div>`;
+                        }
+                    }
+
+                    occHtml += '</div>';
+                    similarContainer.innerHTML = occHtml;
+                }
+
             } catch (error) {
                 console.error('Failed to load incident context:', error);
                 const container = document.getElementById('incident-context-body');
@@ -7910,7 +8109,7 @@ Can you help me understand this issue further or suggest next steps?`;
             }
         }
 
-        // Modify openAlertModal to include incident context + remediation sections
+        // Modify openAlertModal to include diagnostic summary + incident context + remediation sections
         const _originalOpenAlertModal = openAlertModal;
         openAlertModal = function(alert, alertId) {
             _originalOpenAlertModal(alert, alertId);
@@ -7921,6 +8120,16 @@ Can you help me understand this issue further or suggest next steps?`;
                 if (content) {
                     const actionsDiv = content.querySelector('.alert-actions');
                     if (actionsDiv) {
+                        // Build and insert diagnostic summary
+                        const diagDiv = buildAlertDiagnosticSummary(alert, alertId);
+                        // Insert after .alert-detail-meta
+                        const metaDiv = content.querySelector('.alert-detail-meta');
+                        if (metaDiv && metaDiv.nextSibling) {
+                            content.insertBefore(diagDiv, metaDiv.nextSibling);
+                        } else {
+                            content.insertBefore(diagDiv, actionsDiv);
+                        }
+
                         // Add remediation section
                         const remediationSection = document.createElement('div');
                         remediationSection.className = 'remediation-section';
@@ -7941,12 +8150,146 @@ Can you help me understand this issue further or suggest next steps?`;
                         `;
                         content.insertBefore(contextSection, actionsDiv);
 
-                        // Fetch remediations
+                        // Fetch remediations and incident context (eagerly, for similar occurrences in diagnostic summary)
                         loadRemediations(alert.alert_id || alertId);
+                        loadIncidentContext(alert.alert_id || alertId);
                     }
                 }
             }
         };
+
+        function buildAlertDiagnosticSummary(alert, alertId) {
+            const severity = (alert.severity || 'info').toLowerCase();
+            const status = (alert.status || 'active').toLowerCase();
+            const isResolved = status === 'resolved';
+            const isAutoResolved = !!alert.auto_resolved;
+            const alertType = alert.alert_type || '';
+            const isRootCause = ROOT_CAUSE_ALERT_TYPES.includes(alertType);
+            const hasInvestigation = !!alert.root_cause_summary;
+            const hasActions = !!alert.recommended_actions;
+            const curVal = parseFloat(alert.current_value) || 0;
+            const baseVal = parseFloat(alert.baseline_value) || 0;
+            const zScore = parseFloat(alert.z_score) || 0;
+            const devPct = baseVal !== 0 ? Math.round(((curVal - baseVal) / Math.abs(baseVal)) * 100) : 0;
+
+            const bullets = [];
+            let diagSeverity = 'ok';
+
+            // Severity / deviation assessment
+            if (severity === 'critical') {
+                diagSeverity = 'critical';
+                if (Math.abs(devPct) > 50) {
+                    bullets.push({text: `${Math.abs(devPct)}% deviation from baseline — significant degradation`, cls: 'bullet-red'});
+                } else if (Math.abs(devPct) > 0) {
+                    bullets.push({text: `${Math.abs(devPct)}% deviation from baseline (z-score: ${zScore.toFixed(1)})`, cls: 'bullet-red'});
+                } else {
+                    bullets.push({text: `Critical severity — immediate attention required`, cls: 'bullet-red'});
+                }
+            } else if (severity === 'warning') {
+                diagSeverity = 'warning';
+                if (Math.abs(devPct) > 0) {
+                    bullets.push({text: `${Math.abs(devPct)}% deviation from baseline (z-score: ${zScore.toFixed(1)})`, cls: 'bullet-amber'});
+                } else {
+                    bullets.push({text: 'Warning level — monitor closely', cls: 'bullet-amber'});
+                }
+            } else {
+                bullets.push({text: 'Informational — no immediate action needed', cls: 'bullet-green'});
+            }
+
+            // Root cause vs symptom guidance
+            if (isRootCause) {
+                bullets.push({text: 'Root cause alert — fixing this may resolve downstream symptoms', cls: 'bullet-red'});
+                diagSeverity = 'critical';
+            } else {
+                // Check if there might be a root cause alert
+                const typeName = alertType.replace(/_/g, ' ');
+                if (severity === 'critical' || severity === 'warning') {
+                    bullets.push({text: `Symptom alert (${typeName}) — look for root cause alerts on dependencies`, cls: 'bullet-amber'});
+                }
+            }
+
+            // Investigation status
+            if (hasInvestigation) {
+                const summary = (alert.root_cause_summary || '').substring(0, 120);
+                bullets.push({text: `Root cause identified: ${summary}${alert.root_cause_summary.length > 120 ? '...' : ''}`, cls: 'bullet-green'});
+            } else if (severity !== 'info') {
+                bullets.push({text: 'No automated investigation yet — request one or investigate via chat', cls: 'bullet-amber'});
+            }
+
+            // Recommended actions hint
+            if (hasActions) {
+                bullets.push({text: 'Recommended actions available — see below', cls: 'bullet-green'});
+            }
+
+            // Resolution context
+            if (isResolved) {
+                if (isAutoResolved) {
+                    bullets.push({text: 'Auto-resolved — the metric returned to normal on its own', cls: 'bullet-green'});
+                    const resolvedAt = alert.resolved_at ? new Date(alert.resolved_at).toLocaleString() : '';
+                    const createdAt = alert.created_at ? new Date(alert.created_at) : null;
+                    const resolvedDate = alert.resolved_at ? new Date(alert.resolved_at) : null;
+                    if (createdAt && resolvedDate) {
+                        const durationMin = Math.round((resolvedDate - createdAt) / 60000);
+                        if (durationMin < 60) {
+                            bullets.push({text: `Duration: ${durationMin} minutes — transient spike, likely no action needed`, cls: 'bullet-green'});
+                        } else {
+                            bullets.push({text: `Duration: ${Math.round(durationMin / 60)}h ${durationMin % 60}m — extended issue, review if it recurs`, cls: 'bullet-amber'});
+                        }
+                    }
+                } else {
+                    bullets.push({text: 'Manually resolved — someone acknowledged this alert', cls: 'bullet-green'});
+                }
+                diagSeverity = 'ok';
+            }
+
+            // Build verdict
+            let verdict, nextStep;
+            if (isResolved && isAutoResolved) {
+                verdict = 'Resolved — condition self-corrected, no action needed unless it recurs';
+                nextStep = 'none';
+            } else if (isResolved) {
+                verdict = 'Resolved — this alert was manually closed';
+                nextStep = 'none';
+            } else if (diagSeverity === 'critical' && !hasInvestigation) {
+                verdict = 'Needs investigation — active issue without root cause analysis';
+                nextStep = 'investigate';
+            } else if (diagSeverity === 'critical' && hasInvestigation && !hasActions) {
+                verdict = 'Root cause known — needs remediation plan';
+                nextStep = 'chat';
+            } else if (diagSeverity === 'critical' && hasActions) {
+                verdict = 'Actionable — review recommended actions and remediation options below';
+                nextStep = 'actions';
+            } else if (diagSeverity === 'warning') {
+                verdict = 'Monitor — may escalate if underlying condition persists';
+                nextStep = 'monitor';
+            } else {
+                verdict = 'Low priority — no immediate action required';
+                nextStep = 'none';
+            }
+
+            const div = document.createElement('div');
+            div.className = `diagnostic-summary sev-${diagSeverity}`;
+            div.style.marginTop = '16px';
+
+            let actionsHtml = '';
+            if (nextStep === 'investigate') {
+                actionsHtml = `<button class="diag-action-btn primary" onclick="requestInvestigation('${escapeHtml(alertId)}')">Request Investigation</button>
+                    <button class="diag-action-btn" onclick="askAboutAlert('${escapeHtml(alertId)}', '${escapeHtml(alert.service_name)}', '${escapeHtml(alertType.replace(/_/g, ' '))}', false)">Investigate in Chat</button>`;
+            } else if (nextStep === 'chat') {
+                actionsHtml = `<button class="diag-action-btn primary" onclick="askAboutAlert('${escapeHtml(alertId)}', '${escapeHtml(alert.service_name)}', '${escapeHtml(alertType.replace(/_/g, ' '))}', true)">Ask for Next Steps</button>`;
+            } else if (nextStep === 'actions') {
+                actionsHtml = `<button class="diag-action-btn" onclick="document.querySelector('.remediation-section')?.scrollIntoView({behavior:'smooth'})">Jump to Remediations</button>`;
+            }
+
+            div.innerHTML = `
+                <h4>Diagnostic Summary</h4>
+                <div class="diag-verdict">${escapeHtml(verdict)}</div>
+                <ul class="diag-bullets">${bullets.map(b => `<li class="${b.cls}">${escapeHtml(b.text)}</li>`).join('')}</ul>
+                ${actionsHtml ? `<div class="diag-actions">${actionsHtml}</div>` : ''}
+                <div id="alert-similar-occurrences"></div>
+            `;
+            return div;
+        }
 
         async function loadRemediations(alertId) {
             const container = document.getElementById('remediation-section');
