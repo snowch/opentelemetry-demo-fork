@@ -356,12 +356,15 @@ CREATE TABLE vast."csnow-db|otel".job_status (
 );
 
 -- Threshold overrides: manual and learned threshold adjustments
+-- service_name: '*' = global (learned adjustments), otherwise entity name (manual)
+-- override_type: 'manual' (absolute z-score) or 'learned' (additive delta)
+-- created_by: 'system' or 'user'
 CREATE TABLE vast."csnow-db|otel".threshold_overrides (
-   service_name    varchar,       -- '*' = global (used by learned adjustments)
-   metric_category varchar,       -- 'error_rate', 'db_error', 'latency', etc.
-   override_type   varchar,       -- 'manual' or 'learned'
-   threshold_value double,        -- manual: absolute z-score; learned: additive delta
-   created_by      varchar,       -- 'system' or 'user'
+   service_name    varchar,
+   metric_category varchar,
+   override_type   varchar,
+   threshold_value double,
+   created_by      varchar,
    created_at      timestamp(9),
    updated_at      timestamp(9)
 );
