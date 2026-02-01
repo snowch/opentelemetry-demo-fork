@@ -3652,6 +3652,7 @@
                     { id: 'traces', label: 'Traces', loader: 'loadEntityTraces', hasBadge: true },
                     { id: 'logs', label: 'Logs', loader: 'loadEntityLogs', hasBadge: true },
                     { id: 'metrics', label: 'Metrics', loader: 'loadEntityMetrics', hasBadge: true },
+                    { id: 'alerts', label: 'Alerts', loader: 'loadEntityAlerts', hasBadge: true },
                     { id: 'thresholds', label: 'Thresholds', loader: 'loadEntityThresholds' },
                 ],
                 defaultTab: 'charts',
@@ -3669,6 +3670,7 @@
                     { id: 'traces', label: 'Traces', loader: 'loadEntityTraces', hasBadge: true },
                     { id: 'logs', label: 'Logs', loader: 'loadEntityLogs', hasBadge: true },
                     { id: 'metrics', label: 'Metrics', loader: 'loadEntityMetrics', hasBadge: true },
+                    { id: 'alerts', label: 'Alerts', loader: 'loadEntityAlerts', hasBadge: true },
                     { id: 'thresholds', label: 'Thresholds', loader: 'loadEntityThresholds' },
                 ],
                 defaultTab: 'charts',
@@ -6047,6 +6049,94 @@ Can you help me understand this issue further or suggest next steps?`;
             } catch (err) {
                 console.error('Failed to load metric history:', err);
                 chartTr.querySelector('td').innerHTML = '<span style="color:var(--accent-error);font-size:12px;">Failed to load chart</span>';
+            }
+        }
+
+        // =================================================================
+        // Entity Alerts Tab
+        // =================================================================
+        async function loadEntityAlerts() {
+            const body = document.getElementById('entity-modal-body');
+            body.innerHTML = '<div class="loading-indicator">Loading alerts...</div>';
+            const name = currentEntityName;
+            const type = currentEntityType;
+
+            try {
+                const resp = await fetch(`/api/alerts?status=all&limit=100&service=${encodeURIComponent(name)}`);
+                const data = await resp.json();
+                const alerts = data.alerts || [];
+
+                if (alerts.length === 0) {
+                    body.innerHTML = '<div class="empty-state" style="padding:24px 0;">No alerts for this entity</div>';
+                    return;
+                }
+
+                const severityOrder = { critical: 0, warning: 1, info: 2 };
+                const active = alerts.filter(a => a.status === 'active').sort((a, b) =>
+                    (severityOrder[a.severity] ?? 3) - (severityOrder[b.severity] ?? 3) || new Date(b.created_at || 0) - new Date(a.created_at || 0));
+                const resolved = alerts.filter(a => a.status !== 'active').sort((a, b) =>
+                    new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
+
+                let html = '<div style="padding:0;">';
+
+                // Summary bar
+                const critCount = active.filter(a => a.severity === 'critical').length;
+                const warnCount = active.filter(a => a.severity === 'warning').length;
+                const infoCount = active.filter(a => a.severity === 'info').length;
+                html += `<div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;padding:10px 14px;background:var(--bg-tertiary);border-radius:8px;font-size:12px;">
+                    <span style="font-weight:600;color:var(--text-primary);">${active.length} active</span>
+                    ${critCount ? `<span style="color:var(--accent-error);">${critCount} critical</span>` : ''}
+                    ${warnCount ? `<span style="color:var(--accent-warning);">${warnCount} warning</span>` : ''}
+                    ${infoCount ? `<span style="color:var(--accent-primary);">${infoCount} info</span>` : ''}
+                    <span style="color:var(--text-muted);">${resolved.length} resolved</span>
+                </div>`;
+
+                function renderAlertItem(alert, isResolved) {
+                    const severity = alert.severity || 'info';
+                    const timeStr = new Date(alert.created_at || 0).toLocaleString();
+                    const resolvedStr = alert.resolved_at ? ' · Resolved: ' + new Date(alert.resolved_at).toLocaleString() : '';
+                    const autoTag = alert.auto_resolved ? ' · auto-resolved' : '';
+                    const isRootCause = isRootCauseAlertType(alert.alert_type);
+                    const categoryLabel = isRootCause ? 'ROOT CAUSE' : 'SYMPTOM';
+                    const categoryClass = isRootCause ? 'root-cause' : 'symptom';
+                    const opacityStyle = isResolved ? 'opacity:0.7;' : '';
+
+                    return `<div class="alert-item alert-${severity}" style="margin-bottom:8px;border-radius:8px;cursor:pointer;${opacityStyle}" onclick="investigateAlert('${escapeHtml(alert.alert_id)}')">
+                        <div class="alert-header">
+                            <span class="alert-type-badge severity-${severity}">${severity}</span>
+                            ${isResolved ? '<span class="alert-type-badge badge-resolved">resolved</span>' : ''}
+                            <span class="alert-category ${categoryClass}">${categoryLabel}</span>
+                            <span class="alert-time">${timeStr}${resolvedStr}${autoTag}</span>
+                        </div>
+                        <div class="alert-title">${escapeHtml(alert.title || alert.alert_type)}</div>
+                        ${alert.root_cause_summary
+                            ? `<div class="alert-root-cause">${escapeHtml(alert.root_cause_summary)}</div>`
+                            : `<div class="alert-description">${escapeHtml(alert.description || '')}</div>`
+                        }
+                        ${alert.current_value != null ? `<div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Value: ${Number(alert.current_value).toFixed(4)} · Threshold: ${alert.threshold_value != null ? Number(alert.threshold_value).toFixed(2) : '-'} · Z-score: ${alert.z_score != null ? Number(alert.z_score).toFixed(2) : '-'}</div>` : ''}
+                    </div>`;
+                }
+
+                // Active alerts
+                if (active.length > 0) {
+                    html += `<div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">Active Alerts</div>`;
+                    active.forEach(a => { html += renderAlertItem(a, false); });
+                }
+
+                // Resolved alerts
+                if (resolved.length > 0) {
+                    html += `<details style="margin-top:12px;" ${active.length === 0 ? 'open' : ''}>
+                        <summary style="font-size:13px;font-weight:600;color:var(--text-secondary);cursor:pointer;padding:6px 0;">Resolved Alerts (${resolved.length})</summary>
+                        <div style="margin-top:8px;">`;
+                    resolved.forEach(a => { html += renderAlertItem(a, true); });
+                    html += '</div></details>';
+                }
+
+                html += '</div>';
+                body.innerHTML = html;
+            } catch (err) {
+                console.error('Failed to load entity alerts:', err);
+                body.innerHTML = '<div class="empty-state">Failed to load alerts</div>';
             }
         }
 
