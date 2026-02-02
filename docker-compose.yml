@@ -375,8 +375,8 @@ services:
         condition: service_started
       jaeger:
         condition: service_started
-      grafana:
-        condition: service_started
+      # grafana:
+      #   condition: service_started
       flagd-ui:
         condition: service_started
     dns_search: ""
@@ -1000,23 +1000,23 @@ services:
       - ./src/jaeger/config.yml:/etc/jaeger/config.yml
     logging: *logging
 
-  # Grafana
-  grafana:
-    image: ${GRAFANA_IMAGE}
-    container_name: grafana
-    deploy:
-      resources:
-        limits:
-          memory: 175M
-    restart: unless-stopped
-    # environment:
-    #   - "GF_INSTALL_PLUGINS=grafana-opensearch-datasource"
-    volumes:
-      - ./src/grafana/grafana.ini:/etc/grafana/grafana.ini
-      - ./src/grafana/provisioning/:/etc/grafana/provisioning/
-    ports:
-      - "${GRAFANA_PORT}"
-    logging: *logging
+  # Grafana (disabled — not used by vast observability UI)
+  # grafana:
+  #   image: ${GRAFANA_IMAGE}
+  #   container_name: grafana
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 175M
+  #   restart: unless-stopped
+  #   # environment:
+  #   #   - "GF_INSTALL_PLUGINS=grafana-opensearch-datasource"
+  #   volumes:
+  #     - ./src/grafana/grafana.ini:/etc/grafana/grafana.ini
+  #     - ./src/grafana/provisioning/:/etc/grafana/provisioning/
+  #   ports:
+  #     - "${GRAFANA_PORT}"
+  #   logging: *logging
 
   # OpenTelemetry Collector
   otel-collector:
