@@ -28,6 +28,7 @@ DROP TABLE IF EXISTS vast."csnow-db|otel".pinned_charts;
 DROP TABLE IF EXISTS vast."csnow-db|otel".threshold_overrides;
 DROP TABLE IF EXISTS vast."csnow-db|otel".remediation_playbooks;
 DROP TABLE IF EXISTS vast."csnow-db|otel".remediation_log;
+DROP TABLE IF EXISTS vast."csnow-db|otel".entity_resource_baselines;
 
 -- vast."csnow-db|otel".logs_otel_analytic definition
 
@@ -411,5 +412,14 @@ CREATE TABLE vast."csnow-db|otel".remediation_log (
     status          varchar,
     result_message  varchar,
     alert_resolved_within_minutes double
+);
+
+-- Entity resource baselines: rolling snapshots for z-score anomaly detection
+CREATE TABLE vast."csnow-db|otel".entity_resource_baselines (
+   entity_type   varchar,
+   entity_name   varchar,
+   metric_name   varchar,
+   sample_value  double,
+   sampled_at    timestamp(9)
 );
 

@@ -4180,6 +4180,7 @@
                 badgeClass: 'container',
                 tabs: [
                     { id: 'overview', label: 'Metrics', loader: 'loadContainerOverview' },
+                    { id: 'alerts', label: 'Alerts', loader: 'loadEntityAlerts', hasBadge: true },
                     { id: 'logs', label: 'Logs', loader: 'loadEntityLogs', hasBadge: true },
                     { id: 'metrics', label: 'All Metrics', loader: 'loadEntityMetrics', hasBadge: true },
                     { id: 'thresholds', label: 'Thresholds', loader: 'loadEntityThresholds' },
@@ -4721,11 +4722,11 @@
             return text;
         }
 
+        const _escapeEl = document.createElement('div');
         function escapeHtml(text) {
             if (!text) return '';
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+            _escapeEl.textContent = text;
+            return _escapeEl.innerHTML;
         }
 
         async function clearChat() {
@@ -4944,7 +4945,10 @@
             }
         }
 
+        let alertsRefreshInFlight = false;
         async function refreshAlerts() {
+            if (alertsRefreshInFlight) return;
+            alertsRefreshInFlight = true;
             try {
                 // Fetch all three sources in parallel
                 const [alertsResp, activityResp, predictionsResp] = await Promise.all([
@@ -5056,7 +5060,6 @@
                         <div class="alert-item alert-${severity}" onclick="investigateAlert('${escapeHtml(alert.alert_id)}')">
                             <div class="alert-header">
                                 <span class="alert-severity ${severity}">${severity}</span>
-                                <span class="alert-type-badge severity-${severity}">${severity}</span>
                                 <span class="alert-category ${categoryClass}">${categoryLabel}</span>
                                 <span class="alert-time">${timeAgo}${hasInvestigation ? ' \u2022 analyzed' : ''}</span>
                             </div>
@@ -5136,6 +5139,8 @@
             } catch (error) {
                 console.error('Failed to refresh alerts:', error);
                 document.getElementById('combined-alerts-list').innerHTML = '<div class="empty-state">Alerts unavailable</div>';
+            } finally {
+                alertsRefreshInFlight = false;
             }
         }
 
@@ -5332,7 +5337,8 @@
         const ROOT_CAUSE_ALERT_TYPES = [
             'dependency_anomaly',
             'exception_surge',
-            'new_exception_type'
+            'new_exception_type',
+            'resource_pressure'
         ];
 
         function isRootCauseAlertType(alertType) {
@@ -5442,11 +5448,11 @@ ${escapeHtml(alert.supporting_evidence)}</div>
 
                 let noInvestigationReason;
                 if (criticalOnlyMode && isNonCritical) {
-                    noInvestigationReason = `Auto-investigation is configured for <strong>critical alerts only</strong>.<br>
-                        This ${severity} alert was not automatically investigated.`;
+                    noInvestigationReason = `This ${severity} alert has not been analyzed yet.<br>
+                        Click below to run an AI-powered root cause analysis.`;
                 } else {
-                    noInvestigationReason = `No investigation available yet.<br>
-                        The automated system may be rate-limited or processing other alerts.`;
+                    noInvestigationReason = `This alert has not been analyzed yet.<br>
+                        Click below to run an AI-powered root cause analysis.`;
                 }
 
                 investigationHtml = `
@@ -5553,8 +5559,8 @@ ${escapeHtml(alert.supporting_evidence)}</div>
                     // Refresh the modal to show results
                     const alert = window.alertsCache ? window.alertsCache[alertId] : null;
                     openAlertModal(alert, alertId);
-                    // Refresh alerts list too
-                    refreshAlerts();
+                    // Refresh alerts list after a short delay to avoid concurrent DOM thrashing
+                    setTimeout(() => refreshAlerts(), 500);
                 } else {
                     if (btn) {
                         btn.textContent = data.error || 'Failed';
@@ -6225,13 +6231,23 @@ Can you help me understand this issue further or suggest next steps?`;
         async function loadContainerOverview() {
             if (!currentEntityName) return;
             const body = document.getElementById('entity-modal-body');
-            body.innerHTML = `
-                <div class="chart-row">
-                    <div class="chart-card"><h4>Container Resource Usage</h4>
-                        <div class="host-detail-metrics" id="container-current-metrics"><div class="empty-state">Loading...</div></div>
+
+            const hasContainerCharts = modalCharts.containerCpu || modalCharts.containerMemory;
+            if (!hasContainerCharts) {
+                Object.values(modalCharts).forEach(c => c.destroy());
+                modalCharts = {};
+                body.innerHTML = `
+                    <div class="chart-row">
+                        <div class="chart-card"><h4>Container Resource Usage</h4>
+                            <div class="host-detail-metrics" id="container-current-metrics"><div class="empty-state">Loading...</div></div>
+                        </div>
                     </div>
-                </div>
-            `;
+                    <div class="chart-row">
+                        <div class="chart-card"><h4>CPU Over Time</h4><canvas id="container-cpu-history-chart"></canvas></div>
+                        <div class="chart-card"><h4>Memory Over Time</h4><canvas id="container-memory-history-chart"></canvas></div>
+                    </div>
+                `;
+            }
             try {
                 const response = await fetch(`/api/entity/container/${encodeURIComponent(currentEntityName)}/metrics?${getEntityTimeParams()}`);
                 const data = await response.json();
@@ -6270,7 +6286,40 @@ Can you help me understand this issue further or suggest next steps?`;
                 console.error('Failed to load container overview:', error);
                 document.getElementById('container-current-metrics').innerHTML = '<div class="empty-state">Failed to load metrics</div>';
             }
+            await loadContainerResourceHistory(currentEntityName);
             await loadPinnedCharts();
+        }
+
+        async function loadContainerResourceHistory(containerName) {
+            try {
+                const response = await fetch(`/api/container/${encodeURIComponent(containerName)}/resource-history?${getEntityTimeParams()}`);
+                const data = await response.json();
+                if (!data.history || data.history.length === 0) return;
+
+                const labels = data.history.map(r => new Date(r.time_bucket).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
+                const cpuData = data.history.map(r => r.cpu_pct);
+                const memData = data.history.map(r => r.memory_pct);
+
+                if (modalCharts.containerCpu) {
+                    updateChartInPlace(modalCharts.containerCpu, labels, [{data: cpuData}]);
+                } else {
+                    modalCharts.containerCpu = new Chart(document.getElementById('container-cpu-history-chart'), {
+                        type: 'line', data: { labels, datasets: [
+                            { label: 'CPU %', data: cpuData, borderColor: '#00d9ff', backgroundColor: 'rgba(0,217,255,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
+                        ]}, options: chartOptions()
+                    });
+                }
+
+                if (modalCharts.containerMemory) {
+                    updateChartInPlace(modalCharts.containerMemory, labels, [{data: memData}]);
+                } else {
+                    modalCharts.containerMemory = new Chart(document.getElementById('container-memory-history-chart'), {
+                        type: 'line', data: { labels, datasets: [
+                            { label: 'Memory %', data: memData, borderColor: '#7c3aed', backgroundColor: 'rgba(124,58,237,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
+                        ]}, options: chartOptions()
+                    });
+                }
+            } catch (error) { console.error('Failed to load container resource history:', error); }
         }
 
         async function loadEntityServices() {
@@ -6709,8 +6758,8 @@ Can you help me understand this issue further or suggest next steps?`;
         const THRESHOLD_CATEGORIES_BY_TYPE = {
             service: ['error_rate', 'latency', 'throughput', 'dependency_latency', 'dependency_error', 'exception_surge', 'new_exception'],
             database: ['dependency_error', 'dependency_latency', 'error_rate', 'latency'],
-            host: [],  // host uses resource_predictions
-            container: [],  // container uses resource_predictions
+            host: ['entity_host_cpu_pct', 'entity_host_memory_pct', 'entity_host_disk_pct'],
+            container: ['entity_container_cpu_pct', 'entity_container_memory_pct'],
         };
 
         function formatBaselineValue(val, metricType) {
@@ -8121,6 +8170,10 @@ Can you help me understand this issue further or suggest next steps?`;
                 const patternCount = pat ? (pat.occurrence_count || 0) : 0;
                 const effectiveCount = patternCount > 0 ? patternCount : similarAlerts.length;
                 if (effectiveCount > 1 && similarContainer) {
+                    // Check if this alert already has an investigation
+                    const cachedAlert = window.alertsCache && window.alertsCache[alertId];
+                    const alertHasInvestigation = cachedAlert && cachedAlert.root_cause_summary;
+
                     // Navigate from the similarContainer up to the parent diagnostic-summary div
                     const diagParent = similarContainer.closest('.diagnostic-summary')
                                     || similarContainer.parentElement;
@@ -8132,15 +8185,19 @@ Can you help me understand this issue further or suggest next steps?`;
                         if (verdictEl && bulletsEl) {
                             const curVerdict = verdictEl.textContent || '';
                             if (curVerdict.indexOf('no action needed') !== -1) {
-                                verdictEl.textContent = 'Recurring issue \u2014 this has happened ' + effectiveCount + ' times, investigate root cause';
+                                if (alertHasInvestigation) {
+                                    verdictEl.textContent = 'Recurring pattern \u2014 happened ' + effectiveCount + ' times, investigation complete';
+                                } else {
+                                    verdictEl.textContent = 'Recurring issue \u2014 happened ' + effectiveCount + ' times, investigate root cause';
+                                }
                                 diagParent.classList.remove('sev-ok');
-                                diagParent.classList.add('sev-warning');
+                                diagParent.classList.add(alertHasInvestigation ? 'sev-ok' : 'sev-warning');
                                 const allBullets = bulletsEl.querySelectorAll('li');
                                 for (var i = 0; i < allBullets.length; i++) {
                                     var t = allBullets[i].textContent;
                                     if (t.indexOf('transient spike') !== -1 || t.indexOf('likely no action needed') !== -1) {
                                         allBullets[i].textContent = 'Recurred ' + effectiveCount + ' times \u2014 not transient, review underlying cause';
-                                        allBullets[i].className = 'bullet-amber';
+                                        allBullets[i].className = alertHasInvestigation ? 'bullet-green' : 'bullet-amber';
                                     } else if (t.indexOf('Auto-resolved') !== -1) {
                                         allBullets[i].remove();
                                         i--;
@@ -8148,13 +8205,25 @@ Can you help me understand this issue further or suggest next steps?`;
                                 }
                                 if (pat && pat.common_root_cause) {
                                     var li = document.createElement('li');
-                                    li.className = 'bullet-amber';
+                                    li.className = alertHasInvestigation ? 'bullet-green' : 'bullet-amber';
                                     li.textContent = 'Known pattern \u2014 common root cause: ' + pat.common_root_cause;
                                     bulletsEl.appendChild(li);
                                 }
                             }
                         }
                     }
+                }
+
+                // If no investigation exists but we have historical pattern data, surface it
+                const noInvText = document.querySelector('.alert-no-investigation-text');
+                if (noInvText && pat && pat.common_root_cause) {
+                    const occCount = pat.occurrence_count || 0;
+                    const avgDur = pat.avg_duration_minutes ? pat.avg_duration_minutes.toFixed(1) : null;
+                    let msg = `This alert has occurred <strong>${occCount}</strong> time(s) on this service`;
+                    if (avgDur) msg += ` (avg duration: ${avgDur} min)`;
+                    msg += `.<br>Previous root cause: <em>${escapeHtml(pat.common_root_cause)}</em>`;
+                    msg += `<br><br>Request a new investigation to confirm if this recurrence has the same cause.`;
+                    noInvText.innerHTML = msg;
                 }
 
             } catch (error) {
@@ -8205,9 +8274,11 @@ Can you help me understand this issue further or suggest next steps?`;
                         `;
                         content.insertBefore(contextSection, actionsDiv);
 
-                        // Fetch remediations and incident context (eagerly, for similar occurrences in diagnostic summary)
-                        loadRemediations(alert.alert_id || alertId);
-                        loadIncidentContext(alert.alert_id || alertId, alert.metric_type);
+                        // Fetch remediations and incident context after a frame to avoid DOM thrashing
+                        requestAnimationFrame(() => {
+                            loadRemediations(alert.alert_id || alertId);
+                            loadIncidentContext(alert.alert_id || alertId, alert.metric_type);
+                        });
                     }
                 }
             }
@@ -8269,7 +8340,9 @@ Can you help me understand this issue further or suggest next steps?`;
             // Investigation status
             if (hasInvestigation) {
                 const summary = (alert.root_cause_summary || '').substring(0, 120);
-                bullets.push({text: `Root cause identified: ${summary}${alert.root_cause_summary.length > 120 ? '...' : ''}`, cls: 'bullet-green'});
+                bullets.push({text: `Investigation summary: ${summary}${alert.root_cause_summary.length > 120 ? '...' : ''}`, cls: 'bullet-green'});
+            } else if (isRootCause) {
+                bullets.push({text: 'Request an investigation for deeper analysis and remediation steps', cls: 'bullet-green'});
             } else if (severity !== 'info') {
                 bullets.push({text: 'No automated investigation yet — request one or investigate via chat', cls: 'bullet-amber'});
             }
@@ -8308,6 +8381,9 @@ Can you help me understand this issue further or suggest next steps?`;
             } else if (isResolved) {
                 verdict = 'Resolved — this alert was manually closed';
                 nextStep = 'none';
+            } else if (isRootCause && !hasInvestigation) {
+                verdict = 'Root cause detected — fix this dependency issue to resolve downstream symptoms';
+                nextStep = 'investigate';
             } else if (diagSeverity === 'critical' && !hasInvestigation) {
                 verdict = 'Needs investigation — active issue without root cause analysis';
                 nextStep = 'investigate';
@@ -8331,8 +8407,7 @@ Can you help me understand this issue further or suggest next steps?`;
 
             let actionsHtml = '';
             if (nextStep === 'investigate') {
-                actionsHtml = `<button class="diag-action-btn primary" onclick="requestInvestigation('${escapeHtml(alertId)}')">Request Investigation</button>
-                    <button class="diag-action-btn" onclick="askAboutAlert('${escapeHtml(alertId)}', '${escapeHtml(alert.service_name)}', '${escapeHtml(alertType.replace(/_/g, ' '))}', false)">Investigate in Chat</button>`;
+                actionsHtml = `<button class="diag-action-btn primary" onclick="askAboutAlert('${escapeHtml(alertId)}', '${escapeHtml(alert.service_name)}', '${escapeHtml(alertType.replace(/_/g, ' '))}', false)">Investigate in Chat</button>`;
             } else if (nextStep === 'chat') {
                 actionsHtml = `<button class="diag-action-btn primary" onclick="askAboutAlert('${escapeHtml(alertId)}', '${escapeHtml(alert.service_name)}', '${escapeHtml(alertType.replace(/_/g, ' '))}', true)">Ask for Next Steps</button>`;
             } else if (nextStep === 'actions') {

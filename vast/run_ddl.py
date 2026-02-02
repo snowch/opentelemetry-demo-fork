@@ -14,7 +14,7 @@ conn = trino.dbapi.connect(
     user="trino",
     catalog="vast",
     schema='"csnow-db|otel"',
-    http_scheme="https",
+    http_scheme=os.getenv("TRINO_HTTP_SCHEME", "https"),
     verify=False,
 )
 cur = conn.cursor()

@@ -1866,6 +1866,40 @@ def host_resource_history(host_name):
     return jsonify({'history': rows})
 
 
+@app.route('/api/container/<container_name>/resource-history', methods=['GET'])
+def container_resource_history(container_name):
+    """Get 1-minute bucketed CPU, memory utilization for a container."""
+    executor = get_query_executor()
+    tr = parse_time_range(request, default_preset='1h')
+    time_cond = time_filter_sql(tr, 'timestamp')
+
+    query = f"""
+    SELECT date_trunc('minute', timestamp) as time_bucket,
+        MAX(CASE WHEN metric_name='container.cpu.percent' THEN ROUND(value_double,1) END) as cpu_pct,
+        MAX(CASE WHEN metric_name='container.memory.percent' THEN ROUND(value_double,1) END) as memory_pct,
+        MAX(CASE WHEN metric_name='container.memory.usage.total' THEN ROUND(value_double/1048576.0,1) END) as memory_mb
+    FROM metrics_otel_analytic
+    WHERE metric_name IN ('container.cpu.percent','container.memory.percent','container.memory.usage.total')
+      AND {time_cond}
+      AND attributes_flat LIKE '%container.name={container_name}%'
+    GROUP BY date_trunc('minute', timestamp)
+    ORDER BY time_bucket
+    """
+
+    result = executor.execute_query(query)
+    rows = []
+    if result['success'] and result['rows']:
+        for row in result['rows']:
+            rows.append({
+                'time_bucket': str(row.get('time_bucket', '')),
+                'cpu_pct': row.get('cpu_pct'),
+                'memory_pct': row.get('memory_pct'),
+                'memory_mb': row.get('memory_mb'),
+            })
+
+    return jsonify({'history': rows})
+
+
 # =============================================================================
 # Topology API
 # =============================================================================

@@ -196,6 +196,7 @@ class AlertType(Enum):
     DEPENDENCY_ANOMALY = "dependency_anomaly"          # Generic dependency anomaly (db, messaging, rpc, http, service)
     EXCEPTION_SURGE = "exception_surge"                # Unusual increase in exceptions
     NEW_EXCEPTION_TYPE = "new_exception_type"          # Previously unseen exception type
+    RESOURCE_PRESSURE = "resource_pressure"            # Entity resource saturation (CPU, memory, disk)
 
 
 class AlertStatus(Enum):
@@ -453,6 +454,12 @@ class AdaptiveThresholdManager:
             "dependency_latency", "dependency_error",
             "exception_surge", "new_exception",
         ]
+        # Dynamically add entity resource categories from ENTITY_SOURCES
+        for etype, source in ENTITY_SOURCES.items():
+            for metric_name in source["metrics"]:
+                cat = f"entity_{etype}_{metric_name}"
+                if cat not in all_categories:
+                    all_categories.append(cat)
         result = {}
         for cat in all_categories:
             # Compute base * multiplier
@@ -493,6 +500,12 @@ class AdaptiveThresholdManager:
 
     def _get_metric_category(self, alert_type: str, metric_type: str) -> str:
         """Map alert/metric type to a threshold category."""
+        # Handle entity resource metrics (e.g., "entity:container:kafka:memory_pct")
+        if metric_type.startswith("entity:"):
+            parts = metric_type.split(":")
+            if len(parts) >= 4:
+                return f"entity_{parts[1]}_{parts[3]}"
+            return ""
         if "dependency" in alert_type.lower() or metric_type.startswith("dep:"):
             if "latency" in metric_type.lower():
                 return "dependency_latency"
@@ -1046,6 +1059,9 @@ class AnomalyDetector:
         # Adaptive threshold manager for root cause detection
         self.threshold_manager = AdaptiveThresholdManager(config)
 
+        # Entity resource detector (container/host saturation)
+        self.entity_resource_detector = EntityResourceDetector(executor, config, self.threshold_manager)
+
         # Isolation Forest model (if sklearn available)
         self.isolation_forest = None
         if SKLEARN_AVAILABLE:
@@ -1102,6 +1118,13 @@ class AnomalyDetector:
                    self.threshold_manager.is_root_cause_enabled("new_exception"):
                     exc_anomalies = self._detect_exception_issues(service)
                     anomalies.extend(exc_anomalies)
+
+        # === ENTITY RESOURCE DETECTION (container/host saturation) ===
+        try:
+            entity_anomalies = self.entity_resource_detector.detect_all()
+            anomalies.extend(entity_anomalies)
+        except Exception as e:
+            print(f"[AnomalyDetector] Entity resource detection failed: {e}")
 
         return anomalies
 
@@ -2184,6 +2207,209 @@ class ResourceTrendPredictor:
 
 
 # =============================================================================
+# Entity Resource Detection
+# =============================================================================
+
+ENTITY_SOURCES = {
+    "container": {
+        "table": "topology_containers",
+        "name_col": "container_name",
+        "metrics": {
+            "cpu_pct":    {"unit": "%", "warn_abs": 80, "crit_abs": 95, "direction": "upper"},
+            "memory_pct": {"unit": "%", "warn_abs": 85, "crit_abs": 95, "direction": "upper"},
+        },
+        "freshness_minutes": 5,
+    },
+    "host": {
+        "table": "topology_hosts",
+        "name_col": "host_name",
+        "metrics": {
+            "cpu_pct":    {"unit": "%", "warn_abs": 80, "crit_abs": 95, "direction": "upper"},
+            "memory_pct": {"unit": "%", "warn_abs": 85, "crit_abs": 95, "direction": "upper"},
+            "disk_pct":   {"unit": "%", "warn_abs": 85, "crit_abs": 95, "direction": "upper"},
+        },
+        "freshness_minutes": 5,
+    },
+}
+
+
+class EntityResourceDetector:
+    """
+    Registry-driven resource anomaly detector for any topology entity.
+
+    Uses hybrid thresholds:
+      1. Absolute thresholds for saturation (works day one, no history needed)
+      2. Z-score baselines for sudden changes (needs 10+ samples)
+
+    To add a new entity type, just add an entry to ENTITY_SOURCES above.
+    """
+
+    # Z-score threshold for baseline deviation alerting
+    ZSCORE_WARN = 2.5
+    ZSCORE_CRIT = 3.5
+    MIN_SAMPLES = 10
+    BASELINE_WINDOW_HOURS = 1
+    PRUNE_HOURS = 24
+
+    def __init__(self, executor, config: Config, threshold_manager: AdaptiveThresholdManager):
+        self.executor = executor
+        self.config = config
+        self.threshold_manager = threshold_manager
+
+    def detect_all(self) -> List[Dict]:
+        """Iterate all entity sources, check each entity+metric, return anomalies."""
+        anomalies = []
+        for entity_type, source in ENTITY_SOURCES.items():
+            try:
+                entities = self._get_entities(source)
+            except Exception as e:
+                print(f"[EntityResource] Failed to query {source['table']}: {e}")
+                continue
+
+            for entity in entities:
+                name = entity.get(source["name_col"], "")
+                if not name:
+                    continue
+                for metric_name, metric_cfg in source["metrics"].items():
+                    value = entity.get(metric_name)
+                    if value is None:
+                        continue
+                    try:
+                        value = float(value)
+                    except (TypeError, ValueError):
+                        continue
+
+                    anomaly = self._check_metric(
+                        entity_type, name, metric_name, value, metric_cfg
+                    )
+                    if anomaly:
+                        anomalies.append(anomaly)
+
+                    # Store baseline sample each cycle
+                    self._store_baseline_sample(entity_type, name, metric_name, value)
+
+            # Prune old baselines once per detection pass
+            self._prune_old_baselines(entity_type)
+
+        if anomalies:
+            print(f"[EntityResource] Detected {len(anomalies)} resource anomalies")
+
+        return anomalies
+
+    def _get_entities(self, source: dict) -> List[Dict]:
+        """Query a topology table for fresh entities."""
+        freshness = source.get("freshness_minutes", 5)
+        sql = f"""
+            SELECT * FROM {source['table']}
+            WHERE updated_at > CURRENT_TIMESTAMP - INTERVAL '{freshness}' MINUTE
+        """
+        return self.executor.execute(sql)
+
+    def _check_metric(self, entity_type: str, entity_name: str,
+                      metric_name: str, value: float, cfg: dict) -> Optional[Dict]:
+        """
+        Hybrid anomaly check:
+          1. Absolute threshold (catches saturation immediately)
+          2. Z-score baseline (catches sudden spikes even below absolute thresholds)
+        """
+        severity = None
+        message = None
+        baseline_mean = None
+        z_score = None
+
+        # --- Absolute threshold check ---
+        if cfg["direction"] == "upper":
+            if value >= cfg["crit_abs"]:
+                severity = Severity.CRITICAL
+                message = (f"{entity_type.capitalize()} {entity_name} {metric_name.replace('_', ' ')}: "
+                           f"{value:.1f}{cfg['unit']} >= {cfg['crit_abs']}{cfg['unit']} critical threshold")
+            elif value >= cfg["warn_abs"]:
+                severity = Severity.WARNING
+                message = (f"{entity_type.capitalize()} {entity_name} {metric_name.replace('_', ' ')}: "
+                           f"{value:.1f}{cfg['unit']} >= {cfg['warn_abs']}{cfg['unit']} warning threshold")
+
+        # --- Z-score baseline check (if enough samples) ---
+        baseline = self._get_rolling_baseline(entity_type, entity_name, metric_name)
+        if baseline:
+            baseline_mean, baseline_std = baseline
+            if baseline_std > 0:
+                z_score = (value - baseline_mean) / baseline_std
+                if cfg["direction"] == "upper" and z_score > 0:
+                    if z_score >= self.ZSCORE_CRIT and severity is None:
+                        severity = Severity.CRITICAL
+                        message = (f"{entity_type.capitalize()} {entity_name} {metric_name.replace('_', ' ')}: "
+                                   f"{value:.1f}{cfg['unit']} z-score {z_score:.1f} (baseline {baseline_mean:.1f})")
+                    elif z_score >= self.ZSCORE_WARN and severity is None:
+                        severity = Severity.WARNING
+                        message = (f"{entity_type.capitalize()} {entity_name} {metric_name.replace('_', ' ')}: "
+                                   f"{value:.1f}{cfg['unit']} z-score {z_score:.1f} (baseline {baseline_mean:.1f})")
+
+        if severity is None:
+            return None
+
+        metric_type_key = f"entity:{entity_type}:{entity_name}:{metric_name}"
+        return {
+            "service": entity_name,
+            "metric_type": metric_type_key,
+            "alert_type": AlertType.RESOURCE_PRESSURE,
+            "severity": severity,
+            "current_value": round(value, 2),
+            "baseline_value": round(baseline_mean, 2) if baseline_mean is not None else None,
+            "z_score": round(z_score, 2) if z_score is not None else None,
+            "message": message,
+        }
+
+    def _store_baseline_sample(self, entity_type: str, entity_name: str,
+                               metric_name: str, value: float):
+        """Store current value into entity_resource_baselines for rolling baseline computation."""
+        sql = f"""
+            INSERT INTO entity_resource_baselines
+                (entity_type, entity_name, metric_name, sample_value, sampled_at)
+            VALUES ('{entity_type}', '{entity_name}', '{metric_name}', {value}, CURRENT_TIMESTAMP)
+        """
+        try:
+            self.executor.execute_write(sql)
+        except Exception as e:
+            print(f"[EntityResource] Failed to store baseline sample: {e}")
+
+    def _get_rolling_baseline(self, entity_type: str, entity_name: str,
+                              metric_name: str) -> Optional[Tuple[float, float]]:
+        """Compute mean/stddev from last BASELINE_WINDOW_HOURS of stored snapshots."""
+        sql = f"""
+            SELECT AVG(sample_value) as mean_val,
+                   STDDEV(sample_value) as std_val,
+                   COUNT(*) as cnt
+            FROM entity_resource_baselines
+            WHERE entity_type = '{entity_type}'
+              AND entity_name = '{entity_name}'
+              AND metric_name = '{metric_name}'
+              AND sampled_at > CURRENT_TIMESTAMP - INTERVAL '{self.BASELINE_WINDOW_HOURS}' HOUR
+        """
+        try:
+            rows = self.executor.execute(sql)
+            if rows and rows[0].get("cnt", 0) >= self.MIN_SAMPLES:
+                mean_val = rows[0].get("mean_val")
+                std_val = rows[0].get("std_val")
+                if mean_val is not None and std_val is not None:
+                    return (float(mean_val), float(std_val))
+        except Exception:
+            pass
+        return None
+
+    def _prune_old_baselines(self, entity_type: str):
+        """Remove samples older than PRUNE_HOURS."""
+        sql = f"""
+            DELETE FROM entity_resource_baselines
+            WHERE entity_type = '{entity_type}'
+              AND sampled_at < CURRENT_TIMESTAMP - INTERVAL '{self.PRUNE_HOURS}' HOUR
+        """
+        try:
+            self.executor.execute_write(sql)
+        except Exception:
+            pass
+
+
+# =============================================================================
 # Pattern Matcher
 # =============================================================================
 
@@ -2800,7 +3026,8 @@ class PredictiveAlertsService:
         """Ensure required tables exist (creates them if not)."""
         # Check if tables exist by querying
         tables = ["service_baselines", "anomaly_scores", "alerts",
-                  "incident_context", "resource_predictions", "incident_patterns", "simulation_runs"]
+                  "incident_context", "resource_predictions", "incident_patterns", "simulation_runs",
+                  "entity_resource_baselines"]
 
         for table in tables:
             sql = f"SELECT 1 FROM {table} LIMIT 1"
