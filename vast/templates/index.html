@@ -1644,6 +1644,23 @@
         }
         .diag-action-btn.primary:hover { opacity: 0.9; }
 
+        /* Links row below diagnostic summary (service drill-down, reduce sensitivity) */
+        .diag-links {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+            font-size: 11px;
+        }
+        .diag-action-link {
+            color: #3b82f6;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .diag-action-link:hover { text-decoration: underline; }
+        .diag-action-link.sensitivity-link { color: #f59e0b; }
+        .diag-action-link.sensitivity-link:hover { color: #fbbf24; }
+
         .error-stacktrace-toggle {
             display: inline-block;
             font-size: 12px;
@@ -5482,7 +5499,7 @@ ${escapeHtml(alert.supporting_evidence)}</div>
                     </div>
                     <div class="alert-meta-item">
                         <span class="alert-meta-label">Service</span>
-                        <span class="alert-meta-value">${escapeHtml(alert.service_name)}</span>
+                        <span class="alert-meta-value"><a href="#" onclick="closeAlertModal(); openEntityModal('service', '${escapeHtml(alert.service_name)}'); return false;" style="color: #3b82f6; text-decoration: underline; cursor: pointer;">${escapeHtml(alert.service_name)}</a></span>
                     </div>
                     <div class="alert-meta-item">
                         <span class="alert-meta-label">Category</span>
@@ -7559,7 +7576,12 @@ Can you help me understand this issue further or suggest next steps?`;
                         badge.textContent = 'Trace';
                         badge.style.background = 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)';
                     }
-                    document.getElementById('error-service').textContent = info.service_name || '-';
+                    const errorServiceEl = document.getElementById('error-service');
+                    if (info.service_name) {
+                        errorServiceEl.innerHTML = `<a href="#" onclick="closeErrorModal(); openEntityModal('service', '${escapeHtml(info.service_name)}'); return false;" style="color: #3b82f6; text-decoration: underline; cursor: pointer;">${escapeHtml(info.service_name)}</a>`;
+                    } else {
+                        errorServiceEl.textContent = '-';
+                    }
                     document.getElementById('error-operation').textContent = info.span_name || '-';
                     document.getElementById('error-timestamp').textContent = info.start_time ? new Date(info.start_time).toLocaleString() : '-';
                     document.getElementById('error-duration').textContent = info.duration_ms ? `${info.duration_ms}ms` : '-';
@@ -8285,6 +8307,61 @@ Can you help me understand this issue further or suggest next steps?`;
             }
         };
 
+        /**
+         * Map alert_type to the threshold metric_category used by the override API.
+         * Returns null if no meaningful mapping exists.
+         */
+        function alertTypeToThresholdCategory(alertType) {
+            const map = {
+                'error_rate': 'error_rate',
+                'latency': 'latency',
+                'throughput': 'throughput',
+                'dependency_anomaly': 'dependency_latency',
+                'exception_surge': 'exception_surge',
+                'new_exception_type': 'new_exception',
+                'resource_pressure': 'resource_pressure',
+            };
+            return map[alertType] || null;
+        }
+
+        /**
+         * Reduce alert sensitivity by raising the threshold for this service/category.
+         * Increases the effective threshold by ~50% (minimum +1σ) to suppress noisy alerts.
+         */
+        async function reduceAlertSensitivity(serviceName, alertType, currentZScore) {
+            const category = alertTypeToThresholdCategory(alertType);
+            if (!category) {
+                console.warn('No threshold category for alert type:', alertType);
+                return;
+            }
+            // Calculate a new threshold: raise to at least current z-score + 1σ, or default 5σ
+            const zs = parseFloat(currentZScore) || 3.0;
+            const newThreshold = Math.max(Math.round((zs + 1.5) * 10) / 10, 4.0);
+
+            const btn = event?.target;
+            if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+
+            try {
+                const resp = await fetch(`/api/entity/service/${encodeURIComponent(serviceName)}/threshold-override`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({metric_category: category, threshold_value: newThreshold}),
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    if (btn) {
+                        btn.textContent = `Threshold raised to ${data.effective_threshold}σ`;
+                        btn.style.color = '#10b981';
+                    }
+                } else {
+                    if (btn) { btn.textContent = data.error || 'Failed'; btn.disabled = false; }
+                }
+            } catch (e) {
+                console.error('Failed to reduce sensitivity:', e);
+                if (btn) { btn.textContent = 'Error — try again'; btn.disabled = false; }
+            }
+        }
+
         function buildAlertDiagnosticSummary(alert, alertId) {
             const severity = (alert.severity || 'info').toLowerCase();
             const status = (alert.status || 'active').toLowerCase();
@@ -8415,11 +8492,26 @@ Can you help me understand this issue further or suggest next steps?`;
                 actionsHtml = `<button class="diag-action-btn" onclick="document.querySelector('.remediation-section')?.scrollIntoView({behavior:'smooth'})">Jump to Remediations</button>`;
             }
 
+            // "View Service" link — always shown for service-level alerts
+            const serviceName = alert.service_name || '';
+            let serviceLink = '';
+            if (serviceName) {
+                serviceLink = `<a href="#" class="diag-action-link" onclick="closeAlertModal(); openEntityModal('service', '${escapeHtml(serviceName)}'); return false;">View ${escapeHtml(serviceName)} details</a>`;
+            }
+
+            // "Too noisy? Reduce sensitivity" — shown for active alerts with a mappable threshold category
+            let sensitivityLink = '';
+            const threshCat = alertTypeToThresholdCategory(alertType);
+            if (threshCat && !isResolved) {
+                sensitivityLink = `<a href="#" class="diag-action-link sensitivity-link" onclick="reduceAlertSensitivity('${escapeHtml(serviceName)}', '${escapeHtml(alertType)}', ${zScore}); return false;">Too noisy? Reduce sensitivity</a>`;
+            }
+
             div.innerHTML = `
                 <h4>Diagnostic Summary</h4>
                 <div class="diag-verdict" id="diag-verdict-text">${escapeHtml(verdict)}</div>
                 <ul class="diag-bullets" id="diag-bullets-list">${bullets.map(b => `<li class="${b.cls}">${escapeHtml(b.text)}</li>`).join('')}</ul>
                 ${actionsHtml ? `<div class="diag-actions">${actionsHtml}</div>` : ''}
+                <div class="diag-links">${serviceLink}${sensitivityLink}</div>
                 <div id="alert-similar-occurrences"></div>
             `;
             return div;

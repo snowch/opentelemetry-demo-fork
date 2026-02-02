@@ -2943,6 +2943,7 @@ def set_entity_threshold_override(entity_type, entity_name):
         "error_rate", "latency", "throughput",
         "dependency_latency", "dependency_error",
         "exception_surge", "new_exception",
+        "resource_pressure",
     }
     if category not in valid_categories:
         return jsonify({"error": f"Invalid category: {category}"}), 400
