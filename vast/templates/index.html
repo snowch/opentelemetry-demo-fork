@@ -1646,6 +1646,37 @@
         .diag-action-link.sensitivity-link { color: #f59e0b; }
         .diag-action-link.sensitivity-link:hover { color: #fbbf24; }
 
+        .alert-suggestion-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 12px 0;
+            border-top: 1px solid var(--border-color);
+            margin-top: 10px;
+        }
+        .chip-label {
+            width: 100%;
+            font-size: 11px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            letter-spacing: 0.5px;
+            margin-bottom: 2px;
+        }
+        .alert-suggestion-chip {
+            font-size: 12px;
+            padding: 5px 12px;
+            border-radius: 999px;
+            border: 1px solid rgba(59,130,246,0.3);
+            background: rgba(59,130,246,0.08);
+            color: #93c5fd;
+            cursor: pointer;
+            transition: transform 0.1s, background 0.15s;
+        }
+        .alert-suggestion-chip:hover {
+            background: rgba(59,130,246,0.18);
+            transform: translateY(-1px);
+        }
+
         .error-stacktrace-toggle {
             display: inline-block;
             font-size: 12px;
@@ -5656,6 +5687,98 @@ Can you help me understand this issue further or suggest next steps?`;
             sendMessage();
         }
 
+        function generateAlertSuggestions(alert) {
+            const suggestions = [];
+            const svc = alert.service_name || alert.entity_name;
+            const metric = alert.metric_type || alert.metricType;
+            const sev = alert.severity ? `${alert.severity}-severity ` : '';
+            const aType = alert.title || alert.alert_type || 'alert';
+
+            // Build a time-window string: "started 2026-02-02 14:30 (active 23m)"
+            let timeCtx = '';
+            if (alert.created_at) {
+                const start = new Date(alert.created_at);
+                const startStr = start.toLocaleString();
+                if (alert.resolved_at) {
+                    const end = new Date(alert.resolved_at);
+                    const durMin = Math.round((end - start) / 60000);
+                    timeCtx = ` Started ${startStr}, resolved after ${durMin}m.`;
+                } else {
+                    const durMin = Math.round((Date.now() - start) / 60000);
+                    timeCtx = ` Started ${startStr}, active for ${durMin}m.`;
+                }
+            }
+
+            // Deviation context: "current 42.3 vs baseline 12.1 (z-score 3.8)"
+            let devCtx = '';
+            if (alert.current_value != null && alert.baseline_value != null) {
+                devCtx = ` Current value ${alert.current_value} vs baseline ${alert.baseline_value}`;
+                if (alert.z_score != null) devCtx += ` (z-score ${alert.z_score})`;
+                devCtx += '.';
+            }
+
+            // Brief description context
+            const descCtx = alert.description ? ` Alert description: "${alert.description}".` : '';
+
+            // Common preamble every prompt can use
+            const preamble = `This is a ${sev}${aType} on ${svc || 'unknown service'}.${timeCtx}${devCtx}${descCtx}`;
+
+            if (metric && svc) {
+                suggestions.push({
+                    label: `Chart ${metric} trend`,
+                    prompt: `${preamble} Chart the ${metric} metric for ${svc} over the last 2 hours. Show the trend and highlight when the anomaly started relative to the alert time.`
+                });
+            }
+            if (svc) {
+                suggestions.push({
+                    label: `Show ${svc} topology`,
+                    prompt: `${preamble} Show the upstream and downstream dependencies for ${svc}. Are any of its dependencies experiencing issues in the same time window?`
+                });
+            }
+            if (alert.created_at) {
+                const ts = new Date(alert.created_at).toLocaleString();
+                suggestions.push({
+                    label: 'Explore around alert time',
+                    prompt: `${preamble} What was happening across all services around ${ts} (±10 minutes)? Look for correlated anomalies, error spikes, or latency changes that overlap this alert's time window.`
+                });
+            }
+            if (alert.current_value != null && alert.baseline_value != null) {
+                suggestions.push({
+                    label: 'Compare to baseline',
+                    prompt: `${preamble} When did the deviation from baseline start? Is the metric stabilizing, worsening, or oscillating? Show the progression over time.`
+                });
+            }
+            if (svc) {
+                suggestions.push({
+                    label: 'Check dependency health',
+                    prompt: `${preamble} Are any dependencies of ${svc} showing anomalies, elevated error rates, or latency spikes during this alert's time window?`
+                });
+                suggestions.push({
+                    label: 'Show recent errors',
+                    prompt: `${preamble} Show recent errors and exceptions for ${svc} during and around this alert's time window, grouped by error type with counts and stack traces.`
+                });
+            }
+            if (alert.root_cause_summary) {
+                suggestions.push({
+                    label: 'Deep-dive root cause',
+                    prompt: `${preamble} The automated root cause analysis says: "${alert.root_cause_summary}". Verify this against actual traces and logs from the alert time window. Do you agree with the assessment?`
+                });
+            }
+            if (alert.alert_id && svc) {
+                suggestions.push({
+                    label: 'Find correlated alerts',
+                    prompt: `${preamble} Are there other active or recently resolved alerts on ${svc} or its dependencies overlapping this alert's time window? Show any correlated alerts that might be part of the same incident.`
+                });
+            }
+            return suggestions.slice(0, 5);
+        }
+
+        function sendAlertSuggestion(prompt) {
+            closeAlertModal();
+            setPrompt(prompt);
+            sendMessage();
+        }
+
         async function refreshJobs() {
             try {
                 const response = await fetch('/api/jobs/status');
@@ -8314,6 +8437,19 @@ Can you help me understand this issue further or suggest next steps?`;
                             content.insertBefore(diagDiv, metaDiv.nextSibling);
                         } else {
                             content.insertBefore(diagDiv, actionsDiv);
+                        }
+
+                        // Add suggestion chips
+                        const chipSuggestions = generateAlertSuggestions(alert);
+                        if (chipSuggestions.length > 0) {
+                            window._alertSuggestionPrompts = chipSuggestions.map(s => s.prompt);
+                            const chipsDiv = document.createElement('div');
+                            chipsDiv.className = 'alert-suggestion-chips';
+                            chipsDiv.innerHTML = '<div class="chip-label">Suggested Investigations</div>' +
+                                chipSuggestions.map((s, i) =>
+                                    `<button class="alert-suggestion-chip" onclick="sendAlertSuggestion(window._alertSuggestionPrompts[${i}])" title="${escapeHtml(s.prompt)}">${escapeHtml(s.label)}</button>`
+                                ).join('');
+                            content.insertBefore(chipsDiv, actionsDiv);
                         }
 
                         // Add remediation section
