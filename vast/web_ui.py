@@ -21,6 +21,8 @@ warnings.filterwarnings("ignore", message=".*model.*is deprecated.*")
 import json
 import os
 import re
+import time
+import threading
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -55,6 +57,91 @@ TRINO_HTTP_SCHEME = os.getenv("TRINO_HTTP_SCHEME", "https")
 MAX_QUERY_ROWS = 100
 
 app = Flask(__name__)
+
+# =============================================================================
+# Response Cache
+# =============================================================================
+#
+# Simple TTL cache for read-heavy API endpoints that hit Trino.  Each Trino
+# round-trip takes 300-1000ms over the network, and most data is written by
+# background jobs running on 60s+ cycles.  Serving slightly-stale responses
+# from memory eliminates redundant queries and dramatically improves UI
+# responsiveness — especially when the browser fires 7+ concurrent requests
+# on page load or when opening the alert modal.
+#
+# Cache keys are the full request URL (including query string) so that
+# different time windows (e.g. ?time=5m vs ?time=1h) are cached separately.
+#
+# Write endpoints (POST) bypass the cache entirely.  The cache can also be
+# explicitly invalidated after mutations (e.g. after an investigation
+# completes) by calling _invalidate_cache() with a prefix.
+
+class TTLCache:
+    """Thread-safe in-memory cache with per-key TTL."""
+
+    def __init__(self):
+        self._store: Dict[str, tuple] = {}  # key -> (value, expiry_timestamp)
+        self._lock = threading.Lock()
+
+    def get(self, key: str):
+        """Return cached value if present and not expired, else None."""
+        with self._lock:
+            entry = self._store.get(key)
+            if entry and entry[1] > time.monotonic():
+                return entry[0]
+            # Expired — remove it
+            self._store.pop(key, None)
+            return None
+
+    def set(self, key: str, value, ttl_seconds: float):
+        """Store a value with the given TTL (in seconds)."""
+        with self._lock:
+            self._store[key] = (value, time.monotonic() + ttl_seconds)
+
+    def invalidate(self, prefix: str = ""):
+        """Remove all entries whose key starts with *prefix*.
+        Call with no arguments to flush the entire cache."""
+        with self._lock:
+            if not prefix:
+                self._store.clear()
+            else:
+                keys = [k for k in self._store if k.startswith(prefix)]
+                for k in keys:
+                    del self._store[k]
+
+
+_cache = TTLCache()
+
+# TTL values (seconds) — tuned to match background-job intervals so we never
+# serve data older than one job cycle.
+CACHE_TTL_STATUS = 30        # /api/status — topology/aggregator run every 60s
+CACHE_TTL_ALERTS = 15        # /api/alerts — alert changes need quicker visibility
+CACHE_TTL_ALERTS_ACTIVITY = 15
+CACHE_TTL_PREDICTIONS = 30   # /api/predictions — predictive job runs every 60s
+CACHE_TTL_JOBS = 30          # /api/jobs/status
+CACHE_TTL_SIMULATION = 30    # /api/simulation/*
+CACHE_TTL_INCIDENTS = 60     # /api/incidents/context/<id> — context rarely changes
+
+
+def _cached_response(cache_key: str, ttl: float, fn):
+    """Return a cached JSON response, or call *fn* to produce one and cache it.
+
+    *fn* must return a Flask response (typically from jsonify()).
+    """
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
+    result = fn()
+    _cache.set(cache_key, result, ttl)
+    return result
+
+
+def _invalidate_cache(prefix: str = ""):
+    """Invalidate cached responses.  Called after mutations so the next read
+    picks up fresh data.  Pass a URL prefix (e.g. '/api/alerts') to
+    selectively flush, or omit for a full flush."""
+    _cache.invalidate(prefix)
+
 
 # =============================================================================
 # Entity Type Registry
@@ -807,7 +894,12 @@ def clear_session():
 
 @app.route('/api/status', methods=['GET'])
 def system_status():
-    """Get current system status."""
+    """Get current system status.  Cached for CACHE_TTL_STATUS seconds."""
+    cache_key = f"/api/status?time={request.args.get('time', '5m')}"
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     executor = get_query_executor()
     time_param = request.args.get('time', '5m')
 
@@ -1030,7 +1122,9 @@ def system_status():
         },
     ]
 
-    return jsonify(status)
+    response = jsonify(status)
+    _cache.set(cache_key, response, CACHE_TTL_STATUS)
+    return response
 
 
 @app.route('/api/query', methods=['POST'])
@@ -2935,7 +3029,12 @@ def delete_entity_threshold_override(entity_type, entity_name):
 
 @app.route('/api/alerts', methods=['GET'])
 def get_alerts():
-    """Get alerts with optional filtering."""
+    """Get alerts with optional filtering.  Cached for CACHE_TTL_ALERTS seconds."""
+    cache_key = request.full_path  # includes query string
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     executor = get_query_executor()
 
     status = request.args.get('status', 'active')  # active, resolved, all
@@ -3028,7 +3127,9 @@ def get_alerts():
             'info': row.get('info') or 0
         }
 
-    return jsonify(data)
+    response = jsonify(data)
+    _cache.set(cache_key, response, CACHE_TTL_ALERTS)
+    return response
 
 
 @app.route('/api/alerts/<alert_id>/acknowledge', methods=['POST'])
@@ -3046,6 +3147,7 @@ def acknowledge_alert(alert_id):
     try:
         cursor = executor.conn.cursor()
         cursor.execute(sql)
+        _invalidate_cache("/api/alerts")
         return jsonify({'success': True, 'message': f'Alert {alert_id} acknowledged'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3069,6 +3171,7 @@ def resolve_alert(alert_id):
         cursor = executor.conn.cursor()
         cursor.execute(sql)
         _update_remediation_resolution(executor, alert_id)
+        _invalidate_cache("/api/alerts")
         return jsonify({'success': True, 'message': f'Alert {alert_id} resolved'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3089,6 +3192,7 @@ def archive_alert(alert_id):
     try:
         cursor = executor.conn.cursor()
         cursor.execute(sql)
+        _invalidate_cache("/api/alerts")
         return jsonify({'success': True, 'message': f'Alert {alert_id} archived'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3121,6 +3225,8 @@ def investigate_alert(alert_id):
     try:
         investigation = run_alert_investigation(executor, alert)
         if investigation:
+            _invalidate_cache("/api/alerts")
+            _invalidate_cache("/api/incidents")
             return jsonify({'success': True, 'investigation': investigation})
         else:
             return jsonify({'success': False, 'error': 'Investigation failed'}), 500
@@ -3608,7 +3714,12 @@ def get_anomalies():
 
 @app.route('/api/alerts/activity', methods=['GET'])
 def get_alert_activity():
-    """Get recent alert activity (created, resolved, auto-resolved)."""
+    """Get recent alert activity (created, resolved, auto-resolved).  Cached."""
+    cache_key = request.full_path
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     executor = get_query_executor()
 
     minutes = min(int(request.args.get('minutes', 60)), 1440)  # max 24 hours
@@ -3663,7 +3774,9 @@ def get_alert_activity():
     if result['success']:
         data['events'] = result['rows']
 
-    return jsonify(data)
+    response = jsonify(data)
+    _cache.set(cache_key, response, CACHE_TTL_ALERTS_ACTIVITY)
+    return response
 
 
 # =============================================================================
@@ -3692,7 +3805,12 @@ def get_simulation_manager():
 
 @app.route('/api/predictions', methods=['GET'])
 def get_predictions():
-    """Get active resource predictions."""
+    """Get active resource predictions.  Cached for CACHE_TTL_PREDICTIONS seconds."""
+    cache_key = "/api/predictions"
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     executor = get_query_executor()
 
     data = {'predictions': []}
@@ -3710,12 +3828,19 @@ def get_predictions():
     if result['success']:
         data['predictions'] = result['rows']
 
-    return jsonify(data)
+    response = jsonify(data)
+    _cache.set(cache_key, response, CACHE_TTL_PREDICTIONS)
+    return response
 
 
 @app.route('/api/jobs/status', methods=['GET'])
 def get_jobs_status():
-    """Get status of background services."""
+    """Get status of background services.  Cached for CACHE_TTL_JOBS seconds."""
+    cache_key = "/api/jobs/status"
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     executor = get_query_executor()
     query = "SELECT job_name, last_run_at, cycle_duration_ms, status, details_json, updated_at FROM job_status ORDER BY job_name"
     result = executor.execute_query(query)
@@ -3734,12 +3859,19 @@ def get_jobs_status():
                 if 'details_json' in job:
                     del job['details_json']
             jobs.append(job)
-    return jsonify({'jobs': jobs})
+    response = jsonify({'jobs': jobs})
+    _cache.set(cache_key, response, CACHE_TTL_JOBS)
+    return response
 
 
 @app.route('/api/incidents/context/<alert_id>', methods=['GET'])
 def get_incident_context(alert_id):
-    """Get incident context snapshot for an alert."""
+    """Get incident context snapshot for an alert.  Cached for CACHE_TTL_INCIDENTS seconds."""
+    cache_key = f"/api/incidents/context/{alert_id}"
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     executor = get_query_executor()
 
     data = {'context': None, 'pattern': None, 'similar_alerts': []}
@@ -3834,7 +3966,9 @@ def get_incident_patterns():
                     pass
         data['patterns'] = result['rows']
 
-    return jsonify(data)
+    response = jsonify(data)
+    _cache.set(cache_key, response, CACHE_TTL_INCIDENTS)
+    return response
 
 
 @app.route('/api/simulation/scenarios', methods=['GET'])
@@ -4151,4 +4285,7 @@ if __name__ == '__main__':
 
     print("\nOpen http://localhost:5000 in your browser\n")
 
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # threaded=True allows concurrent request handling so the browser's
+    # parallel API calls don't queue behind each other (each Trino round-trip
+    # takes 300-1000ms; without threading, 7 concurrent requests = 3.5s serial).
+    app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)

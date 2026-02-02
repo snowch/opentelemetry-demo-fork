@@ -4190,7 +4190,7 @@
                 sidebarRenderer: 'renderContainerItem',
             },
         };
-        const REFRESH_INTERVAL = 30000; // 30 seconds for sidebar
+        const REFRESH_INTERVAL = 60000; // 60 seconds for sidebar (matches background job cycles)
         const MODAL_REFRESH_INTERVAL = 60000; // 60 seconds for drill-down modal
 
         const chartColors = ['#00d9ff', '#7c3aed', '#10b981', '#f59e0b', '#ef4444', '#ec4899'];
@@ -5559,8 +5559,9 @@ ${escapeHtml(alert.supporting_evidence)}</div>
                     // Refresh the modal to show results
                     const alert = window.alertsCache ? window.alertsCache[alertId] : null;
                     openAlertModal(alert, alertId);
-                    // Refresh alerts list after a short delay to avoid concurrent DOM thrashing
-                    setTimeout(() => refreshAlerts(), 500);
+                    // Skip refreshAlerts() here — the sidebar auto-refresh (every 60s)
+                    // will pick up changes.  Firing it here caused concurrent DOM thrashing
+                    // and Firefox "slowing down page" warnings.
                 } else {
                     if (btn) {
                         btn.textContent = data.error || 'Failed';
