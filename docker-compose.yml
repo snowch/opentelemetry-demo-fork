@@ -1127,6 +1127,53 @@ services:
   #     retries: 10
   #   logging: *logging
 
+  # Trino query engine with VAST connector
+  trino:
+    container_name: trino
+    image: vastdataorg/trino-vast:${TRINO_VERSION}
+    restart: unless-stopped
+    mem_limit: 8g
+    ports:
+      - 18080:8080
+    platform: linux/amd64
+    env_file:
+      - .env
+      - .env.override
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        cat > /etc/trino/config.properties <<EOF
+        coordinator=true
+        node-scheduler.include-coordinator=true
+        http-server.http.port=8080
+        discovery.uri=http://localhost:8080
+        http-server.process-forwarded=true
+        http-server.authentication.allow-insecure-over-http=true
+        tracing.enabled=true
+        tracing.exporter.endpoint=http://${OTEL_COLLECTOR_HOST}:${OTEL_COLLECTOR_PORT_GRPC}
+        EOF
+        cat > /etc/trino/catalog/vast.properties <<EOF
+        connector.name=vast
+        endpoint=$${VASTDB_ENDPOINT}
+        data_endpoints=$${VASTDB_ENDPOINT}
+        access_key_id=$${VASTDB_ACCESS_KEY}
+        secret_access_key=$${VASTDB_SECRET_KEY}
+        region=us-east-1
+        num_of_splits=32
+        num_of_subsplits=8
+        vast.http-client.request-timeout=60m
+        vast.http-client.idle-timeout=60m
+        enable_custom_schema_separator=true
+        custom_schema_separator=|
+        EOF
+        exec /usr/lib/trino/bin/run-trino
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/info"]
+      interval: 30s
+      retries: 10
+    logging: *logging
+
 volumes:
   pg-data:
     driver: local
