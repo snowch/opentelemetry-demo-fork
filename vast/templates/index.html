@@ -4078,6 +4078,8 @@
         const MAX_HISTORY = 50;
         const errorHistory = new Map();    // key: trace_id + '_' + span_id
         const alertHistory = new Map();    // key: alert_id
+        const hostDisplayNames = {};       // host_name -> display label
+        function resolveDisplayName(name) { return hostDisplayNames[name] || name; }
         const forecastHistory = new Map(); // key: prediction_id
 
         // Auto-refresh state
@@ -4732,11 +4734,19 @@
             return text;
         }
 
+        // PERF: Use pure string replacement instead of DOM-based escaping
+        // (textContent/innerHTML on a detached element). The DOM approach triggered
+        // expensive browser-internal string searches and NodeList operations that,
+        // combined with DevTools and extensions observing mutations, caused 17s hangs
+        // on the main thread (profiled via Firefox perf: StringIndexOf, memchr2x16,
+        // NodeList_Binding dominating samples inside loadIncidentContext).
         const _escapeEl = document.createElement('div');
         function escapeHtml(text) {
             if (!text) return '';
-            _escapeEl.textContent = text;
-            return _escapeEl.innerHTML;
+            return _escapeHtmlStr(String(text));
+        }
+        function _escapeHtmlStr(s) {
+            return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         }
 
         async function clearChat() {
@@ -4867,6 +4877,11 @@
                     const hostsList = document.getElementById('hosts-list');
                     if (data.hosts && data.hosts.length > 0) {
                         hostsList.innerHTML = data.hosts.map(h => renderHostItem(h, 'host', 'host_name')).join('');
+                        data.hosts.forEach(h => {
+                            if (h.display_name) {
+                                hostDisplayNames[h.host_name] = `${h.display_name} (${h.host_name.slice(0,5)})`;
+                            }
+                        });
                     } else {
                         hostsList.innerHTML = '<div class="empty-state">No host metrics</div>';
                     }
@@ -5332,7 +5347,7 @@
                         <div class="history-item severity-${severity}" onclick="investigateAlert('${escapeHtml(alert.alert_id)}')" style="${status !== 'active' ? 'opacity:0.7;' : ''}">
                             <div class="history-time">${timeStr}${autoResolved}</div>
                             <div class="history-title">${statusBadge} ${escapeHtml(alert.title || alert.alert_type)}</div>
-                            <div class="history-detail">${escapeHtml(alert.service_name || '')} · ${(alert.alert_type || '').replace(/_/g, ' ')}</div>
+                            <div class="history-detail">${escapeHtml(resolveDisplayName(alert.service_name || ''))} · ${(alert.alert_type || '').replace(/_/g, ' ')}</div>
                         </div>
                     `;
                 });
@@ -5492,7 +5507,7 @@ ${escapeHtml(alert.supporting_evidence)}</div>
                     </div>
                     <div class="alert-meta-item">
                         <span class="alert-meta-label">Entity</span>
-                        <span class="alert-meta-value"><a href="#" onclick="closeAlertModal(); var e=resolveEntityType('${escapeHtml(alert.service_name)}'); openEntityModal(e.type, e.name); return false;" style="color: #3b82f6; text-decoration: underline; cursor: pointer;">${escapeHtml(alert.service_name)}</a></span>
+                        <span class="alert-meta-value"><a href="#" onclick="closeAlertModal(); var e=resolveEntityType('${escapeHtml(alert.service_name)}'); openEntityModal(e.type, e.name); return false;" style="color: #3b82f6; text-decoration: underline; cursor: pointer;">${escapeHtml(resolveDisplayName(alert.service_name))}</a></span>
                     </div>
                     <div class="alert-meta-item">
                         <span class="alert-meta-label">Category</span>
@@ -6252,6 +6267,9 @@ Can you help me understand this issue further or suggest next steps?`;
                         <div class="chart-card"><h4>Container Resource Usage</h4>
                             <div class="host-detail-metrics" id="container-current-metrics"><div class="empty-state">Loading...</div></div>
                         </div>
+                        <div class="chart-card"><h4>Container Information</h4>
+                            <div class="host-detail-info" id="container-info"><div class="empty-state">Loading...</div></div>
+                        </div>
                     </div>
                     <div class="chart-row">
                         <div class="chart-card"><h4>CPU Over Time</h4><canvas id="container-cpu-history-chart"></canvas></div>
@@ -6297,6 +6315,30 @@ Can you help me understand this issue further or suggest next steps?`;
                 console.error('Failed to load container overview:', error);
                 document.getElementById('container-current-metrics').innerHTML = '<div class="empty-state">Failed to load metrics</div>';
             }
+            // Load container resource attributes
+            try {
+                const infoResp = await fetch(`/api/container/${encodeURIComponent(currentEntityName)}/info`);
+                const infoData = await infoResp.json();
+                const infoDiv = document.getElementById('container-info');
+                if (infoDiv && infoData.resource_attributes && Object.keys(infoData.resource_attributes).length > 0) {
+                    const ciLabels = {
+                        'container.id': 'Container ID', 'container.hostname': 'Hostname',
+                        'container.image.name': 'Image Name', 'container.image.tag': 'Image Tag',
+                        'container.runtime': 'Runtime', 'os.type': 'OS Type', 'host.name': 'Host',
+                        'service.name': 'Service', 'service.namespace': 'Namespace', 'service.version': 'Version'
+                    };
+                    let html = '';
+                    for (const [key, val] of Object.entries(infoData.resource_attributes)) {
+                        const label = ciLabels[key] || key;
+                        let displayVal = val;
+                        if (key === 'container.id' && val.length > 12) displayVal = val.substring(0, 12);
+                        html += `<div class="host-info-row"><span class="host-info-label">${escapeHtml(label)}</span><span class="host-info-value">${escapeHtml(displayVal)}</span></div>`;
+                    }
+                    infoDiv.innerHTML = html;
+                } else if (infoDiv) {
+                    infoDiv.innerHTML = '<div class="empty-state">No container info available</div>';
+                }
+            } catch (e) { console.error('Failed to load container info:', e); }
             await loadContainerResourceHistory(currentEntityName);
             await loadPinnedCharts();
         }
@@ -7340,9 +7382,10 @@ Can you help me understand this issue further or suggest next steps?`;
             const cpuClass = cpu === '-' ? '' : (cpu > 80 ? 'metric-error' : cpu > 60 ? 'metric-warn' : 'metric-ok');
             const memClass = mem === '-' ? '' : (mem > 85 ? 'metric-error' : mem > 70 ? 'metric-warn' : 'metric-ok');
             const diskClass = disk === '-' ? '' : (disk > 90 ? 'metric-error' : disk > 75 ? 'metric-warn' : 'metric-ok');
+            const hostLabel = h.display_name ? `${h.display_name} (${h[nameField].slice(0,8)})` : h[nameField];
             return `
                 <div class="host-item" onclick="openEntityModal('host', '${escapeHtml(h[nameField])}')" style="cursor: pointer;">
-                    <div class="host-name">${escapeHtml(h[nameField])}</div>
+                    <div class="host-name">${escapeHtml(hostLabel)}</div>
                     <div class="host-metrics">
                         <div class="host-metric">
                             <div class="host-metric-value ${cpuClass}">${cpu}%</div>
@@ -7864,6 +7907,21 @@ Can you help me understand this issue further or suggest next steps?`;
                 const infoDiv = document.getElementById('host-info');
                 if (data.host_info) {
                     const info = data.host_info;
+                    const raLabels = {
+                        'host.arch': 'Architecture', 'os.type': 'OS Type', 'os.description': 'OS Description',
+                        'service.version': 'Service Version', 'service.namespace': 'Namespace',
+                        'telemetry.sdk.name': 'SDK Name', 'telemetry.sdk.version': 'SDK Version',
+                        'telemetry.sdk.language': 'SDK Language',
+                        'process.runtime.name': 'Runtime', 'process.runtime.version': 'Runtime Version'
+                    };
+                    let raHtml = '';
+                    if (info.resource_attributes) {
+                        for (const [key, val] of Object.entries(info.resource_attributes)) {
+                            if (key === 'os.type') continue; // already shown above
+                            const label = raLabels[key] || key;
+                            raHtml += `<div class="host-info-row"><span class="host-info-label">${escapeHtml(label)}</span><span class="host-info-value">${escapeHtml(val)}</span></div>`;
+                        }
+                    }
                     infoDiv.innerHTML = `
                         <div class="host-info-row">
                             <span class="host-info-label">Hostname</span>
@@ -7871,12 +7929,13 @@ Can you help me understand this issue further or suggest next steps?`;
                         </div>
                         <div class="host-info-row">
                             <span class="host-info-label">OS Type</span>
-                            <span class="host-info-value">${escapeHtml(info.os_type || 'Unknown')}</span>
+                            <span class="host-info-value">${escapeHtml(info.os_type || (info.resource_attributes && info.resource_attributes['os.type']) || 'Unknown')}</span>
                         </div>
                         <div class="host-info-row">
                             <span class="host-info-label">Last Seen</span>
                             <span class="host-info-value">${info.last_seen ? new Date(info.last_seen).toLocaleString() : '-'}</span>
                         </div>
+                        ${raHtml}
                     `;
                 } else {
                     infoDiv.innerHTML = `
@@ -8182,63 +8241,50 @@ Can you help me understand this issue further or suggest next steps?`;
                 }
 
                 // Update diagnostic verdict if this is a recurring auto-resolved alert.
-                // Use occurrence_count from the pattern (most authoritative), fall back to similar_alerts count.
+                // PERF: Previously this scanned DOM via querySelectorAll('li'), read
+                // each element's textContent, searched with indexOf(), then removed
+                // nodes individually. That pattern caused 17s main-thread hangs
+                // (profiled: NodeList_Binding, Element.remove, StringIndexOf in a hot
+                // loop). Replaced with getElementById + single innerHTML rebuild.
                 const patternCount = pat ? (pat.occurrence_count || 0) : 0;
                 const effectiveCount = patternCount > 0 ? patternCount : similarAlerts.length;
                 if (effectiveCount > 1 && similarContainer) {
-                    // Check if this alert already has an investigation
                     const cachedAlert = window.alertsCache && window.alertsCache[alertId];
                     const alertHasInvestigation = cachedAlert && cachedAlert.root_cause_summary;
-
-                    // Navigate from the similarContainer up to the parent diagnostic-summary div
-                    const diagParent = similarContainer.closest('.diagnostic-summary')
-                                    || similarContainer.parentElement;
-                    if (diagParent) {
-                        const verdictEl = diagParent.querySelector('.diag-verdict')
-                                       || document.getElementById('diag-verdict-text');
-                        const bulletsEl = diagParent.querySelector('.diag-bullets')
-                                       || document.getElementById('diag-bullets-list');
-                        if (verdictEl && bulletsEl) {
-                            const curVerdict = verdictEl.textContent || '';
-                            if (curVerdict.indexOf('no action needed') !== -1) {
-                                if (alertHasInvestigation) {
-                                    verdictEl.textContent = 'Recurring pattern \u2014 happened ' + effectiveCount + ' times, investigation complete';
-                                } else {
-                                    verdictEl.textContent = 'Recurring issue \u2014 happened ' + effectiveCount + ' times, investigate root cause';
-                                }
+                    const verdictEl = document.getElementById('diag-verdict-text');
+                    const bulletsEl = document.getElementById('diag-bullets-list');
+                    if (verdictEl && bulletsEl) {
+                        const curVerdict = verdictEl.textContent || '';
+                        if (curVerdict.indexOf('no action needed') !== -1) {
+                            const diagParent = verdictEl.closest('.diagnostic-summary');
+                            verdictEl.textContent = alertHasInvestigation
+                                ? 'Recurring pattern \u2014 happened ' + effectiveCount + ' times, investigation complete'
+                                : 'Recurring issue \u2014 happened ' + effectiveCount + ' times, investigate root cause';
+                            if (diagParent) {
                                 diagParent.classList.remove('sev-ok');
                                 diagParent.classList.add(alertHasInvestigation ? 'sev-ok' : 'sev-warning');
-                                const allBullets = bulletsEl.querySelectorAll('li');
-                                for (var i = 0; i < allBullets.length; i++) {
-                                    var t = allBullets[i].textContent;
-                                    if (t.indexOf('transient spike') !== -1 || t.indexOf('likely no action needed') !== -1) {
-                                        allBullets[i].textContent = 'Recurred ' + effectiveCount + ' times \u2014 not transient, review underlying cause';
-                                        allBullets[i].className = alertHasInvestigation ? 'bullet-green' : 'bullet-amber';
-                                    } else if (t.indexOf('Auto-resolved') !== -1) {
-                                        allBullets[i].remove();
-                                        i--;
-                                    }
-                                }
-                                if (pat && pat.common_root_cause) {
-                                    var li = document.createElement('li');
-                                    li.className = alertHasInvestigation ? 'bullet-green' : 'bullet-amber';
-                                    li.textContent = 'Known pattern \u2014 common root cause: ' + pat.common_root_cause;
-                                    bulletsEl.appendChild(li);
-                                }
                             }
+                            // Rebuild bullets from data in one innerHTML write instead of
+                            // iterating live NodeList with remove()/textContent per element
+                            const cls = alertHasInvestigation ? 'bullet-green' : 'bullet-amber';
+                            let bulletsHtml = '<li class="' + cls + '">Recurred ' + effectiveCount + ' times \u2014 not transient, review underlying cause</li>';
+                            if (pat && pat.common_root_cause) {
+                                bulletsHtml += '<li class="' + cls + '">Known pattern \u2014 common root cause: ' + escapeHtml(pat.common_root_cause) + '</li>';
+                            }
+                            bulletsEl.innerHTML = bulletsHtml;
                         }
                     }
                 }
 
                 // If no investigation exists but we have historical pattern data, surface it
-                const noInvText = document.querySelector('.alert-no-investigation-text');
+                const noInvText = document.getElementById('alert-no-investigation-text') || document.querySelector('.alert-no-investigation-text');
                 if (noInvText && pat && pat.common_root_cause) {
                     const occCount = pat.occurrence_count || 0;
                     const avgDur = pat.avg_duration_minutes ? pat.avg_duration_minutes.toFixed(1) : null;
-                    let msg = `This alert has occurred <strong>${occCount}</strong> time(s) on this service`;
-                    if (avgDur) msg += ` (avg duration: ${avgDur} min)`;
-                    msg += `.<br>Previous root cause: <em>${escapeHtml(pat.common_root_cause)}</em>`;
-                    msg += `<br><br>Request a new investigation to confirm if this recurrence has the same cause.`;
+                    let msg = 'This alert has occurred <strong>' + occCount + '</strong> time(s) on this service';
+                    if (avgDur) msg += ' (avg duration: ' + avgDur + ' min)';
+                    msg += '.<br>Previous root cause: <em>' + escapeHtml(pat.common_root_cause) + '</em>';
+                    msg += '<br><br>Request a new investigation to confirm if this recurrence has the same cause.';
                     noInvText.innerHTML = msg;
                 }
 

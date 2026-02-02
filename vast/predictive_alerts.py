@@ -1764,7 +1764,11 @@ class AlertManager:
         severity = anomaly["severity"].value
         metric_type = anomaly["metric_type"]
 
-        title = f"{alert_type.replace('_', ' ').title()} - {service}"
+        display_name = anomaly.get("display_name")
+        if display_name:
+            title = f"{alert_type.replace('_', ' ').title()} - {display_name} ({service[:5]})"
+        else:
+            title = f"{alert_type.replace('_', ' ').title()} - {service}"
         description = anomaly["message"]
 
         sql = f"""
@@ -2283,6 +2287,9 @@ class EntityResourceDetector:
                         entity_type, name, metric_name, value, metric_cfg
                     )
                     if anomaly:
+                        display_name = entity.get("display_name")
+                        if display_name:
+                            anomaly["display_name"] = display_name
                         anomalies.append(anomaly)
 
                     # Store baseline sample each cycle

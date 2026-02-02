@@ -217,6 +217,7 @@ CREATE TABLE ${CATALOG}."${SCHEMA}".topology_host_services (
 -- Host registry with system metrics
 CREATE TABLE ${CATALOG}."${SCHEMA}".topology_hosts (
    host_name varchar,
+   display_name varchar,
    os_type varchar,
    cpu_pct double,
    memory_pct double,

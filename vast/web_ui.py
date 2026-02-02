@@ -1031,7 +1031,7 @@ def system_status():
 
     # Get host metrics - try topology table first, fall back to inline query
     topology_host_result = executor.execute_query("""
-    SELECT host_name, os_type, cpu_pct, memory_pct, disk_pct, last_seen
+    SELECT host_name, display_name, os_type, cpu_pct, memory_pct, disk_pct, last_seen
     FROM topology_hosts
     """)
     if topology_host_result['success'] and topology_host_result['rows']:
@@ -1919,7 +1919,73 @@ def host_services(host_name):
                 data['host_info'] = {}
             data['host_info']['os_type'] = result['rows'][0].get('os_type', 'unknown')
 
+    # Fetch resource attributes from attributes_flat
+    res_attr_query = f"""
+    SELECT attributes_flat
+    FROM metrics_otel_analytic
+    WHERE attributes_flat LIKE '%host.name={host_name}%'
+      AND timestamp > NOW() - INTERVAL '5' MINUTE
+    LIMIT 1
+    """
+    result = executor.execute_query(res_attr_query)
+    if result['success'] and result['rows'] and result['rows'][0].get('attributes_flat'):
+        attrs_flat = result['rows'][0]['attributes_flat']
+        resource_attrs = _parse_resource_attributes(attrs_flat, HOST_RESOURCE_ATTR_KEYS)
+        if resource_attrs:
+            if data['host_info'] is None:
+                data['host_info'] = {}
+            data['host_info']['resource_attributes'] = resource_attrs
+
     return jsonify(data)
+
+
+def _parse_resource_attributes(attrs_flat, wanted_keys):
+    """Parse an attributes_flat string into a dict of wanted resource attributes."""
+    result = {}
+    if not attrs_flat:
+        return result
+    for pair in attrs_flat.split(','):
+        if '=' not in pair:
+            continue
+        key, _, value = pair.partition('=')
+        key = key.strip()
+        if key in wanted_keys:
+            result[key] = value.strip()
+    return result
+
+
+HOST_RESOURCE_ATTR_KEYS = {
+    'host.arch', 'os.type', 'os.description',
+    'service.version', 'service.namespace',
+    'telemetry.sdk.name', 'telemetry.sdk.version',
+    'telemetry.sdk.language', 'process.runtime.name', 'process.runtime.version',
+}
+
+CONTAINER_RESOURCE_ATTR_KEYS = {
+    'container.id', 'container.hostname', 'container.image.name',
+    'container.image.tag', 'container.runtime', 'os.type', 'host.name',
+    'service.name', 'service.namespace', 'service.version',
+}
+
+
+@app.route('/api/container/<container_name>/info', methods=['GET'])
+def container_info(container_name):
+    """Get resource attributes for a container."""
+    executor = get_query_executor()
+    query = f"""
+    SELECT attributes_flat
+    FROM metrics_otel_analytic
+    WHERE attributes_flat LIKE '%container.name={container_name}%'
+      AND timestamp > NOW() - INTERVAL '5' MINUTE
+    LIMIT 1
+    """
+    result = executor.execute_query(query)
+    resource_attributes = {}
+    if result['success'] and result['rows'] and result['rows'][0].get('attributes_flat'):
+        resource_attributes = _parse_resource_attributes(
+            result['rows'][0]['attributes_flat'], CONTAINER_RESOURCE_ATTR_KEYS
+        )
+    return jsonify({'resource_attributes': resource_attributes})
 
 
 @app.route('/api/host/<host_name>/resource-history', methods=['GET'])

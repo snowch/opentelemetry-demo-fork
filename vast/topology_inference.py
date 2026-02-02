@@ -340,6 +340,7 @@ class TopologyInferenceService:
         INSERT INTO topology_hosts
         SELECT
             REGEXP_EXTRACT(attributes_flat, 'host\\.name=([^,]+)', 1) as host_name,
+            NULL as display_name,
             MAX(CASE
                 WHEN attributes_flat LIKE '%os.type=linux%' THEN 'linux'
                 WHEN attributes_flat LIKE '%os.type=windows%' THEN 'windows'
@@ -366,8 +367,36 @@ class TopologyInferenceService:
             rows = self.executor.execute("SELECT COUNT(*) as cnt FROM topology_hosts")
             count = rows[0]['cnt'] if rows else 0
             print(f"[Topology]   -> {count} hosts materialized")
+            self._resolve_host_display_names()
         else:
             print("[Topology]   -> FAILED to materialize hosts")
+
+    def _resolve_host_display_names(self):
+        """Set display_name on topology_hosts from the top service in topology_host_services."""
+        rows = self.executor.execute(
+            "SELECT host_name, service_name FROM topology_host_services ORDER BY data_point_count DESC"
+        )
+        if not rows:
+            return
+        # Pick first (highest data_point_count) service per host
+        best = {}
+        for r in rows:
+            h = r.get("host_name")
+            if h and h not in best:
+                best[h] = r.get("service_name", "")
+        updated = 0
+        for host_name, svc in best.items():
+            if not svc:
+                continue
+            safe_svc = svc.replace("'", "''")
+            safe_host = host_name.replace("'", "''")
+            ok = self.executor.execute_write(
+                f"UPDATE topology_hosts SET display_name = '{safe_svc}' WHERE host_name = '{safe_host}'"
+            )
+            if ok:
+                updated += 1
+        if updated:
+            print(f"[Topology]   -> {updated} host display names resolved")
 
     def _materialize_database_hosts(self):
         """Materialize database-to-host mappings from metric attributes."""
