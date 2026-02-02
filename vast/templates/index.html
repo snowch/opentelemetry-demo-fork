@@ -5552,9 +5552,19 @@
             return value.toFixed(2);
         }
 
-        function investigateAlert(alertId) {
-            // Look up alert from cache and open modal
-            const alert = window.alertsCache ? window.alertsCache[alertId] : null;
+        async function investigateAlert(alertId) {
+            // Look up alert from cache first
+            let alert = window.alertsCache ? window.alertsCache[alertId] : null;
+            if (!alert) {
+                // Fallback: fetch all alerts and try to find it
+                try {
+                    const resp = await fetch('/api/alerts?status=all&limit=200');
+                    const data = await resp.json();
+                    window.alertsCache = window.alertsCache || {};
+                    (data.alerts || []).forEach(a => { window.alertsCache[a.alert_id] = a; });
+                    alert = window.alertsCache[alertId] || null;
+                } catch (e) { /* ignore, will show not-found UI */ }
+            }
             openAlertModal(alert, alertId);
         }
 
@@ -7138,6 +7148,10 @@ Can you help me understand this issue further or suggest next steps?`;
                 const resp = await fetch(`/api/alerts?status=all&limit=100&service=${encodeURIComponent(name)}`);
                 const data = await resp.json();
                 const alerts = data.alerts || [];
+
+                // Populate alertsCache so investigateAlert() can find these
+                window.alertsCache = window.alertsCache || {};
+                alerts.forEach(a => { window.alertsCache[a.alert_id] = a; });
 
                 if (alerts.length === 0) {
                     body.innerHTML = '<div class="empty-state" style="padding:24px 0;">No alerts for this entity</div>';
