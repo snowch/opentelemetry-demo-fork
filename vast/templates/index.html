@@ -3864,7 +3864,7 @@
                 <div class="error-detail-card">
                     <h4>Span Information</h4>
                     <div class="error-detail-row">
-                        <span class="error-detail-label">Service:</span>
+                        <span class="error-detail-label">Entity:</span>
                         <span class="error-detail-value" id="error-service">-</span>
                     </div>
                     <div class="error-detail-row">
@@ -4133,6 +4133,20 @@
         let availableDatabases = [];
         let availableEntities = {};
         let alertsConfig = { investigate_critical_only: false };
+
+        /**
+         * Resolve the best entity type for a given name by checking availableEntities.
+         * Checks service first, then database, container, host. Returns {type, name}.
+         */
+        function resolveEntityType(name) {
+            if (!name) return null;
+            for (const type of ['service', 'database', 'container', 'host']) {
+                const list = availableEntities[type] || [];
+                if (list.includes(name)) return { type, name };
+            }
+            // Fallback: default to service
+            return { type: 'service', name };
+        }
 
         // =================================================================
         // Entity Configuration (mirrors backend ENTITY_TYPES)
@@ -5498,8 +5512,8 @@ ${escapeHtml(alert.supporting_evidence)}</div>
                         <span class="alert-meta-value" style="font-family: 'JetBrains Mono', monospace; font-size: 11px;">${escapeHtml(alert.alert_id)}</span>
                     </div>
                     <div class="alert-meta-item">
-                        <span class="alert-meta-label">Service</span>
-                        <span class="alert-meta-value"><a href="#" onclick="closeAlertModal(); openEntityModal('service', '${escapeHtml(alert.service_name)}'); return false;" style="color: #3b82f6; text-decoration: underline; cursor: pointer;">${escapeHtml(alert.service_name)}</a></span>
+                        <span class="alert-meta-label">Entity</span>
+                        <span class="alert-meta-value"><a href="#" onclick="closeAlertModal(); var e=resolveEntityType('${escapeHtml(alert.service_name)}'); openEntityModal(e.type, e.name); return false;" style="color: #3b82f6; text-decoration: underline; cursor: pointer;">${escapeHtml(alert.service_name)}</a></span>
                     </div>
                     <div class="alert-meta-item">
                         <span class="alert-meta-label">Category</span>
@@ -7578,7 +7592,7 @@ Can you help me understand this issue further or suggest next steps?`;
                     }
                     const errorServiceEl = document.getElementById('error-service');
                     if (info.service_name) {
-                        errorServiceEl.innerHTML = `<a href="#" onclick="closeErrorModal(); openEntityModal('service', '${escapeHtml(info.service_name)}'); return false;" style="color: #3b82f6; text-decoration: underline; cursor: pointer;">${escapeHtml(info.service_name)}</a>`;
+                        errorServiceEl.innerHTML = `<a href="#" onclick="closeErrorModal(); var e=resolveEntityType('${escapeHtml(info.service_name)}'); openEntityModal(e.type, e.name); return false;" style="color: #3b82f6; text-decoration: underline; cursor: pointer;">${escapeHtml(info.service_name)}</a>`;
                     } else {
                         errorServiceEl.textContent = '-';
                     }
@@ -8492,11 +8506,11 @@ Can you help me understand this issue further or suggest next steps?`;
                 actionsHtml = `<button class="diag-action-btn" onclick="document.querySelector('.remediation-section')?.scrollIntoView({behavior:'smooth'})">Jump to Remediations</button>`;
             }
 
-            // "View Service" link — always shown for service-level alerts
+            // "View entity" link — resolves the correct entity type (service, container, database, host)
             const serviceName = alert.service_name || '';
             let serviceLink = '';
             if (serviceName) {
-                serviceLink = `<a href="#" class="diag-action-link" onclick="closeAlertModal(); openEntityModal('service', '${escapeHtml(serviceName)}'); return false;">View ${escapeHtml(serviceName)} details</a>`;
+                serviceLink = `<a href="#" class="diag-action-link" onclick="closeAlertModal(); var e=resolveEntityType('${escapeHtml(serviceName)}'); openEntityModal(e.type, e.name); return false;">View ${escapeHtml(serviceName)} details</a>`;
             }
 
             // "Too noisy? Reduce sensitivity" — shown for active alerts with a mappable threshold category
