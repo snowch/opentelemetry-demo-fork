@@ -17,6 +17,8 @@ KAFKA_BOOTSTRAP="${KAFKA_BOOTSTRAP_SERVERS:-172.200.204.97:9092}"
 TRINO_HOST="${TRINO_HOST:-10.143.11.241}"
 TRINO_PORT="${TRINO_PORT:-8443}"
 TRINO_HTTP_SCHEME="${TRINO_HTTP_SCHEME:-https}"
+TRINO_CATALOG="${TRINO_CATALOG:-vast}"
+TRINO_SCHEMA="${TRINO_SCHEMA:-csnow-db|otel}"
 
 TOPICS=("otel-logs" "otel-traces" "otel-metrics")
 KAFKA_BIN="/opt/kafka/bin/kafka-topics.sh"
@@ -30,6 +32,8 @@ docker run --rm \
     -e TRINO_HOST="${TRINO_HOST}" \
     -e TRINO_PORT="${TRINO_PORT}" \
     -e TRINO_HTTP_SCHEME="${TRINO_HTTP_SCHEME}" \
+    -e TRINO_CATALOG="${TRINO_CATALOG}" \
+    -e TRINO_SCHEMA="${TRINO_SCHEMA}" \
     -v "$(pwd)/vast/ddl.sql:/ddl.sql:ro" \
     -v "$(pwd)/vast/run_ddl.py:/run_ddl.py:ro" \
     python:3.12-slim \

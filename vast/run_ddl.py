@@ -8,12 +8,15 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 import trino
 
+catalog = os.getenv("TRINO_CATALOG", "vast")
+schema = os.getenv("TRINO_SCHEMA", "csnow-db|otel")
+
 conn = trino.dbapi.connect(
     host=os.environ["TRINO_HOST"],
     port=int(os.environ["TRINO_PORT"]),
     user="trino",
-    catalog="vast",
-    schema='"csnow-db|otel"',
+    catalog=catalog,
+    schema=f'"{schema}"',
     http_scheme=os.getenv("TRINO_HTTP_SCHEME", "https"),
     verify=False,
 )
@@ -21,6 +24,8 @@ cur = conn.cursor()
 
 with open("/ddl.sql") as f:
     ddl = f.read()
+
+ddl = ddl.replace("${CATALOG}", catalog).replace("${SCHEMA}", schema)
 
 for stmt in ddl.split(";"):
     stmt = stmt.strip()

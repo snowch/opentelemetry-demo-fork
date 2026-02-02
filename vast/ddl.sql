@@ -1,38 +1,38 @@
 -- =============================================================================
 -- Drop Existing Tables (Fresh Install)
 -- =============================================================================
-DROP TABLE IF EXISTS vast."csnow-db|otel".logs_otel_analytic;
-DROP TABLE IF EXISTS vast."csnow-db|otel".metrics_otel_analytic;
-DROP TABLE IF EXISTS vast."csnow-db|otel".span_events_otel_analytic;
-DROP TABLE IF EXISTS vast."csnow-db|otel".span_links_otel_analytic;
-DROP TABLE IF EXISTS vast."csnow-db|otel".traces_otel_analytic;
-DROP TABLE IF EXISTS vast."csnow-db|otel".service_baselines;
-DROP TABLE IF EXISTS vast."csnow-db|otel".anomaly_scores;
-DROP TABLE IF EXISTS vast."csnow-db|otel".alerts;
-DROP TABLE IF EXISTS vast."csnow-db|otel".alert_investigations;
-DROP TABLE IF EXISTS vast."csnow-db|otel".topology_services;
-DROP TABLE IF EXISTS vast."csnow-db|otel".topology_dependencies;
-DROP TABLE IF EXISTS vast."csnow-db|otel".topology_host_services;
-DROP TABLE IF EXISTS vast."csnow-db|otel".topology_hosts;
-DROP TABLE IF EXISTS vast."csnow-db|otel".topology_database_hosts;
-DROP TABLE IF EXISTS vast."csnow-db|otel".topology_containers;
-DROP TABLE IF EXISTS vast."csnow-db|otel".incident_context;
-DROP TABLE IF EXISTS vast."csnow-db|otel".resource_predictions;
-DROP TABLE IF EXISTS vast."csnow-db|otel".incident_patterns;
-DROP TABLE IF EXISTS vast."csnow-db|otel".simulation_runs;
-DROP TABLE IF EXISTS vast."csnow-db|otel".service_metrics_1m;
-DROP TABLE IF EXISTS vast."csnow-db|otel".db_metrics_1m;
-DROP TABLE IF EXISTS vast."csnow-db|otel".operation_metrics_5m;
-DROP TABLE IF EXISTS vast."csnow-db|otel".job_status;
-DROP TABLE IF EXISTS vast."csnow-db|otel".pinned_charts;
-DROP TABLE IF EXISTS vast."csnow-db|otel".threshold_overrides;
-DROP TABLE IF EXISTS vast."csnow-db|otel".remediation_playbooks;
-DROP TABLE IF EXISTS vast."csnow-db|otel".remediation_log;
-DROP TABLE IF EXISTS vast."csnow-db|otel".entity_resource_baselines;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".logs_otel_analytic;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".metrics_otel_analytic;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".span_events_otel_analytic;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".span_links_otel_analytic;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".traces_otel_analytic;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".service_baselines;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".anomaly_scores;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".alerts;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".alert_investigations;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".topology_services;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".topology_dependencies;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".topology_host_services;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".topology_hosts;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".topology_database_hosts;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".topology_containers;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".incident_context;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".resource_predictions;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".incident_patterns;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".simulation_runs;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".service_metrics_1m;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".db_metrics_1m;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".operation_metrics_5m;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".job_status;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".pinned_charts;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".threshold_overrides;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".remediation_playbooks;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".remediation_log;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".entity_resource_baselines;
 
--- vast."csnow-db|otel".logs_otel_analytic definition
+-- ${CATALOG}."${SCHEMA}".logs_otel_analytic definition
 
-CREATE TABLE vast."csnow-db|otel".logs_otel_analytic (
+CREATE TABLE ${CATALOG}."${SCHEMA}".logs_otel_analytic (
    timestamp timestamp(9),
    service_name varchar,
    severity_number integer,
@@ -43,9 +43,9 @@ CREATE TABLE vast."csnow-db|otel".logs_otel_analytic (
    attributes_json varchar
 );
 
--- vast."csnow-db|otel".metrics_otel_analytic definition
+-- ${CATALOG}."${SCHEMA}".metrics_otel_analytic definition
 
-CREATE TABLE vast."csnow-db|otel".metrics_otel_analytic (
+CREATE TABLE ${CATALOG}."${SCHEMA}".metrics_otel_analytic (
    timestamp timestamp(9),
    service_name varchar,
    metric_name varchar,
@@ -54,9 +54,9 @@ CREATE TABLE vast."csnow-db|otel".metrics_otel_analytic (
    attributes_flat varchar
 );
 
--- vast."csnow-db|otel".span_events_otel_analytic definition
+-- ${CATALOG}."${SCHEMA}".span_events_otel_analytic definition
 
-CREATE TABLE vast."csnow-db|otel".span_events_otel_analytic (
+CREATE TABLE ${CATALOG}."${SCHEMA}".span_events_otel_analytic (
    timestamp timestamp(9),
    trace_id varchar,
    span_id varchar,
@@ -74,9 +74,9 @@ CREATE TABLE vast."csnow-db|otel".span_events_otel_analytic (
    gen_ai_usage_completion_tokens integer
 );
 
--- vast."csnow-db|otel".span_links_otel_analytic definition
+-- ${CATALOG}."${SCHEMA}".span_links_otel_analytic definition
 
-CREATE TABLE vast."csnow-db|otel".span_links_otel_analytic (
+CREATE TABLE ${CATALOG}."${SCHEMA}".span_links_otel_analytic (
    trace_id varchar,
    span_id varchar,
    service_name varchar,
@@ -87,9 +87,9 @@ CREATE TABLE vast."csnow-db|otel".span_links_otel_analytic (
    link_attributes_json varchar
 );
 
--- vast."csnow-db|otel".traces_otel_analytic definition
+-- ${CATALOG}."${SCHEMA}".traces_otel_analytic definition
 
-CREATE TABLE vast."csnow-db|otel".traces_otel_analytic (
+CREATE TABLE ${CATALOG}."${SCHEMA}".traces_otel_analytic (
    trace_id varchar,
    span_id varchar,
    parent_span_id varchar,
@@ -109,7 +109,7 @@ CREATE TABLE vast."csnow-db|otel".traces_otel_analytic (
 -- =============================================================================
 
 -- Service baselines: stores computed statistical baselines per service/metric
-CREATE TABLE vast."csnow-db|otel".service_baselines (
+CREATE TABLE ${CATALOG}."${SCHEMA}".service_baselines (
    computed_at timestamp(9),
    service_name varchar,
    metric_type varchar,           -- 'error_rate', 'latency_p50', 'latency_p95', 'latency_p99', 'throughput'
@@ -125,7 +125,7 @@ CREATE TABLE vast."csnow-db|otel".service_baselines (
 );
 
 -- Anomaly scores: stores ML model predictions and anomaly detection results
-CREATE TABLE vast."csnow-db|otel".anomaly_scores (
+CREATE TABLE ${CATALOG}."${SCHEMA}".anomaly_scores (
    timestamp timestamp(9),
    service_name varchar,
    metric_type varchar,
@@ -143,7 +143,7 @@ CREATE TABLE vast."csnow-db|otel".anomaly_scores (
 -- Alert types include:
 --   Symptom-based: 'error_spike', 'latency_degradation', 'throughput_drop', 'anomaly', 'trend', 'service_down'
 --   Root cause: 'dependency_anomaly', 'exception_surge', 'new_exception_type'
-CREATE TABLE vast."csnow-db|otel".alerts (
+CREATE TABLE ${CATALOG}."${SCHEMA}".alerts (
    alert_id varchar,
    created_at timestamp(9),
    updated_at timestamp(9),
@@ -163,7 +163,7 @@ CREATE TABLE vast."csnow-db|otel".alerts (
 );
 
 -- Alert investigations: LLM-powered root cause analysis
-CREATE TABLE vast."csnow-db|otel".alert_investigations (
+CREATE TABLE ${CATALOG}."${SCHEMA}".alert_investigations (
    investigation_id varchar,
    alert_id varchar,
    investigated_at timestamp(9),
@@ -182,7 +182,7 @@ CREATE TABLE vast."csnow-db|otel".alert_investigations (
 -- =============================================================================
 
 -- Active services registry (materialized from traces)
-CREATE TABLE vast."csnow-db|otel".topology_services (
+CREATE TABLE ${CATALOG}."${SCHEMA}".topology_services (
    service_name varchar,
    service_type varchar,             -- 'application', 'database', 'infrastructure'
    span_count bigint,
@@ -193,7 +193,7 @@ CREATE TABLE vast."csnow-db|otel".topology_services (
 );
 
 -- Service-to-service and service-to-database dependencies
-CREATE TABLE vast."csnow-db|otel".topology_dependencies (
+CREATE TABLE ${CATALOG}."${SCHEMA}".topology_dependencies (
    source_service varchar,
    target_service varchar,
    dependency_type varchar,          -- 'service', 'database'
@@ -205,7 +205,7 @@ CREATE TABLE vast."csnow-db|otel".topology_dependencies (
 );
 
 -- Host-to-service mappings
-CREATE TABLE vast."csnow-db|otel".topology_host_services (
+CREATE TABLE ${CATALOG}."${SCHEMA}".topology_host_services (
    host_name varchar,
    service_name varchar,
    source varchar,                   -- 'traces', 'metrics'
@@ -215,7 +215,7 @@ CREATE TABLE vast."csnow-db|otel".topology_host_services (
 );
 
 -- Host registry with system metrics
-CREATE TABLE vast."csnow-db|otel".topology_hosts (
+CREATE TABLE ${CATALOG}."${SCHEMA}".topology_hosts (
    host_name varchar,
    os_type varchar,
    cpu_pct double,
@@ -226,7 +226,7 @@ CREATE TABLE vast."csnow-db|otel".topology_hosts (
 );
 
 -- Database-to-host mappings (from metric attributes)
-CREATE TABLE vast."csnow-db|otel".topology_database_hosts (
+CREATE TABLE ${CATALOG}."${SCHEMA}".topology_database_hosts (
    db_system varchar,
    host_name varchar,
    last_seen timestamp(9),
@@ -234,7 +234,7 @@ CREATE TABLE vast."csnow-db|otel".topology_database_hosts (
 );
 
 -- Container registry with resource metrics
-CREATE TABLE vast."csnow-db|otel".topology_containers (
+CREATE TABLE ${CATALOG}."${SCHEMA}".topology_containers (
    container_name varchar,
    cpu_pct double,
    memory_pct double,
@@ -248,7 +248,7 @@ CREATE TABLE vast."csnow-db|otel".topology_containers (
 -- =============================================================================
 
 -- Incident context: snapshot of surrounding telemetry when an alert fires
-CREATE TABLE vast."csnow-db|otel".incident_context (
+CREATE TABLE ${CATALOG}."${SCHEMA}".incident_context (
    context_id varchar,
    alert_id varchar,
    captured_at timestamp(9),
@@ -265,7 +265,7 @@ CREATE TABLE vast."csnow-db|otel".incident_context (
 );
 
 -- Resource predictions: linear regression predictions for resource exhaustion
-CREATE TABLE vast."csnow-db|otel".resource_predictions (
+CREATE TABLE ${CATALOG}."${SCHEMA}".resource_predictions (
    prediction_id varchar,
    created_at timestamp(9),
    host_name varchar,
@@ -282,7 +282,7 @@ CREATE TABLE vast."csnow-db|otel".resource_predictions (
 );
 
 -- Incident patterns: aggregated patterns from recurring incidents
-CREATE TABLE vast."csnow-db|otel".incident_patterns (
+CREATE TABLE ${CATALOG}."${SCHEMA}".incident_patterns (
    pattern_id varchar,
    fingerprint varchar,
    service_name varchar,
@@ -297,7 +297,7 @@ CREATE TABLE vast."csnow-db|otel".incident_patterns (
 );
 
 -- Simulation runs: tracks simulation scenarios for correlation with predictions
-CREATE TABLE vast."csnow-db|otel".simulation_runs (
+CREATE TABLE ${CATALOG}."${SCHEMA}".simulation_runs (
    run_id varchar,
    started_at timestamp(9),
    ended_at timestamp(9),
@@ -314,7 +314,7 @@ CREATE TABLE vast."csnow-db|otel".simulation_runs (
 -- =============================================================================
 
 -- Pre-aggregated service metrics (1-minute buckets)
-CREATE TABLE vast."csnow-db|otel".service_metrics_1m (
+CREATE TABLE ${CATALOG}."${SCHEMA}".service_metrics_1m (
    time_bucket   timestamp(9),
    service_name  varchar,
    avg_latency_ms   double,
@@ -326,7 +326,7 @@ CREATE TABLE vast."csnow-db|otel".service_metrics_1m (
 );
 
 -- Pre-aggregated database metrics (1-minute buckets)
-CREATE TABLE vast."csnow-db|otel".db_metrics_1m (
+CREATE TABLE ${CATALOG}."${SCHEMA}".db_metrics_1m (
    time_bucket   timestamp(9),
    db_system     varchar,
    avg_latency_ms   double,
@@ -337,7 +337,7 @@ CREATE TABLE vast."csnow-db|otel".db_metrics_1m (
 );
 
 -- Pre-aggregated operation metrics (5-minute buckets)
-CREATE TABLE vast."csnow-db|otel".operation_metrics_5m (
+CREATE TABLE ${CATALOG}."${SCHEMA}".operation_metrics_5m (
    time_bucket   timestamp(9),
    service_name  varchar,
    span_name     varchar,
@@ -348,7 +348,7 @@ CREATE TABLE vast."csnow-db|otel".operation_metrics_5m (
 );
 
 -- Background job status tracking
-CREATE TABLE vast."csnow-db|otel".job_status (
+CREATE TABLE ${CATALOG}."${SCHEMA}".job_status (
     job_name      varchar,
     last_run_at   timestamp(9),
     cycle_duration_ms bigint,
@@ -361,7 +361,7 @@ CREATE TABLE vast."csnow-db|otel".job_status (
 -- service_name: '*' = global (learned adjustments), otherwise entity name (manual)
 -- override_type: 'manual' (absolute z-score) or 'learned' (additive delta)
 -- created_by: 'system' or 'user'
-CREATE TABLE vast."csnow-db|otel".threshold_overrides (
+CREATE TABLE ${CATALOG}."${SCHEMA}".threshold_overrides (
    service_name    varchar,
    metric_category varchar,
    override_type   varchar,
@@ -372,7 +372,7 @@ CREATE TABLE vast."csnow-db|otel".threshold_overrides (
 );
 
 -- Pinned metric charts per entity
-CREATE TABLE vast."csnow-db|otel".pinned_charts (
+CREATE TABLE ${CATALOG}."${SCHEMA}".pinned_charts (
    pin_id        varchar,
    entity_type   varchar,
    entity_name   varchar,
@@ -386,7 +386,7 @@ CREATE TABLE vast."csnow-db|otel".pinned_charts (
 -- =============================================================================
 
 -- Pre-defined catalog of fix actions mapped to alert types
-CREATE TABLE vast."csnow-db|otel".remediation_playbooks (
+CREATE TABLE ${CATALOG}."${SCHEMA}".remediation_playbooks (
     playbook_id     varchar,
     alert_type      varchar,
     action_name     varchar,
@@ -398,7 +398,7 @@ CREATE TABLE vast."csnow-db|otel".remediation_playbooks (
 );
 
 -- Tracks every execution of a playbook action with outcome
-CREATE TABLE vast."csnow-db|otel".remediation_log (
+CREATE TABLE ${CATALOG}."${SCHEMA}".remediation_log (
     execution_id    varchar,
     playbook_id     varchar,
     alert_id        varchar,
@@ -415,7 +415,7 @@ CREATE TABLE vast."csnow-db|otel".remediation_log (
 );
 
 -- Entity resource baselines: rolling snapshots for z-score anomaly detection
-CREATE TABLE vast."csnow-db|otel".entity_resource_baselines (
+CREATE TABLE ${CATALOG}."${SCHEMA}".entity_resource_baselines (
    entity_type   varchar,
    entity_name   varchar,
    metric_name   varchar,
