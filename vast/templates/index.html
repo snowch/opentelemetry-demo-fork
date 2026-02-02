@@ -14,21 +14,21 @@
             --bg-tertiary: #1a1a24;
             --bg-card: rgba(26, 26, 36, 0.8);
             --border-color: rgba(255, 255, 255, 0.06);
-            --border-glow: rgba(0, 217, 255, 0.2);
+            --border-glow: rgba(255, 255, 255, 0.1);
             --text-primary: #f0f0f5;
             --text-secondary: #a0a0b0;
             --text-muted: #606070;
-            --accent-primary: #00d9ff;
-            --accent-secondary: #7c3aed;
-            --accent-success: #10b981;
+            --accent-primary: #3b82f6;
+            --accent-secondary: #64748b;
+            --accent-success: #22c55e;
             --accent-warning: #f59e0b;
             --accent-error: #ef4444;
-            --gradient-primary: linear-gradient(135deg, #00d9ff 0%, #7c3aed 100%);
+            --gradient-primary: #3b82f6;
             --gradient-bg: linear-gradient(180deg, #0a0a0f 0%, #12121a 100%);
             --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
             --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.4);
             --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.5);
-            --shadow-glow: 0 0 30px rgba(0, 217, 255, 0.15);
+            --shadow-glow: 0 4px 12px rgba(0, 0, 0, 0.3);
         }
 
         * {
@@ -88,10 +88,7 @@
         .logo-text {
             font-size: 18px;
             font-weight: 700;
-            background: var(--gradient-primary);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            color: var(--accent-primary);
         }
 
         .sidebar-section {
@@ -141,7 +138,7 @@
         }
 
         .refresh-btn:hover {
-            background: rgba(0, 217, 255, 0.1);
+            background: rgba(59, 130, 246, 0.1);
         }
 
         .status-card {
@@ -220,12 +217,6 @@
             font-size: 11px;
             font-weight: 600;
             margin-left: 8px;
-            animation: pulse-badge 2s infinite;
-        }
-
-        @keyframes pulse-badge {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.7; }
         }
 
         .alerts-list {
@@ -256,7 +247,7 @@
         }
 
         .alert-info {
-            background: rgba(0, 217, 255, 0.12);
+            background: rgba(59, 130, 246, 0.12);
             border-left: 3px solid var(--accent-primary);
         }
 
@@ -431,7 +422,7 @@
             border-left-color: var(--accent-warning);
         }
         .combined-alerts-list .alert-item.alert-info {
-            background: rgba(0, 217, 255, 0.12);
+            background: rgba(59, 130, 246, 0.12);
             border-left-color: var(--accent-primary);
         }
         .combined-alerts-list .alert-item.alert-forecast {
@@ -450,7 +441,7 @@
         }
         .alert-type-badge.severity-critical { background: rgba(239, 68, 68, 0.2); color: var(--accent-error); }
         .alert-type-badge.severity-warning { background: rgba(245, 158, 11, 0.2); color: var(--accent-warning); }
-        .alert-type-badge.severity-info { background: rgba(0, 217, 255, 0.2); color: var(--accent-primary); }
+        .alert-type-badge.severity-info { background: rgba(59, 130, 246, 0.2); color: var(--accent-primary); }
         .alert-type-badge.badge-forecast { background: rgba(139, 92, 246, 0.2); color: #a78bfa; }
         .alert-type-badge.badge-resolved { background: rgba(34, 197, 94, 0.2); color: var(--accent-success); }
         .alert-type-badge.badge-activity { background: rgba(107, 114, 128, 0.2); color: #9ca3af; }
@@ -688,10 +679,7 @@
         .header h1 {
             font-size: 20px;
             font-weight: 600;
-            background: var(--gradient-primary);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            color: var(--accent-primary);
         }
 
         .header-actions button {
@@ -708,8 +696,8 @@
 
         .header-actions button:hover {
             background: rgba(255, 255, 255, 0.05);
-            border-color: var(--accent-primary);
-            color: var(--accent-primary);
+            border-color: var(--border-color);
+            color: var(--text-primary);
         }
 
         /* Chat Container */
@@ -898,7 +886,7 @@
         .filter-bar input:focus {
             outline: none;
             border-color: var(--accent-primary);
-            box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.1);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
         }
 
         .filter-bar select {
@@ -918,7 +906,7 @@
         .filter-bar select:focus {
             outline: none;
             border-color: var(--accent-primary);
-            box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.1);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
         }
 
         .time-selector {
@@ -952,7 +940,7 @@
         .time-selector select:focus {
             outline: none;
             border-color: var(--accent-primary);
-            box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.1);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
         }
 
         .input-container {
@@ -967,7 +955,7 @@
 
         .input-container:focus-within {
             border-color: var(--accent-primary);
-            box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.1);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
         }
 
         .input-container textarea {
@@ -1133,13 +1121,13 @@
 
         /* Key findings, recommendations styling */
         .message-content li code {
-            background: rgba(0, 217, 255, 0.1);
-            border: 1px solid rgba(0, 217, 255, 0.2);
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.2);
         }
 
         /* Agent questions - stand out from informational content */
         .message-content .agent-question {
-            background: rgba(0, 217, 255, 0.08);
+            background: rgba(59, 130, 246, 0.08);
             border-left: 3px solid var(--accent-primary);
             padding: 10px 14px;
             margin: 12px 0 4px 0;
@@ -1196,10 +1184,7 @@
         .modal-header h2 {
             font-size: 20px;
             font-weight: 600;
-            background: var(--gradient-primary);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            color: var(--accent-primary);
         }
 
         .modal-close {
@@ -1446,7 +1431,7 @@
         .service-selector:focus {
             outline: none;
             border-color: var(--accent-primary);
-            box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.1);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
         }
 
         .service-selector option {
@@ -1465,15 +1450,15 @@
         }
 
         .modal-type-badge.service {
-            background: rgba(0, 217, 255, 0.15);
+            background: rgba(59, 130, 246, 0.15);
             color: var(--accent-primary);
-            border: 1px solid rgba(0, 217, 255, 0.3);
+            border: 1px solid rgba(59, 130, 246, 0.3);
         }
 
         .modal-type-badge.database {
-            background: rgba(124, 58, 237, 0.15);
+            background: rgba(100, 116, 139, 0.15);
             color: var(--accent-secondary);
-            border: 1px solid rgba(124, 58, 237, 0.3);
+            border: 1px solid rgba(100, 116, 139, 0.3);
         }
 
         .modal-type-badge.container {
@@ -1638,7 +1623,7 @@
         }
         .diag-action-btn:hover { background: var(--bg-hover); }
         .diag-action-btn.primary {
-            background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+            background: #3b82f6;
             border-color: transparent;
             color: #fff;
         }
@@ -2176,8 +2161,8 @@
             border-radius: 50%;
         }
 
-        .legend-dot.service { background: #00d9ff; }
-        .legend-dot.database { background: #7c3aed; }
+        .legend-dot.service { background: #3b82f6; }
+        .legend-dot.database { background: #64748b; }
         .legend-dot.external { background: #f59e0b; }
         .legend-dot.error { background: #ef4444; }
 
@@ -2206,13 +2191,13 @@
             transition: all 0.15s;
         }
         .time-preset-btn:hover {
-            border-color: rgba(0,217,255,0.4);
+            border-color: rgba(59,130,246,0.4);
             color: var(--text-primary);
         }
         .time-preset-btn.active {
-            background: rgba(0,217,255,0.15);
-            border-color: rgba(0,217,255,0.5);
-            color: #00d9ff;
+            background: rgba(59,130,246,0.15);
+            border-color: rgba(59,130,246,0.5);
+            color: #3b82f6;
         }
         .time-custom {
             margin-left: auto;
@@ -2233,15 +2218,15 @@
             padding: 4px 12px;
             font-size: 11px;
             font-weight: 500;
-            border: 1px solid rgba(0,217,255,0.4);
+            border: 1px solid rgba(59,130,246,0.4);
             border-radius: 4px;
-            background: rgba(0,217,255,0.1);
-            color: #00d9ff;
+            background: rgba(59,130,246,0.1);
+            color: #3b82f6;
             cursor: pointer;
             transition: all 0.15s;
         }
         .time-apply-btn:hover {
-            background: rgba(0,217,255,0.2);
+            background: rgba(59,130,246,0.2);
         }
         .entity-live-indicator {
             display: none;
@@ -2301,7 +2286,7 @@
         .threshold-value {
             font-size: 22px;
             font-weight: 700;
-            color: #00d9ff;
+            color: #3b82f6;
             margin-bottom: 4px;
         }
         .threshold-card.threshold-sensitive .threshold-value {
@@ -2361,8 +2346,8 @@
             border-radius: 6px;
             overflow: hidden;
             background: linear-gradient(90deg,
-                rgba(0, 217, 255, 0.15) 0%,
-                rgba(0, 217, 255, 0.15) 50%,
+                rgba(59, 130, 246, 0.15) 0%,
+                rgba(59, 130, 246, 0.15) 50%,
                 rgba(245, 158, 11, 0.2) 50%,
                 rgba(245, 158, 11, 0.2) 75%,
                 rgba(239, 68, 68, 0.25) 75%,
@@ -2373,7 +2358,7 @@
         .threshold-gauge-fill {
             height: 100%;
             border-radius: 6px 0 0 6px;
-            background: linear-gradient(90deg, rgba(0, 217, 255, 0.3), rgba(0, 217, 255, 0.12));
+            background: linear-gradient(90deg, rgba(59, 130, 246, 0.3), rgba(59, 130, 246, 0.12));
             animation: gaugeFill 600ms ease-out;
             position: relative;
         }
@@ -2385,15 +2370,15 @@
             top: 0;
             bottom: 0;
             width: 3px;
-            background: #00d9ff;
-            box-shadow: 0 0 8px rgba(0, 217, 255, 0.7), 0 0 16px rgba(0, 217, 255, 0.3);
+            background: #3b82f6;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
             border-radius: 2px;
             z-index: 2;
             transition: left 0.4s ease-out;
         }
         .threshold-gauge-marker.manual {
             background: #f59e0b;
-            box-shadow: 0 0 8px rgba(245, 158, 11, 0.7), 0 0 16px rgba(245, 158, 11, 0.3);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
         }
         .threshold-gauge-labels {
             display: flex;
@@ -2455,7 +2440,7 @@
         .threshold-card-enhanced .card-edit-btn:hover {
             border-color: var(--accent-primary);
             color: var(--accent-primary);
-            background: rgba(0, 217, 255, 0.08);
+            background: rgba(59, 130, 246, 0.08);
         }
         .threshold-card-enhanced .edit-inline {
             display: inline-flex;
@@ -2490,9 +2475,8 @@
             border: 1px solid var(--border-color);
         }
         @keyframes saveFlash {
-            0% { box-shadow: 0 0 0 0 rgba(0, 217, 255, 0.4); }
-            50% { box-shadow: 0 0 12px 4px rgba(0, 217, 255, 0.2); }
-            100% { box-shadow: none; }
+            0% { background-color: rgba(59, 130, 246, 0.12); }
+            100% { background-color: transparent; }
         }
         .threshold-card-enhanced.just-saved {
             animation: saveFlash 600ms ease-out;
@@ -2515,11 +2499,6 @@
         .source-badge.source-learned {
             background: rgba(168, 85, 247, 0.15);
             color: #c084fc;
-            animation: learnedPulse 3s ease-in-out infinite;
-        }
-        @keyframes learnedPulse {
-            0%, 100% { box-shadow: none; }
-            50% { box-shadow: 0 0 8px rgba(168, 85, 247, 0.3); }
         }
         .source-badge.source-manual {
             background: rgba(245, 158, 11, 0.15);
@@ -2546,13 +2525,13 @@
             border-left-color: #f59e0b;
         }
         .detection-cat-card.cat-manual {
-            border-left-color: #00d9ff;
-            box-shadow: 0 0 8px rgba(0, 217, 255, 0.08);
+            border-left-color: #3b82f6;
+            box-shadow: 0 0 8px rgba(59, 130, 246, 0.08);
         }
         .detection-cat-card .cat-effective {
             font-size: 20px;
             font-weight: 700;
-            color: #00d9ff;
+            color: #3b82f6;
         }
         .detection-cat-card.cat-sensitive .cat-effective {
             color: #f59e0b;
@@ -2656,7 +2635,7 @@
         }
 
         .modal-tab.active .tab-badge {
-            background: rgba(0, 217, 255, 0.15);
+            background: rgba(59, 130, 246, 0.15);
             color: var(--accent-primary);
         }
 
@@ -2706,7 +2685,7 @@
         }
 
         .metric-row { cursor: pointer; }
-        .metric-row:hover td { background: rgba(0, 217, 255, 0.06); }
+        .metric-row:hover td { background: rgba(59, 130, 246, 0.06); }
         .metric-expand-icon { display: inline-block; width: 14px; font-size: 10px; color: var(--text-muted); margin-right: 4px; }
         .metric-chart-row td { background: rgba(0, 0, 0, 0.25); padding: 8px 12px !important; }
         .metric-chart-row canvas { max-height: 200px; }
@@ -2788,12 +2767,12 @@
         }
 
         .dep-type-badge.service {
-            background: rgba(0, 217, 255, 0.15);
+            background: rgba(59, 130, 246, 0.15);
             color: var(--accent-primary);
         }
 
         .dep-type-badge.database {
-            background: rgba(124, 58, 237, 0.15);
+            background: rgba(100, 116, 139, 0.15);
             color: var(--accent-secondary);
         }
 
@@ -2853,7 +2832,7 @@
         .arch-component.ingester { border-left: 3px solid #8b5cf6; }
         .arch-component.database { border-left: 3px solid #06b6d4; }
         .arch-component.trino { border-left: 3px solid #ec4899; }
-        .arch-component.ui { border-left: 3px solid #00d9ff; }
+        .arch-component.ui { border-left: 3px solid #3b82f6; }
 
         .arch-icon {
             font-size: 28px;
@@ -2909,7 +2888,7 @@
             border: 1px solid var(--border-color);
         }
 
-        .flow-card.traces { border-left: 3px solid #7c3aed; }
+        .flow-card.traces { border-left: 3px solid #64748b; }
         .flow-card.metrics { border-left: 3px solid #10b981; }
         .flow-card.logs { border-left: 3px solid #f59e0b; }
 
@@ -3190,7 +3169,7 @@
         }
 
         .predictions-list .prediction-item:hover {
-            background: rgba(0, 217, 255, 0.05);
+            background: rgba(59, 130, 246, 0.05);
         }
 
         .prediction-resource {
@@ -3307,9 +3286,9 @@
         .pattern-info {
             margin-top: 8px;
             padding: 8px;
-            background: rgba(124, 58, 237, 0.1);
+            background: rgba(100, 116, 139, 0.1);
             border-radius: 6px;
-            border: 1px solid rgba(124, 58, 237, 0.2);
+            border: 1px solid rgba(100, 116, 139, 0.2);
             font-size: 12px;
         }
 
@@ -3503,7 +3482,7 @@
         }
 
         .remediation-execute-btn:hover {
-            box-shadow: 0 0 8px rgba(0, 217, 255, 0.4);
+            box-shadow: 0 0 8px rgba(59, 130, 246, 0.4);
         }
 
         .remediation-execute-btn:disabled {
@@ -3589,7 +3568,7 @@
         }
 
         .remediation-result.pending {
-            background: rgba(0, 217, 255, 0.1);
+            background: rgba(59, 130, 246, 0.1);
             color: var(--accent-primary);
         }
     </style>
@@ -3853,7 +3832,7 @@
         <div class="modal">
             <div class="modal-header">
                 <div class="modal-title-row">
-                    <span class="modal-type-badge" id="trace-detail-badge" style="background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);">Trace</span>
+                    <span class="modal-type-badge" id="trace-detail-badge" style="background: #64748b;">Trace</span>
                     <h2 id="error-modal-title">Span Details</h2>
                 </div>
                 <div class="modal-refresh-controls">
@@ -3963,44 +3942,44 @@
                 <div class="architecture-diagram">
                     <div class="arch-row">
                         <div class="arch-component apps">
-                            <div class="arch-icon">📱</div>
+                            <div class="arch-icon">UI</div>
                             <div class="arch-label">OTel Demo Apps</div>
                             <div class="arch-desc">Instrumented services generating telemetry</div>
                         </div>
                         <div class="arch-arrow">→</div>
                         <div class="arch-component collector">
-                            <div class="arch-icon">🔄</div>
+                            <div class="arch-icon">COL</div>
                             <div class="arch-label">OTel Collector</div>
                             <div class="arch-desc">Receives, processes, exports telemetry</div>
                         </div>
                         <div class="arch-arrow">→</div>
                         <div class="arch-component kafka">
-                            <div class="arch-icon">📨</div>
+                            <div class="arch-icon">MQ</div>
                             <div class="arch-label">Vast Kafka</div>
                             <div class="arch-desc">Message broker (3 topics)</div>
                         </div>
                     </div>
                     <div class="arch-row">
                         <div class="arch-component ingester">
-                            <div class="arch-icon">⚙️</div>
+                            <div class="arch-icon">ING</div>
                             <div class="arch-label">Ingester</div>
                             <div class="arch-desc">Consumes Kafka, writes to DB</div>
                         </div>
                         <div class="arch-arrow">→</div>
                         <div class="arch-component database">
-                            <div class="arch-icon">🗄️</div>
+                            <div class="arch-icon">DB</div>
                             <div class="arch-label">Vast DB</div>
                             <div class="arch-desc">Stores logs, metrics, traces</div>
                         </div>
                         <div class="arch-arrow">→</div>
                         <div class="arch-component trino">
-                            <div class="arch-icon">🔍</div>
+                            <div class="arch-icon">SQL</div>
                             <div class="arch-label">Trino</div>
                             <div class="arch-desc">SQL query engine</div>
                         </div>
                         <div class="arch-arrow">→</div>
                         <div class="arch-component ui">
-                            <div class="arch-icon">🤖</div>
+                            <div class="arch-icon">AI</div>
                             <div class="arch-label">Agentic UI</div>
                             <div class="arch-desc">AI-powered diagnostics</div>
                         </div>
@@ -4008,24 +3987,24 @@
                 </div>
 
                 <div class="help-section">
-                    <h3>📊 Data Flow</h3>
+                    <h3>Data Flow</h3>
                     <div class="data-flow-cards">
                         <div class="flow-card traces">
-                            <div class="flow-icon">🔗</div>
+                            <div class="flow-icon">T</div>
                             <div class="flow-info">
                                 <div class="flow-name">Traces</div>
                                 <div class="flow-path">otel-traces → spans_otel_analytic</div>
                             </div>
                         </div>
                         <div class="flow-card metrics">
-                            <div class="flow-icon">📈</div>
+                            <div class="flow-icon">M</div>
                             <div class="flow-info">
                                 <div class="flow-name">Metrics</div>
                                 <div class="flow-path">otel-metrics → metrics_otel_analytic</div>
                             </div>
                         </div>
                         <div class="flow-card logs">
-                            <div class="flow-icon">📝</div>
+                            <div class="flow-icon">L</div>
                             <div class="flow-info">
                                 <div class="flow-name">Logs</div>
                                 <div class="flow-path">otel-logs → logs_otel_analytic</div>
@@ -4035,7 +4014,7 @@
                 </div>
 
                 <div class="help-section">
-                    <h3>💡 How It Works</h3>
+                    <h3>How It Works</h3>
                     <ol class="how-it-works">
                         <li><strong>Ask a question</strong> in natural language (e.g., "Why is checkout slow?")</li>
                         <li><strong>AI generates SQL</strong> queries to investigate logs, metrics, and traces</li>
@@ -4046,7 +4025,7 @@
                 </div>
 
                 <div class="help-section">
-                    <h3>🔧 Diagnostic Process</h3>
+                    <h3>Diagnostic Process</h3>
                     <div class="diagnostic-steps">
                         <div class="diag-step">
                             <span class="step-num">1</span>
@@ -4224,7 +4203,7 @@
         const REFRESH_INTERVAL = 60000; // 60 seconds for sidebar (matches background job cycles)
         const MODAL_REFRESH_INTERVAL = 60000; // 60 seconds for drill-down modal
 
-        const chartColors = ['#00d9ff', '#7c3aed', '#10b981', '#f59e0b', '#ef4444', '#ec4899'];
+        const chartColors = ['#3b82f6', '#64748b', '#22c55e', '#f59e0b', '#ef4444', '#ec4899'];
 
         Chart.defaults.color = '#a0a0b0';
         Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.06)';
@@ -4532,7 +4511,7 @@
                     responsive: true,
                     maintainAspectRatio: true,
                     plugins: {
-                        title: { display: true, text: chartData.title, color: '#00d9ff', font: { size: 14, weight: 600 } },
+                        title: { display: true, text: chartData.title, color: '#3b82f6', font: { size: 14, weight: 600 } },
                         legend: { labels: { color: '#a0a0b0', font: { size: 11 } } }
                     },
                     scales: chartData.chart_type !== 'doughnut' ? {
@@ -4549,8 +4528,8 @@
 
             // Node colors by type and status
             const nodeColors = {
-                service: { background: '#00d9ff', border: '#00a3cc', font: '#ffffff' },
-                database: { background: '#7c3aed', border: '#5b21b6', font: '#ffffff' },
+                service: { background: '#3b82f6', border: '#2563eb', font: '#ffffff' },
+                database: { background: '#64748b', border: '#475569', font: '#ffffff' },
                 external: { background: '#f59e0b', border: '#d97706', font: '#ffffff' }
             };
 
@@ -4586,7 +4565,7 @@
                 to: edge.to,
                 label: edge.label || '',
                 arrows: 'to',
-                color: { color: '#606070', highlight: '#00d9ff' },
+                color: { color: '#606070', highlight: '#3b82f6' },
                 font: { color: '#a0a0b0', size: 10, face: 'Inter', strokeWidth: 0 },
                 smooth: { type: 'cubicBezier', roundness: 0.5 }
             })));
@@ -5420,7 +5399,7 @@
             if (!alert) {
                 content.innerHTML = `
                     <div class="alert-no-investigation">
-                        <div class="alert-no-investigation-icon">⚠️</div>
+                        <div class="alert-no-investigation-icon">!</div>
                         <div class="alert-no-investigation-text">Alert not found in cache</div>
                         <button class="alert-action-btn primary" onclick="askAboutAlert('${alertId}')">
                             Investigate via Chat
@@ -5443,7 +5422,7 @@
             if (hasInvestigation) {
                 investigationHtml = `
                     <div class="alert-section">
-                        <div class="alert-section-title">🔍 Root Cause</div>
+                        <div class="alert-section-title">Root Cause</div>
                         <div class="alert-section-content root-cause">
                             ${escapeHtml(alert.root_cause_summary)}
                         </div>
@@ -5451,7 +5430,7 @@
 
                     ${alert.recommended_actions ? `
                     <div class="alert-section">
-                        <div class="alert-section-title">✅ Recommended Actions</div>
+                        <div class="alert-section-title">Recommended Actions</div>
                         <div class="alert-section-content actions">
                             ${escapeHtml(alert.recommended_actions).replace(/\n/g, '<br>')}
                         </div>
@@ -5460,16 +5439,16 @@
 
                     ${alert.supporting_evidence ? `
                     <div class="alert-section">
-                        <div class="alert-section-title">📋 Supporting Evidence</div>
+                        <div class="alert-section-title">Supporting Evidence</div>
                         <div class="alert-section-content evidence">
 ${escapeHtml(alert.supporting_evidence)}</div>
                     </div>
                     ` : ''}
 
                     <div class="alert-investigation-stats">
-                        ${alert.queries_executed ? `<span>📊 ${alert.queries_executed} queries</span>` : ''}
-                        ${alert.tokens_used ? `<span>🔤 ${alert.tokens_used} tokens</span>` : ''}
-                        ${alert.model_used ? `<span>🤖 ${alert.model_used}</span>` : ''}
+                        ${alert.queries_executed ? `<span>${alert.queries_executed} queries</span>` : ''}
+                        ${alert.tokens_used ? `<span>${alert.tokens_used} tokens</span>` : ''}
+                        ${alert.model_used ? `<span>${alert.model_used}</span>` : ''}
                     </div>
                 `;
             } else {
@@ -5488,7 +5467,7 @@ ${escapeHtml(alert.supporting_evidence)}</div>
 
                 investigationHtml = `
                     <div class="alert-no-investigation">
-                        <div class="alert-no-investigation-icon">🔍</div>
+                        <div class="alert-no-investigation-icon">?</div>
                         <div class="alert-no-investigation-text">
                             ${noInvestigationReason}
                         </div>
@@ -6044,7 +6023,7 @@ Can you help me understand this issue further or suggest next steps?`;
                     } else {
                         modalCharts.latency = new Chart(document.getElementById('entity-latency-chart'), {
                             type: 'line', data: { labels, datasets: [
-                                { label: 'Avg Latency (ms)', data: avgData, borderColor: '#00d9ff', tension: 0.4, fill: false, pointRadius: 2 },
+                                { label: 'Avg Latency (ms)', data: avgData, borderColor: '#3b82f6', tension: 0.4, fill: false, pointRadius: 2 },
                                 { label: 'Max Latency (ms)', data: maxData, borderColor: '#ef4444', tension: 0.4, fill: false, pointRadius: 2 }
                             ]}, options: chartOptions()
                         });
@@ -6054,7 +6033,7 @@ Can you help me understand this issue further or suggest next steps?`;
                     } else {
                         modalCharts.throughput = new Chart(document.getElementById('entity-throughput-chart'), {
                             type: 'bar', data: { labels, datasets: [
-                                { label: 'Requests', data: reqData, backgroundColor: 'rgba(0,217,255,0.4)', borderColor: '#00d9ff', borderWidth: 1 }
+                                { label: 'Requests', data: reqData, backgroundColor: 'rgba(59,130,246,0.4)', borderColor: '#3b82f6', borderWidth: 1 }
                             ]}, options: chartOptions()
                         });
                     }
@@ -6112,7 +6091,7 @@ Can you help me understand this issue further or suggest next steps?`;
                     } else {
                         modalCharts.latency = new Chart(document.getElementById('entity-latency-chart'), {
                             type: 'line', data: { labels, datasets: [
-                                { label: 'Avg Latency (ms)', data: avgData, borderColor: '#7c3aed', tension: 0.4, fill: false, pointRadius: 2 },
+                                { label: 'Avg Latency (ms)', data: avgData, borderColor: '#64748b', tension: 0.4, fill: false, pointRadius: 2 },
                                 { label: 'Max Latency (ms)', data: maxData, borderColor: '#ef4444', tension: 0.4, fill: false, pointRadius: 2 }
                             ]}, options: chartOptions()
                         });
@@ -6122,7 +6101,7 @@ Can you help me understand this issue further or suggest next steps?`;
                     } else {
                         modalCharts.volume = new Chart(document.getElementById('entity-volume-chart'), {
                             type: 'bar', data: { labels, datasets: [
-                                { label: 'Queries', data: volData, backgroundColor: 'rgba(124,58,237,0.4)', borderColor: '#7c3aed', borderWidth: 1 }
+                                { label: 'Queries', data: volData, backgroundColor: 'rgba(100,116,139,0.4)', borderColor: '#64748b', borderWidth: 1 }
                             ]}, options: chartOptions()
                         });
                     }
@@ -6175,7 +6154,7 @@ Can you help me understand this issue further or suggest next steps?`;
                     } else {
                         modalCharts.dbSize = new Chart(document.getElementById('entity-size-chart'), {
                             type: 'line', data: { labels: szLabels, datasets: [
-                                { label: 'Size (MB)', data: szData, borderColor: '#00d9ff', backgroundColor: 'rgba(0,217,255,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
+                                { label: 'Size (MB)', data: szData, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
                             ]}, options: chartOptions()
                         });
                     }
@@ -6233,7 +6212,7 @@ Can you help me understand this issue further or suggest next steps?`;
                 } else {
                     modalCharts.hostCpu = new Chart(document.getElementById('host-cpu-history-chart'), {
                         type: 'line', data: { labels, datasets: [
-                            { label: 'CPU %', data: cpuData, borderColor: '#00d9ff', backgroundColor: 'rgba(0,217,255,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
+                            { label: 'CPU %', data: cpuData, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
                         ]}, options: chartOptions()
                     });
                 }
@@ -6243,7 +6222,7 @@ Can you help me understand this issue further or suggest next steps?`;
                 } else {
                     modalCharts.hostMemory = new Chart(document.getElementById('host-memory-history-chart'), {
                         type: 'line', data: { labels, datasets: [
-                            { label: 'Memory %', data: memData, borderColor: '#7c3aed', backgroundColor: 'rgba(124,58,237,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
+                            { label: 'Memory %', data: memData, borderColor: '#64748b', backgroundColor: 'rgba(100,116,139,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
                         ]}, options: chartOptions()
                     });
                 }
@@ -6337,7 +6316,7 @@ Can you help me understand this issue further or suggest next steps?`;
                 } else {
                     modalCharts.containerCpu = new Chart(document.getElementById('container-cpu-history-chart'), {
                         type: 'line', data: { labels, datasets: [
-                            { label: 'CPU %', data: cpuData, borderColor: '#00d9ff', backgroundColor: 'rgba(0,217,255,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
+                            { label: 'CPU %', data: cpuData, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
                         ]}, options: chartOptions()
                     });
                 }
@@ -6347,7 +6326,7 @@ Can you help me understand this issue further or suggest next steps?`;
                 } else {
                     modalCharts.containerMemory = new Chart(document.getElementById('container-memory-history-chart'), {
                         type: 'line', data: { labels, datasets: [
-                            { label: 'Memory %', data: memData, borderColor: '#7c3aed', backgroundColor: 'rgba(124,58,237,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
+                            { label: 'Memory %', data: memData, borderColor: '#64748b', backgroundColor: 'rgba(100,116,139,0.1)', tension: 0.4, fill: true, pointRadius: 2 }
                         ]}, options: chartOptions()
                     });
                 }
@@ -7571,7 +7550,7 @@ Can you help me understand this issue further or suggest next steps?`;
             // Reset badge
             const badge = document.getElementById('trace-detail-badge');
             badge.textContent = 'Trace';
-            badge.style.background = 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)';
+            badge.style.background = '#64748b';
 
             try {
                 const response = await fetch(`/api/error/${encodeURIComponent(traceId)}/${encodeURIComponent(spanId)}`);
@@ -7588,7 +7567,7 @@ Can you help me understand this issue further or suggest next steps?`;
                         badge.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
                     } else {
                         badge.textContent = 'Trace';
-                        badge.style.background = 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)';
+                        badge.style.background = '#64748b';
                     }
                     const errorServiceEl = document.getElementById('error-service');
                     if (info.service_name) {
@@ -7966,7 +7945,7 @@ Can you help me understand this issue further or suggest next steps?`;
             }
 
             const nodeColors = {
-                application: { background: '#7c3aed', border: '#6d28d9', highlight: { background: '#8b5cf6', border: '#7c3aed' } },
+                application: { background: '#3b82f6', border: '#2563eb', highlight: { background: '#60a5fa', border: '#3b82f6' } },
                 database: { background: '#f59e0b', border: '#d97706', highlight: { background: '#fbbf24', border: '#f59e0b' } },
                 infrastructure: { background: '#06b6d4', border: '#0891b2', highlight: { background: '#22d3ee', border: '#06b6d4' } },
                 host: { background: '#06b6d4', border: '#0891b2', highlight: { background: '#22d3ee', border: '#06b6d4' } }
@@ -8016,7 +7995,7 @@ Can you help me understand this issue further or suggest next steps?`;
                     to: e.to,
                     label: e.label || '',
                     arrows: e.label === 'hosts' ? '' : 'to',
-                    color: { color: edgeColor, highlight: '#00d9ff' },
+                    color: { color: edgeColor, highlight: '#3b82f6' },
                     font: { color: '#a0a0b0', size: 10, face: 'Inter', strokeWidth: 0 },
                     width: Math.max(1, Math.min(4, Math.log10((e.call_count || 1) + 1))),
                     smooth: { type: 'curvedCW', roundness: 0.15 }
