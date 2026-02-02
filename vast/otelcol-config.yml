@@ -192,7 +192,7 @@ exporters:
     sending_queue:
       batch:
   otlphttp/prometheus:
-    endpoint: "http://prometheus:9090/api/v1/otlp"
+    endpoint: "http://prometheus:${env:PROMETHEUS_PORT}/api/v1/otlp"
     tls:
       insecure: true
     sending_queue:
