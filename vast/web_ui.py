@@ -3931,6 +3931,44 @@ def get_jobs_status():
     return response
 
 
+@app.route('/api/jobs/status/<job_name>', methods=['GET'])
+def get_job_status(job_name):
+    """Get status of a single background job.  Uses the same cache as /api/jobs/status."""
+    # Reuse the all-jobs cache so we don't fire an extra Trino query
+    cache_key = "/api/jobs/status"
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        all_jobs = cached.get_json().get('jobs', [])
+    else:
+        executor = get_query_executor()
+        query = "SELECT job_name, last_run_at, cycle_duration_ms, status, details_json, updated_at FROM job_status ORDER BY job_name"
+        result = executor.execute_query(query)
+        jobs = []
+        if result['success']:
+            for row in result['rows']:
+                job = dict(row)
+                if job.get('details_json'):
+                    try:
+                        job['details'] = json.loads(job['details_json'])
+                    except Exception:
+                        job['details'] = {}
+                    del job['details_json']
+                else:
+                    job['details'] = {}
+                    if 'details_json' in job:
+                        del job['details_json']
+                jobs.append(job)
+        all_response = jsonify({'jobs': jobs})
+        _cache.set(cache_key, all_response, CACHE_TTL_JOBS)
+        all_jobs = jobs
+
+    # Find the requested job
+    for job in all_jobs:
+        if job.get('job_name') == job_name:
+            return jsonify({'job': job})
+    return jsonify({'error': f'Job {job_name} not found'}), 404
+
+
 @app.route('/api/incidents/context/<alert_id>', methods=['GET'])
 def get_incident_context(alert_id):
     """Get incident context snapshot for an alert.  Cached for CACHE_TTL_INCIDENTS seconds."""

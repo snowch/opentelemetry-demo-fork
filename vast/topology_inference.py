@@ -158,6 +158,9 @@ class TopologyInferenceService:
         self.executor = TrinoExecutor(config)
         self.running = True
 
+        # Track entity counts per table for job status details
+        self._last_table_rows = {}
+
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
@@ -231,6 +234,7 @@ class TopologyInferenceService:
         if self.executor.execute_write(sql):
             rows = self.executor.execute("SELECT COUNT(*) as cnt FROM topology_services")
             count = rows[0]['cnt'] if rows else 0
+            self._last_table_rows['topology_services'] = count
             print(f"[Topology]   -> {count} services materialized")
         else:
             print("[Topology]   -> FAILED to materialize services")
@@ -291,6 +295,7 @@ class TopologyInferenceService:
 
         rows = self.executor.execute("SELECT COUNT(*) as cnt FROM topology_dependencies")
         count = rows[0]['cnt'] if rows else 0
+        self._last_table_rows['topology_dependencies'] = count
         print(f"[Topology]   -> {count} dependencies materialized")
 
     def _materialize_host_services(self):
@@ -327,6 +332,7 @@ class TopologyInferenceService:
 
         rows = self.executor.execute("SELECT COUNT(*) as cnt FROM topology_host_services")
         count = rows[0]['cnt'] if rows else 0
+        self._last_table_rows['topology_host_services'] = count
         print(f"[Topology]   -> {count} host-service mappings materialized")
 
     def _materialize_hosts(self):
@@ -366,6 +372,7 @@ class TopologyInferenceService:
         if self.executor.execute_write(sql):
             rows = self.executor.execute("SELECT COUNT(*) as cnt FROM topology_hosts")
             count = rows[0]['cnt'] if rows else 0
+            self._last_table_rows['topology_hosts'] = count
             print(f"[Topology]   -> {count} hosts materialized")
             self._resolve_host_display_names()
         else:
@@ -426,6 +433,7 @@ class TopologyInferenceService:
         if self.executor.execute_write(sql):
             rows = self.executor.execute("SELECT COUNT(*) as cnt FROM topology_database_hosts")
             count = rows[0]['cnt'] if rows else 0
+            self._last_table_rows['topology_database_hosts'] = count
             print(f"[Topology]   -> {count} database-host mappings materialized")
         else:
             print("[Topology]   -> FAILED to materialize database-hosts")
@@ -456,6 +464,7 @@ class TopologyInferenceService:
         if self.executor.execute_write(sql):
             rows = self.executor.execute("SELECT COUNT(*) as cnt FROM topology_containers")
             count = rows[0]['cnt'] if rows else 0
+            self._last_table_rows['topology_containers'] = count
             print(f"[Topology]   -> {count} containers materialized")
         else:
             print("[Topology]   -> FAILED to materialize containers")
@@ -494,7 +503,13 @@ class TopologyInferenceService:
                 elapsed = time.time() - loop_start
                 print(f"[Service] Cycle complete in {elapsed:.1f}s\n")
 
-                self._write_job_status(elapsed, details={"interval_seconds": self.config.inference_interval})
+                details = {
+                    "interval_seconds": self.config.inference_interval,
+                    "cycle_duration_s": round(elapsed, 1),
+                    "steps": ["services", "dependencies", "host_services", "hosts", "database_hosts", "containers"],
+                    "tables": dict(self._last_table_rows),
+                }
+                self._write_job_status(elapsed, details=details)
 
                 sleep_time = max(0, self.config.inference_interval - elapsed)
                 if sleep_time > 0:

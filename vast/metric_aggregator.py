@@ -152,6 +152,9 @@ class MetricAggregatorService:
         self.executor = TrinoExecutor(config)
         self.running = True
 
+        # Track row counts per table for job status details
+        self._last_table_rows = {}
+
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
@@ -242,6 +245,7 @@ class MetricAggregatorService:
                 "SELECT COUNT(*) as cnt FROM service_metrics_1m"
             )
             count = rows[0]['cnt'] if rows else 0
+            self._last_table_rows['service_metrics_1m'] = count
             print(f"[Aggregator]   -> {count} total service-minute rows")
         else:
             print("[Aggregator]   -> FAILED to aggregate service metrics")
@@ -287,6 +291,7 @@ class MetricAggregatorService:
                 "SELECT COUNT(*) as cnt FROM db_metrics_1m"
             )
             count = rows[0]['cnt'] if rows else 0
+            self._last_table_rows['db_metrics_1m'] = count
             print(f"[Aggregator]   -> {count} total db-minute rows")
         else:
             print("[Aggregator]   -> FAILED to aggregate database metrics")
@@ -336,6 +341,7 @@ class MetricAggregatorService:
                 "SELECT COUNT(*) as cnt FROM operation_metrics_5m"
             )
             count = rows[0]['cnt'] if rows else 0
+            self._last_table_rows['operation_metrics_5m'] = count
             print(f"[Aggregator]   -> {count} total operation-5m rows")
         else:
             print("[Aggregator]   -> FAILED to aggregate operation metrics")
@@ -384,7 +390,15 @@ class MetricAggregatorService:
                 elapsed = time.time() - loop_start
                 print(f"[Service] Cycle complete in {elapsed:.1f}s\n")
 
-                self._write_job_status(elapsed, details={"interval_seconds": self.config.aggregation_interval})
+                details = {
+                    "interval_seconds": self.config.aggregation_interval,
+                    "retention_hours": self.config.retention_hours,
+                    "overlap_minutes": self.config.overlap_minutes,
+                    "cycle_duration_s": round(elapsed, 1),
+                    "steps": ["service_metrics_1m", "db_metrics_1m", "operation_metrics_5m", "purge"],
+                    "tables": dict(self._last_table_rows),
+                }
+                self._write_job_status(elapsed, details=details)
 
                 sleep_time = max(0, self.config.aggregation_interval - elapsed)
                 if sleep_time > 0:

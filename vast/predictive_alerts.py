@@ -1679,6 +1679,7 @@ class AlertManager:
         self.config = config
         self.context_capture = context_capture
         self.active_alerts: Dict[str, Dict] = {}  # key -> alert
+        self.total_created = 0  # lifetime counter of alerts created
         self._load_active_alerts()
 
     def _load_active_alerts(self):
@@ -1729,6 +1730,7 @@ class AlertManager:
                     if alert_info:
                         new_alerts.append(alert_info)
                     created += 1
+                    self.total_created += 1
 
         # Auto-resolve alerts that are no longer anomalous
         resolved = self._auto_resolve(seen_keys)
@@ -3143,12 +3145,18 @@ class PredictiveAlertsService:
                 elapsed = time.time() - loop_start
 
                 # Build details for job status
-                details = {"interval_seconds": self.config.detection_interval}
+                details = {
+                    "interval_seconds": self.config.detection_interval,
+                    "cycle_duration_s": round(elapsed, 1),
+                    "active_alerts": len(self.alert_manager.active_alerts),
+                    "total_alerts_created": self.alert_manager.total_created,
+                    "services_monitored": len(self.baseline_computer.baselines),
+                    "anomalies_this_cycle": len(anomalies) if anomalies else 0,
+                }
                 if self.last_baseline_update > 0:
                     details["last_baseline_minutes_ago"] = round((time.time() - self.last_baseline_update) / 60, 1)
                 if self.last_trend_prediction > 0:
                     details["last_trend_minutes_ago"] = round((time.time() - self.last_trend_prediction) / 60, 1)
-                details["active_alerts"] = len(self.alert_manager.active_alerts)
                 self._write_job_status(elapsed, details=details)
 
                 sleep_time = max(0, self.config.detection_interval - elapsed)

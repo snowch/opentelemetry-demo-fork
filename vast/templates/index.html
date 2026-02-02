@@ -624,6 +624,108 @@
             color: var(--text-muted);
             margin-top: 1px;
         }
+        .job-item { cursor: pointer; transition: background 0.15s; }
+        .job-item:hover { background: var(--bg-secondary); }
+
+        /* Job detail modal */
+        .job-modal { max-width: 700px; }
+        .job-stat-cards {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 18px;
+        }
+        .job-stat-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 14px;
+            text-align: center;
+        }
+        .job-stat-value {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .job-stat-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+        .job-pipeline {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 18px;
+        }
+        .job-pipeline-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 500;
+            background: rgba(59,130,246,0.12);
+            color: var(--accent-info);
+            border: 1px solid rgba(59,130,246,0.25);
+        }
+        .job-pipeline-chip::before {
+            content: '';
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: var(--accent-info);
+        }
+        .job-table-cards {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-bottom: 18px;
+        }
+        .job-table-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .job-table-name {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .job-table-count {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--accent-info);
+        }
+        .job-config-table {
+            width: 100%;
+            font-size: 12px;
+            border-collapse: collapse;
+        }
+        .job-config-table td {
+            padding: 6px 10px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .job-config-table td:first-child {
+            color: var(--text-muted);
+            font-weight: 500;
+            width: 45%;
+        }
+        .job-config-table td:last-child {
+            color: var(--text-primary);
+        }
+        .job-section-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
 
         .error-item {
             padding: 12px;
@@ -4081,6 +4183,24 @@
     </div>
 
     <!-- Alert Detail Modal -->
+    <div class="modal-overlay" id="job-modal" onclick="if(event.target===this)closeJobModal()">
+        <div class="modal job-modal">
+            <div class="modal-header">
+                <div class="modal-title-row">
+                    <span class="modal-type-badge" id="job-modal-badge" style="background:#3b82f6;">Job</span>
+                    <h2 id="job-modal-title">Job Details</h2>
+                </div>
+                <div class="modal-refresh-controls">
+                    <button class="modal-refresh-btn" onclick="refreshJobModal()" title="Refresh">&#x21bb;</button>
+                    <button class="modal-close" onclick="closeJobModal()">&times;</button>
+                </div>
+            </div>
+            <div class="modal-body" id="job-modal-body">
+                <div class="empty-state">Loading...</div>
+            </div>
+        </div>
+    </div>
+
     <div class="modal-overlay" id="alert-modal">
         <div class="modal alert-modal">
             <div class="modal-header">
@@ -5823,7 +5943,7 @@ Can you help me understand this issue further or suggest next steps?`;
                         }
 
                         return `
-                            <div class="job-item ${staleClass}">
+                            <div class="job-item ${staleClass}" onclick="openJobModal('${escapeHtml(job.job_name)}')">
                                 <div class="job-indicator"></div>
                                 <div class="job-info">
                                     <div class="job-name">${escapeHtml(name)}</div>
@@ -5839,6 +5959,169 @@ Can you help me understand this issue further or suggest next steps?`;
                 console.error('Failed to refresh jobs:', error);
                 document.getElementById('jobs-list').innerHTML = '<div class="empty-state">Jobs unavailable</div>';
             }
+        }
+
+        // =================================================================
+        // Job Detail Modal
+        // =================================================================
+
+        let _jobModalName = null;
+        let _jobModalTimer = null;
+
+        const JOB_DISPLAY_NAMES = {
+            metric_aggregator: 'Metric Aggregator',
+            topology_inference: 'Topology Inference',
+            predictive_alerts: 'Predictive Alerts',
+        };
+
+        async function openJobModal(name) {
+            _jobModalName = name;
+            const modal = document.getElementById('job-modal');
+            document.getElementById('job-modal-title').textContent = JOB_DISPLAY_NAMES[name] || name;
+            document.getElementById('job-modal-body').innerHTML = '<div class="empty-state">Loading...</div>';
+            modal.classList.add('active');
+            await _loadJobModalContent();
+            // Auto-refresh every 30s
+            _jobModalTimer = setInterval(_loadJobModalContent, 30000);
+        }
+
+        function closeJobModal() {
+            document.getElementById('job-modal').classList.remove('active');
+            _jobModalName = null;
+            if (_jobModalTimer) { clearInterval(_jobModalTimer); _jobModalTimer = null; }
+        }
+
+        function refreshJobModal() {
+            if (_jobModalName) _loadJobModalContent();
+        }
+
+        async function _loadJobModalContent() {
+            if (!_jobModalName) return;
+            try {
+                const resp = await fetch(`/api/jobs/status/${_jobModalName}`);
+                const data = await resp.json();
+                if (data.error) {
+                    document.getElementById('job-modal-body').innerHTML = `<div class="empty-state">${escapeHtml(data.error)}</div>`;
+                    return;
+                }
+                const job = data.job;
+                const d = job.details || {};
+                const body = document.getElementById('job-modal-body');
+
+                // Status badge color
+                const badge = document.getElementById('job-modal-badge');
+                if (job.status === 'error') { badge.style.background = '#ef4444'; badge.textContent = 'Error'; }
+                else { badge.style.background = '#3b82f6'; badge.textContent = 'Running'; }
+
+                // Duration
+                const durationS = job.cycle_duration_ms ? (job.cycle_duration_ms / 1000).toFixed(1) : (d.cycle_duration_s || '?');
+
+                // Dispatch to renderer
+                if (_jobModalName === 'metric_aggregator') body.innerHTML = _renderMetricAggregator(job, d, durationS);
+                else if (_jobModalName === 'topology_inference') body.innerHTML = _renderTopologyInference(job, d, durationS);
+                else if (_jobModalName === 'predictive_alerts') body.innerHTML = _renderPredictiveAlerts(job, d, durationS);
+                else body.innerHTML = _renderGenericJob(job, d, durationS);
+            } catch (err) {
+                console.error('Job modal load error:', err);
+                document.getElementById('job-modal-body').innerHTML = '<div class="empty-state">Failed to load job details</div>';
+            }
+        }
+
+        function _renderStatCards(cards) {
+            return `<div class="job-stat-cards">${cards.map(c =>
+                `<div class="job-stat-card"><div class="job-stat-value">${c.value}</div><div class="job-stat-label">${c.label}</div></div>`
+            ).join('')}</div>`;
+        }
+
+        function _renderPipeline(steps) {
+            return `<div class="job-section-title">Pipeline Steps</div><div class="job-pipeline">${
+                steps.map(s => `<div class="job-pipeline-chip">${escapeHtml(s)}</div>`).join('')
+            }</div>`;
+        }
+
+        function _renderTableCards(tables) {
+            if (!tables || !Object.keys(tables).length) return '';
+            return `<div class="job-section-title">Materialized Tables</div><div class="job-table-cards">${
+                Object.entries(tables).map(([name, count]) =>
+                    `<div class="job-table-card"><div class="job-table-name">${escapeHtml(name)}</div><div class="job-table-count">${(count || 0).toLocaleString()}</div></div>`
+                ).join('')
+            }</div>`;
+        }
+
+        function _renderConfigTable(pairs) {
+            return `<div class="job-section-title">Configuration</div><table class="job-config-table">${
+                pairs.map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(String(v))}</td></tr>`).join('')
+            }</table>`;
+        }
+
+        function _renderMetricAggregator(job, d, durationS) {
+            const totalRows = d.tables ? Object.values(d.tables).reduce((a, b) => a + (b || 0), 0) : 0;
+            let html = _renderStatCards([
+                { value: job.status === 'error' ? 'Error' : 'OK', label: 'Status' },
+                { value: durationS + 's', label: 'Cycle Duration' },
+                { value: totalRows.toLocaleString(), label: 'Total Rows' },
+            ]);
+            if (d.steps) html += _renderPipeline(d.steps);
+            if (d.tables) html += _renderTableCards(d.tables);
+            html += _renderConfigTable([
+                ['Interval', (d.interval_seconds || '?') + 's'],
+                ['Retention', (d.retention_hours || '?') + 'h'],
+                ['Overlap', (d.overlap_minutes || '?') + 'm'],
+            ]);
+            return html;
+        }
+
+        function _renderTopologyInference(job, d, durationS) {
+            const totalEntities = d.tables ? Object.values(d.tables).reduce((a, b) => a + (b || 0), 0) : 0;
+            let html = _renderStatCards([
+                { value: job.status === 'error' ? 'Error' : 'OK', label: 'Status' },
+                { value: durationS + 's', label: 'Cycle Duration' },
+                { value: totalEntities.toLocaleString(), label: 'Total Entities' },
+            ]);
+            if (d.steps) html += _renderPipeline(d.steps);
+            if (d.tables) html += _renderTableCards(d.tables);
+            html += _renderConfigTable([
+                ['Interval', (d.interval_seconds || '?') + 's'],
+            ]);
+            return html;
+        }
+
+        function _renderPredictiveAlerts(job, d, durationS) {
+            let html = _renderStatCards([
+                { value: d.active_alerts !== undefined ? d.active_alerts : '?', label: 'Active Alerts' },
+                { value: d.services_monitored !== undefined ? d.services_monitored : '?', label: 'Services Monitored' },
+                { value: d.anomalies_this_cycle !== undefined ? d.anomalies_this_cycle : '?', label: 'Anomalies This Cycle' },
+            ]);
+            // Secondary stats
+            const secondaryCards = [
+                { value: d.total_alerts_created !== undefined ? d.total_alerts_created : '?', label: 'Total Alerts Created' },
+                { value: durationS + 's', label: 'Cycle Duration' },
+                { value: job.status === 'error' ? 'Error' : 'OK', label: 'Status' },
+            ];
+            html += _renderStatCards(secondaryCards);
+            // Freshness info
+            const configPairs = [
+                ['Interval', (d.interval_seconds || '?') + 's'],
+            ];
+            if (d.last_baseline_minutes_ago !== undefined) configPairs.push(['Last Baseline', d.last_baseline_minutes_ago + 'm ago']);
+            if (d.last_trend_minutes_ago !== undefined) configPairs.push(['Last Trend', d.last_trend_minutes_ago + 'm ago']);
+            html += _renderConfigTable(configPairs);
+            return html;
+        }
+
+        function _renderGenericJob(job, d, durationS) {
+            let html = _renderStatCards([
+                { value: job.status === 'error' ? 'Error' : 'OK', label: 'Status' },
+                { value: durationS + 's', label: 'Cycle Duration' },
+            ]);
+            if (Object.keys(d).length) {
+                html += `<div class="job-section-title">Details</div><table class="job-config-table">${
+                    Object.entries(d).map(([k, v]) =>
+                        `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(typeof v === 'object' ? JSON.stringify(v) : String(v))}</td></tr>`
+                    ).join('')
+                }</table>`;
+            }
+            return html;
         }
 
         // =================================================================
@@ -9094,6 +9377,7 @@ Can you help me understand this issue further or suggest next steps?`;
                 closeErrorModal();
                 closeHelpModal();
                 closeAlertModal();
+                closeJobModal();
             }
         });
     </script>
