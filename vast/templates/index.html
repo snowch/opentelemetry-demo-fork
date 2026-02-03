@@ -4423,6 +4423,8 @@
                     <div class="diag-actions" id="diag-actions"></div>
                 </div>
 
+                <div class="alert-suggestion-chips" id="error-suggestion-chips" style="display:none;"></div>
+
                 <div class="error-detail-card" id="exception-card" style="display: none;">
                     <h4>Exception Details</h4>
                     <div class="error-detail-row">
@@ -6595,6 +6597,99 @@ Can you help me understand this issue further or suggest next steps?`;
 
         function sendAlertSuggestion(prompt) {
             closeAlertModal();
+            setPrompt(prompt);
+            sendMessage();
+        }
+
+        function generateErrorSuggestions(data) {
+            const suggestions = [];
+            const info = data.error_info || {};
+            const exc = data.exception || {};
+            const se = data.similar_errors || {};
+            const attrs = data.attributes || {};
+            const svc = info.service_name;
+            const op = info.span_name;
+            const excType = exc.exception_type ? exc.exception_type.split('.').pop() : '';
+            const excMsg = exc.exception_message || '';
+            const ts = info.start_time ? new Date(info.start_time).toLocaleString() : '';
+
+            // Build preamble with error context
+            let preamble = `This is an error on ${svc || 'unknown service'}`;
+            if (op) preamble += ` (operation: ${op})`;
+            if (ts) preamble += ` at ${ts}`;
+            preamble += '.';
+            if (excType) preamble += ` Exception: ${excType}`;
+            if (excMsg) preamble += ` — "${excMsg.substring(0, 150)}"`;
+            if (excType || excMsg) preamble += '.';
+
+            // Error rate trend
+            if (svc) {
+                suggestions.push({
+                    label: `Chart ${svc} error rate`,
+                    prompt: `${preamble} Chart the error rate for ${svc} over the last 2 hours. Is this error part of a spike or a steady background rate? Highlight when the rate changed.`
+                });
+            }
+
+            // Correlated errors across services
+            if (ts) {
+                suggestions.push({
+                    label: 'Find correlated errors',
+                    prompt: `${preamble} Find errors across all services around ${ts} (±10 minutes). Were other services also failing? Show a breakdown by service and error type to identify if this is part of a cascade.`
+                });
+            }
+
+            // Infrastructure metrics
+            if (svc) {
+                suggestions.push({
+                    label: 'Check infrastructure metrics',
+                    prompt: `${preamble} Check infrastructure metrics for ${svc} around ${ts || 'the time of the error'} — CPU, memory, and any resource pressure. Could resource exhaustion have caused this error?`
+                });
+            }
+
+            // Dependency health (context-aware based on attributes)
+            const dep = attrs['db.system'] || attrs['rpc.service'] || attrs['messaging.system'] || attrs['rpc.system'];
+            if (dep) {
+                suggestions.push({
+                    label: `Check ${dep} health`,
+                    prompt: `${preamble} This span involves dependency "${dep}". Check the health and error rate of ${dep} around ${ts || 'the error time'}. Is the dependency the root cause?`
+                });
+            } else if (svc) {
+                suggestions.push({
+                    label: 'Check dependency health',
+                    prompt: `${preamble} Check the health of ${svc}'s dependencies around ${ts || 'the error time'}. Are any downstream services or databases showing errors or latency spikes?`
+                });
+            }
+
+            // Stack trace analysis (only if there's a stack trace)
+            if (exc.exception_stacktrace) {
+                suggestions.push({
+                    label: 'Analyze stack trace',
+                    prompt: `${preamble} Stack trace:\n${exc.exception_stacktrace.substring(0, 500)}\n\nAnalyze this stack trace. What component is failing and why? Cross-reference with traces and metrics around the same time to identify the root cause.`
+                });
+            }
+
+            // Pattern analysis (if recurring)
+            const c24h = se.count_24h || 0;
+            if (c24h > 1) {
+                suggestions.push({
+                    label: 'Analyze error pattern',
+                    prompt: `${preamble} This error type (${excType || 'unknown'}) has occurred ${c24h} times in 24h on ${svc}. Is it getting worse or improving? Show the trend over time and identify any patterns (time-of-day, correlated deployments, etc).`
+                });
+            }
+
+            // Service topology
+            if (svc) {
+                suggestions.push({
+                    label: `Show ${svc} topology`,
+                    prompt: `${preamble} Show the service topology for ${svc} with its upstream and downstream dependencies. Highlight any dependencies that are also experiencing errors.`
+                });
+            }
+
+            return suggestions.slice(0, 5);
+        }
+
+        function sendErrorSuggestion(prompt) {
+            closeErrorModal();
             setPrompt(prompt);
             sendMessage();
         }
@@ -9110,6 +9205,20 @@ Can you help me understand this issue further or suggest next steps?`;
                     diagCard.style.display = 'block';
                 } else {
                     diagCard.style.display = 'none';
+                }
+
+                // Suggested investigation chips
+                const chipsContainer = document.getElementById('error-suggestion-chips');
+                const chipSuggestions = generateErrorSuggestions(data);
+                if (chipSuggestions.length > 0) {
+                    window._errorSuggestionPrompts = chipSuggestions.map(s => s.prompt);
+                    chipsContainer.innerHTML = '<div class="chip-label">Suggested Investigations</div>' +
+                        chipSuggestions.map((s, i) =>
+                            `<button class="alert-suggestion-chip" onclick="sendErrorSuggestion(window._errorSuggestionPrompts[${i}])" title="${escapeHtml(s.prompt)}">${escapeHtml(s.label)}</button>`
+                        ).join('');
+                    chipsContainer.style.display = 'flex';
+                } else {
+                    chipsContainer.style.display = 'none';
                 }
 
                 // Full trace
