@@ -2855,7 +2855,7 @@ def entity_metric_history(entity_type, name):
 
     attr_values = [row['attributes_flat'] for row in top_result['rows']]
     # Build IN clause — use empty string for NULL/empty
-    in_list = ', '.join(f"'{v}'" for v in attr_values)
+    in_list = ', '.join(f"'{v.replace(chr(39), chr(39)+chr(39))}'" for v in attr_values)
 
     query = f"""
     SELECT date_trunc('minute', timestamp) AS bucket,
