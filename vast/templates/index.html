@@ -7913,6 +7913,9 @@ Can you help me understand this issue further or suggest next steps?`;
                 toggleEl.title = toggleEl.classList.contains('active')
                     ? 'Alerts enabled – click to suppress'
                     : 'Alerts suppressed – click to enable';
+                // Refresh sidebar alerts and service status to reflect the change
+                refreshAlerts();
+                refreshStatus();
             } catch (err) {
                 console.error('Failed to toggle exception alert suppression:', err);
             }

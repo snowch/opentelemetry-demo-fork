@@ -129,6 +129,9 @@ class Config:
     auto_resolve_minutes: int = field(
         default_factory=lambda: int(os.getenv("AUTO_RESOLVE_MINUTES", "30"))
     )
+    service_down_minutes: int = field(
+        default_factory=lambda: int(os.getenv("SERVICE_DOWN_MINUTES", "5"))
+    )
 
     # Root cause detection settings (flexible/learnable)
     root_cause_enabled: bool = field(
@@ -1323,62 +1326,102 @@ class AnomalyDetector:
     def _detect_service_down(self, service: str) -> Optional[Dict]:
         """Detect if a service has stopped sending data.
 
-        Includes a data-age guard: if the oldest trace in the DB is less than
-        1 hour old (e.g. after a database reset), we don't have enough history
-        to reliably claim a service is down, so we skip the check.
+        Uses the throughput baseline to detect silence quickly:
+        - If there's a throughput baseline and the service sent zero spans in
+          the configured window (SERVICE_DOWN_MINUTES, default 5), fire immediately.
+        - If throughput is very low (> zscore_threshold σ below mean), treat as
+          critical availability issue.
+        - Falls back to a simple silence check if no baseline exists yet.
+
+        Includes a data-age guard: if the oldest trace is too recent we don't
+        have enough history to judge, so we skip.
         """
-        # Guard: ensure we have at least 1 hour of data before firing this alert.
-        # After a DB reset the oldest row will be very recent, making "no data in
-        # the last hour" meaningless — every service would trigger.
-        age_sql = """
-            SELECT MIN(start_time) as oldest
-            FROM traces_otel_analytic
-        """
+        window = self.config.service_down_minutes  # default 5
+
+        # Guard: ensure we have at least <window> minutes of data.
+        age_sql = "SELECT MIN(start_time) as oldest FROM traces_otel_analytic"
         age_results = self.executor.execute(age_sql)
         if age_results and age_results[0]["oldest"] is not None:
             oldest = age_results[0]["oldest"]
             try:
                 from datetime import datetime, timezone, timedelta
                 now_utc = datetime.now(timezone.utc)
-                one_hour_ago = now_utc - timedelta(hours=1)
+                cutoff = now_utc - timedelta(minutes=window)
 
                 if isinstance(oldest, datetime):
-                    # Normalize to UTC-aware for comparison
                     if oldest.tzinfo is None:
                         oldest = oldest.replace(tzinfo=timezone.utc)
-                    if oldest > one_hour_ago:
+                    if oldest > cutoff:
                         return None  # Not enough history yet
                 elif isinstance(oldest, str):
                     oldest_dt = datetime.fromisoformat(oldest.replace('Z', '+00:00'))
                     if oldest_dt.tzinfo is None:
                         oldest_dt = oldest_dt.replace(tzinfo=timezone.utc)
-                    if oldest_dt > one_hour_ago:
+                    if oldest_dt > cutoff:
                         return None
             except (ValueError, TypeError):
                 pass  # If we can't parse, proceed with normal detection
 
+        # Count spans in the detection window
         sql = f"""
-            SELECT
-                MAX(start_time) as last_seen,
-                current_timestamp - MAX(start_time) as time_since
+            SELECT COUNT(*) as requests,
+                   MAX(start_time) as last_seen
             FROM traces_otel_analytic
             WHERE service_name = '{service}'
-            AND start_time > current_timestamp - interval '1' hour
+            AND start_time > current_timestamp - interval '{window}' minute
         """
         results = self.executor.execute(sql)
+        if not results:
+            return None
 
-        if not results or results[0]["last_seen"] is None:
-            # No data in the last hour - service may be down
-            return {
-                "service": service,
-                "metric_type": "availability",
-                "alert_type": AlertType.SERVICE_DOWN,
-                "severity": Severity.CRITICAL,
-                "current_value": 0,
-                "baseline_value": 1,
-                "z_score": 0,
-                "message": f"Service {service} has not sent telemetry in over 1 hour"
-            }
+        current_count = int(results[0].get("requests", 0) or 0)
+        current_rpm = current_count / max(window, 1)
+
+        baseline = self.baseline_computer.get_baseline(service, "throughput")
+
+        if baseline and baseline["mean"] > 1 and baseline["stddev"] > 0:
+            # Baseline-aware detection: compare current rate to baseline
+            z_score = (current_rpm - baseline["mean"]) / baseline["stddev"]
+            threshold = self.threshold_manager.get_threshold("throughput")
+
+            if current_count == 0:
+                # Complete silence — fire immediately
+                return {
+                    "service": service,
+                    "metric_type": "availability",
+                    "alert_type": AlertType.SERVICE_DOWN,
+                    "severity": Severity.CRITICAL,
+                    "current_value": 0,
+                    "baseline_value": baseline["mean"],
+                    "z_score": z_score,
+                    "message": f"Service {service} sent 0 spans in the last {window} min (baseline: {baseline['mean']:.0f}/min)"
+                }
+            elif z_score < -threshold * 2:
+                # Near-zero throughput, well below baseline
+                pct_drop = (baseline["mean"] - current_rpm) / baseline["mean"] * 100
+                return {
+                    "service": service,
+                    "metric_type": "availability",
+                    "alert_type": AlertType.SERVICE_DOWN,
+                    "severity": Severity.CRITICAL,
+                    "current_value": current_rpm,
+                    "baseline_value": baseline["mean"],
+                    "z_score": z_score,
+                    "message": f"Service {service} throughput dropped {pct_drop:.0f}% ({current_rpm:.1f}/min vs {baseline['mean']:.0f}/min baseline) in last {window} min"
+                }
+        else:
+            # No baseline yet — fall back to simple silence check
+            if current_count == 0:
+                return {
+                    "service": service,
+                    "metric_type": "availability",
+                    "alert_type": AlertType.SERVICE_DOWN,
+                    "severity": Severity.CRITICAL,
+                    "current_value": 0,
+                    "baseline_value": 1,
+                    "z_score": 0,
+                    "message": f"Service {service} has not sent telemetry in {window} min (no baseline available)"
+                }
 
         return None
 
@@ -3122,6 +3165,7 @@ class PredictiveAlertsService:
         print(f"  Z-score threshold: {self.config.zscore_threshold}")
         print(f"  Error rate warning: {self.config.error_rate_warning:.0%}")
         print(f"  Error rate critical: {self.config.error_rate_critical:.0%}")
+        print(f"  Service down window: {self.config.service_down_minutes}m")
         print(f"  sklearn available: {SKLEARN_AVAILABLE}")
         print(f"\nRoot cause detection:")
         print(f"  Enabled: {self.config.root_cause_enabled}")

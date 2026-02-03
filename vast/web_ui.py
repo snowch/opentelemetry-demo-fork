@@ -940,6 +940,30 @@ def system_status():
         'timestamp': datetime.utcnow().isoformat()
     }
 
+    # Load suppressed error operations to exclude from error counts/lists
+    suppression_not_expr = ""  # e.g. "NOT ((svc=X AND span=Y) OR ...)" for use in CASE WHEN
+    suppression_where = ""     # e.g. "AND NOT (...)" for use in WHERE clauses
+    try:
+        sup_result = executor.execute_query(
+            "SELECT service_name, exception_type FROM alert_suppressions "
+            "WHERE suppression_type = 'error_operation'"
+        )
+        if sup_result.get('success') and sup_result.get('rows'):
+            clauses = []
+            for row in sup_result['rows']:
+                svc = row['service_name']
+                op = row['exception_type']
+                if svc == '*':
+                    clauses.append(f"span_name = '{op}'")
+                else:
+                    clauses.append(f"(service_name = '{svc}' AND span_name = '{op}')")
+            if clauses:
+                combined = " OR ".join(clauses)
+                suppression_not_expr = f"AND NOT ({combined})"
+                suppression_where = suppression_not_expr
+    except Exception:
+        pass
+
     # Get service health - use pre-computed topology table only for the
     # default 1h window (topology_services uses a 1h lookback).
     # For shorter windows, query raw traces so the dropdown actually works.
@@ -971,8 +995,8 @@ def system_status():
         stats_query = f"""
         SELECT service_name,
                COUNT(*) as total_spans,
-               SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) as errors,
-               ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) as error_pct,
+               SUM(CASE WHEN status_code = 'ERROR' {suppression_not_expr} THEN 1 ELSE 0 END) as errors,
+               ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' {suppression_not_expr} THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) as error_pct,
                ROUND(AVG(duration_ns / 1000000.0), 2) as avg_latency_ms
         FROM traces_otel_analytic
         WHERE start_time > NOW() - INTERVAL {interval}
@@ -1024,6 +1048,7 @@ def system_status():
     FROM traces_otel_analytic
     WHERE status_code = 'ERROR'
       AND start_time > NOW() - INTERVAL {interval}
+      {suppression_where}
     """
     result = executor.execute_query(error_summary_query)
     if result['success'] and result['rows']:
@@ -1037,6 +1062,7 @@ def system_status():
     FROM traces_otel_analytic
     WHERE status_code = 'ERROR'
       AND start_time > NOW() - INTERVAL {interval}
+      {suppression_where}
     ORDER BY start_time DESC
     LIMIT 10
     """
@@ -3484,6 +3510,7 @@ def put_alert_suppression():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+    _cache.invalidate("/api/status")
     return jsonify({"success": True})
 
 
@@ -3512,6 +3539,7 @@ def delete_alert_suppression():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+    _cache.invalidate("/api/status")
     return jsonify({"success": True})
 
 
