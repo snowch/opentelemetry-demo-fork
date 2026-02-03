@@ -100,6 +100,18 @@ SCENARIOS = {
         ],
         "cleanup": {"action": "feature_flag", "params": {"flag": "kafkaQueueProblems", "variant": "off"}},
     },
+    "instant_exceptions": {
+        "name": "Instant Exceptions",
+        "description": "Immediately triggers 50% payment failures + cart failures + product catalog failures. Generates cross-service exception stacktraces for trace viewer testing.",
+        "predicted_alerts": ["error_spike", "dependency_anomaly"],
+        "hold_at_peak_minutes": 3,
+        "steps": [
+            {"delay_seconds": 0, "action": "feature_flag", "params": {"flag": "paymentFailure", "variant": "50%"}, "label": "50% payment failures"},
+            {"delay_seconds": 0, "action": "feature_flag", "params": {"flag": "cartFailure", "variant": "on"}, "label": "Cart service failures"},
+            {"delay_seconds": 0, "action": "feature_flag", "params": {"flag": "productCatalogFailure", "variant": "on"}, "label": "Product catalog failures"},
+        ],
+        "cleanup": {"action": "multi_flag_cleanup", "params": {"flags": {"paymentFailure": "off", "cartFailure": "off", "productCatalogFailure": "off"}}},
+    },
 }
 
 
@@ -215,6 +227,14 @@ def execute_action(action: str, params: Dict) -> bool:
 
     elif action == "disk_fill_cleanup":
         return _run_docker_exec("postgresql", ["sh", "-c", "rm -f /var/lib/postgresql/data/sim_fill_*.dat"], timeout=10)
+
+    elif action == "multi_flag_cleanup":
+        flags = params.get("flags", {})
+        ok = True
+        for flag_name, variant in flags.items():
+            if not _call_feature_flag(flag_name, variant):
+                ok = False
+        return ok
 
     else:
         print(f"[Simulator] Unknown action: {action}")

@@ -3259,7 +3259,7 @@
 
         /* Alert Detail Modal */
         .alert-modal {
-            max-width: 700px;
+            max-width: 1000px;
         }
 
         .alert-detail-header {
@@ -3855,6 +3855,155 @@
             background: rgba(59, 130, 246, 0.1);
             color: var(--accent-primary);
         }
+
+        /* Trace Explorer Sidebar */
+        .trace-search-row {
+            display: flex; gap: 6px; margin-bottom: 8px;
+        }
+        .trace-search-row input {
+            flex: 1; padding: 6px 8px; font-size: 12px;
+            background: var(--bg-tertiary); border: 1px solid var(--border-color);
+            border-radius: 6px; color: var(--text-primary);
+        }
+        .trace-search-row button {
+            padding: 6px 10px; font-size: 11px; cursor: pointer;
+            background: var(--accent-primary); color: #fff; border: none;
+            border-radius: 6px;
+        }
+        .trace-filter-row {
+            display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap;
+        }
+        .trace-filter-row select, .trace-filter-row input {
+            padding: 4px 6px; font-size: 11px;
+            background: var(--bg-tertiary); border: 1px solid var(--border-color);
+            border-radius: 4px; color: var(--text-primary);
+        }
+        .trace-filter-row label {
+            font-size: 11px; color: var(--text-secondary);
+            display: flex; align-items: center; gap: 4px;
+        }
+        .trace-list-item {
+            padding: 8px 10px; border-bottom: 1px solid var(--border-color);
+            cursor: pointer; font-size: 12px; transition: background 0.15s;
+        }
+        .trace-list-item:hover { background: var(--bg-tertiary); }
+        .trace-list-item .trace-item-id {
+            font-family: monospace; color: var(--accent-primary); font-size: 11px;
+        }
+        .trace-list-item .trace-item-services {
+            color: var(--text-secondary); font-size: 11px; margin-top: 2px;
+        }
+        .trace-list-item .trace-item-meta {
+            color: var(--text-muted); font-size: 10px; margin-top: 2px;
+        }
+        .trace-list-item.has-error .trace-item-id { color: var(--accent-error); }
+
+        /* Trace Waterfall Modal */
+        #trace-modal .modal { max-width: 1100px; width: 95vw; }
+        .waterfall-header {
+            display: flex; gap: 16px; align-items: center; padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color); flex-wrap: wrap;
+        }
+        .waterfall-header .wf-stat {
+            font-size: 12px; color: var(--text-secondary);
+        }
+        .waterfall-header .wf-stat strong {
+            color: var(--text-primary); margin-right: 4px;
+        }
+        .waterfall-container {
+            max-height: 60vh; overflow-y: auto; overflow-x: hidden;
+        }
+        .waterfall-row {
+            position: relative; height: 30px; border-bottom: 1px solid var(--border-color);
+            display: flex; align-items: center; cursor: pointer; transition: background 0.1s;
+        }
+        .waterfall-row:hover { background: var(--bg-tertiary); }
+        .waterfall-row.selected { background: rgba(59, 130, 246, 0.1); }
+        .waterfall-label {
+            flex-shrink: 0; width: 320px; min-width: 200px; padding: 0 8px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            font-size: 12px; display: flex; align-items: center; gap: 4px;
+        }
+        .waterfall-label .wf-svc {
+            color: var(--text-secondary); font-size: 11px; font-weight: 600;
+        }
+        .waterfall-label .wf-op {
+            color: var(--text-primary); font-size: 11px;
+            overflow: hidden; text-overflow: ellipsis;
+        }
+        .waterfall-label .wf-err-icon { color: var(--accent-error); font-size: 10px; }
+        .waterfall-timeline {
+            flex: 1; position: relative; height: 100%; min-width: 0;
+        }
+        .waterfall-bar {
+            position: absolute; height: 18px; top: 6px; border-radius: 3px;
+            min-width: 2px; opacity: 0.85; transition: opacity 0.1s;
+        }
+        .waterfall-row:hover .waterfall-bar { opacity: 1; }
+        .waterfall-bar-label {
+            position: absolute; right: -4px; transform: translateX(100%);
+            font-size: 10px; color: var(--text-muted); white-space: nowrap;
+            line-height: 18px; padding-left: 4px;
+        }
+        .waterfall-time-axis {
+            display: flex; justify-content: space-between; padding: 4px 8px 4px 320px;
+            font-size: 10px; color: var(--text-muted);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        /* Span detail panel */
+        .span-detail-panel {
+            border-top: 2px solid var(--accent-primary);
+            padding: 16px; max-height: 40vh; overflow-y: auto;
+        }
+        .span-detail-panel h4 {
+            font-size: 13px; color: var(--text-primary); margin: 0 0 8px;
+        }
+        .span-detail-grid {
+            display: grid; grid-template-columns: 120px 1fr; gap: 4px 12px;
+            font-size: 12px; margin-bottom: 12px;
+        }
+        .span-detail-grid .sdg-key { color: var(--text-muted); }
+        .span-detail-grid .sdg-val { color: var(--text-primary); word-break: break-all; }
+        .span-attrs-table {
+            width: 100%; font-size: 11px; border-collapse: collapse;
+        }
+        .span-attrs-table td {
+            padding: 3px 8px; border-bottom: 1px solid var(--border-color);
+        }
+        .span-attrs-table td:first-child {
+            color: var(--text-muted); width: 200px; font-family: monospace;
+        }
+        .span-event-item {
+            padding: 6px 8px; margin: 4px 0; border-radius: 4px;
+            font-size: 11px; background: var(--bg-tertiary);
+        }
+        .span-event-item.exception { border-left: 3px solid var(--accent-error); }
+
+        /* Service color palette for waterfall */
+        .wf-color-0 { background: #3b82f6; }
+        .wf-color-1 { background: #22c55e; }
+        .wf-color-2 { background: #f59e0b; }
+        .wf-color-3 { background: #ef4444; }
+        .wf-color-4 { background: #8b5cf6; }
+        .wf-color-5 { background: #ec4899; }
+        .wf-color-6 { background: #06b6d4; }
+        .wf-color-7 { background: #f97316; }
+        .wf-color-8 { background: #14b8a6; }
+        .wf-color-9 { background: #6366f1; }
+        .wf-bar-error { background: var(--accent-error) !important; }
+
+        .wf-svc-legend {
+            display: flex; gap: 12px; flex-wrap: wrap; padding: 8px 16px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .wf-svc-legend-item {
+            display: flex; align-items: center; gap: 4px; font-size: 11px;
+            color: var(--text-secondary);
+        }
+        .wf-svc-legend-dot {
+            width: 10px; height: 10px; border-radius: 2px;
+        }
     </style>
 </head>
 <body>
@@ -3981,6 +4130,32 @@
                     <div class="status-card-title">System resources</div>
                     <div id="hosts-list"><div class="empty-state">Loading...</div></div>
                 </div>
+            </div>
+        </div>
+
+        <div class="sidebar-section">
+            <div class="section-header">
+                <span class="section-title">Trace Explorer</span>
+            </div>
+            <div class="trace-search-row">
+                <input type="text" id="trace-search-input" placeholder="Trace ID or search..." onkeydown="if(event.key==='Enter') searchTraces()">
+                <button onclick="searchTraces()">Search</button>
+            </div>
+            <div class="trace-filter-row">
+                <select id="trace-service-filter" onchange="searchTraces()">
+                    <option value="">All services</option>
+                </select>
+                <select id="trace-time-filter" onchange="searchTraces()">
+                    <option value="5m">5m</option>
+                    <option value="15m">15m</option>
+                    <option value="1h" selected>1h</option>
+                    <option value="6h">6h</option>
+                    <option value="24h">24h</option>
+                </select>
+                <label><input type="checkbox" id="trace-error-only" onchange="searchTraces()"> Errors</label>
+            </div>
+            <div id="trace-explorer-list" class="status-card" style="max-height: 300px; overflow-y: auto;">
+                <div class="empty-state">Click Search to find traces</div>
             </div>
         </div>
 
@@ -4201,7 +4376,7 @@
                 </div>
 
                 <div class="error-detail-card">
-                    <h4>Full Trace</h4>
+                    <h4 style="display:flex;align-items:center;justify-content:space-between;">Full Trace <button id="view-waterfall-btn" class="diag-action-btn" style="font-size:11px;padding:4px 10px;display:none;" onclick="closeErrorModal(); openTraceModal(document.getElementById('view-waterfall-btn').dataset.traceId);">View Waterfall</button></h4>
                     <div style="overflow-x: auto;">
                         <table class="trace-table" id="trace-table">
                             <thead>
@@ -4216,6 +4391,30 @@
                         </table>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Trace Waterfall Modal -->
+    <div class="modal-overlay" id="trace-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title-row">
+                    <span class="modal-type-badge" style="background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);">Trace</span>
+                    <h2 id="trace-modal-title">Trace Viewer</h2>
+                </div>
+                <div class="modal-refresh-controls">
+                    <button class="modal-refresh-btn" onclick="refreshTraceModal()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+                        </svg>
+                        Refresh
+                    </button>
+                    <button class="modal-close" onclick="closeTraceModal()">&times;</button>
+                </div>
+            </div>
+            <div class="modal-body" id="trace-modal-body">
+                <div class="empty-state">Loading trace...</div>
             </div>
         </div>
     </div>
@@ -5283,6 +5482,16 @@
                         });
                     } else {
                         hostsList.innerHTML = '<div class="empty-state">No host metrics</div>';
+                    }
+
+                    // Populate trace explorer service filter
+                    const traceSvcFilter = document.getElementById('trace-service-filter');
+                    if (traceSvcFilter && traceSvcFilter.options.length <= 1 && availableServices.length > 0) {
+                        availableServices.forEach(n => {
+                            const opt = document.createElement('option');
+                            opt.value = n; opt.textContent = n;
+                            traceSvcFilter.appendChild(opt);
+                        });
                     }
                 }
 
@@ -7258,13 +7467,13 @@ Can you help me understand this issue further or suggest next steps?`;
                                 <td title="${escapeHtml(t.span_name || '')}">${escapeHtml(t.span_name || '-')}</td>
                                 <td>${t.duration_ms ? t.duration_ms + 'ms' : '-'}</td>
                                 <td style="color:${isError?'var(--accent-error)':'var(--accent-success)'}">${t.status_code || 'OK'}</td>
-                                <td title="${t.trace_id || ''}">${t.trace_id || '-'}</td></tr>`;
+                                <td title="${t.trace_id || ''}"><a href="#" onclick="event.stopPropagation(); openTraceModal('${t.trace_id}'); return false;" style="color:var(--accent-primary);text-decoration:underline;font-family:monospace;font-size:11px;">${(t.trace_id || '-').substring(0,12)}</a></td></tr>`;
                         } else {
                             return `<tr class="${isError ? 'error-row' : ''}" onclick="openErrorModal('${t.trace_id}', '${t.span_id}')" style="cursor:pointer;">
                                 <td>${time}</td><td title="${escapeHtml(t.span_name || '')}">${escapeHtml(t.span_name || '-')}</td>
                                 <td>${t.span_kind || '-'}</td><td>${t.duration_ms}ms</td>
                                 <td style="color:${isError?'var(--accent-error)':'var(--accent-success)'}">${t.status_code || 'OK'}</td>
-                                <td title="${t.trace_id}">${t.trace_id || '-'}</td></tr>`;
+                                <td title="${t.trace_id}"><a href="#" onclick="event.stopPropagation(); openTraceModal('${t.trace_id}'); return false;" style="color:var(--accent-primary);text-decoration:underline;font-family:monospace;font-size:11px;">${(t.trace_id || '-').substring(0,12)}</a></td></tr>`;
                         }
                     }).join('');
                 } else {
@@ -8508,7 +8717,7 @@ Can you help me understand this issue further or suggest next steps?`;
                     document.getElementById('error-operation').textContent = info.span_name || '-';
                     document.getElementById('error-timestamp').textContent = info.start_time ? new Date(info.start_time).toLocaleString() : '-';
                     document.getElementById('error-duration').textContent = info.duration_ms ? `${info.duration_ms}ms` : '-';
-                    document.getElementById('error-trace-id').textContent = traceId;
+                    document.getElementById('error-trace-id').innerHTML = `<a href="#" onclick="closeErrorModal(); openTraceModal('${escapeHtml(traceId)}'); return false;" style="color:var(--accent-primary);text-decoration:underline;font-family:monospace;">${escapeHtml(traceId)}</a>`;
                 }
 
                 // Exception details
@@ -8707,6 +8916,9 @@ Can you help me understand this issue further or suggest next steps?`;
 
                 // Full trace
                 const traceTable = document.getElementById('trace-table').querySelector('tbody');
+                const waterfallBtn = document.getElementById('view-waterfall-btn');
+                waterfallBtn.dataset.traceId = traceId;
+                waterfallBtn.style.display = 'inline-block';
                 if (data.trace && data.trace.length > 0) {
                     traceTable.innerHTML = data.trace.map(span => `
                         <tr class="${span.status_code === 'ERROR' ? 'error-row' : ''}">
@@ -9834,12 +10046,301 @@ Can you help me understand this issue further or suggest next steps?`;
             }
         }
 
+        // =====================================================================
+        // Trace Viewer Functions
+        // =====================================================================
+        const WATERFALL_COLORS = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#f97316','#14b8a6','#6366f1'];
+        let currentTraceId = null;
+        let currentTraceData = null;
+
+        function getServiceColor(serviceName, serviceColorMap) {
+            if (!serviceColorMap[serviceName]) {
+                const idx = Object.keys(serviceColorMap).length % WATERFALL_COLORS.length;
+                serviceColorMap[serviceName] = WATERFALL_COLORS[idx];
+            }
+            return serviceColorMap[serviceName];
+        }
+
+        function buildSpanTree(spans) {
+            // Build tree from flat list using parent_span_id, DFS flatten for display
+            const byId = {};
+            const roots = [];
+            spans.forEach(s => { byId[s.span_id] = { ...s, children: [], depth: 0 }; });
+            spans.forEach(s => {
+                const node = byId[s.span_id];
+                const parent = s.parent_span_id ? byId[s.parent_span_id] : null;
+                if (parent) {
+                    parent.children.push(node);
+                } else {
+                    roots.push(node);
+                }
+            });
+            // DFS flatten
+            const result = [];
+            function dfs(node, depth) {
+                node.depth = depth;
+                result.push(node);
+                // Sort children by start_time
+                node.children.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+                node.children.forEach(c => dfs(c, depth + 1));
+            }
+            roots.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+            roots.forEach(r => dfs(r, 0));
+            return result;
+        }
+
+        function renderWaterfall(spans, events, traceId) {
+            if (!spans || spans.length === 0) {
+                return '<div class="empty-state">No spans found for this trace</div>';
+            }
+
+            const tree = buildSpanTree(spans);
+            const serviceColorMap = {};
+
+            // Compute trace time boundaries
+            let minStart = Infinity, maxEnd = -Infinity;
+            tree.forEach(s => {
+                const st = new Date(s.start_time).getTime();
+                const dur = (s.duration_ns || 0) / 1000000;
+                if (st < minStart) minStart = st;
+                if (st + dur > maxEnd) maxEnd = st + dur;
+            });
+            const totalDuration = Math.max(maxEnd - minStart, 1);
+
+            // Service legend
+            tree.forEach(s => getServiceColor(s.service_name || 'unknown', serviceColorMap));
+            let legendHtml = '<div class="wf-svc-legend">';
+            Object.entries(serviceColorMap).forEach(([svc, color]) => {
+                legendHtml += `<span class="wf-svc-legend-item"><span class="wf-svc-legend-dot" style="background:${color}"></span>${escapeHtml(svc)}</span>`;
+            });
+            legendHtml += '</div>';
+
+            // Time axis
+            const axisTicks = 5;
+            let axisHtml = '<div class="waterfall-time-axis">';
+            for (let i = 0; i <= axisTicks; i++) {
+                const ms = (totalDuration * i / axisTicks);
+                axisHtml += `<span>${formatDurationMs(ms)}</span>`;
+            }
+            axisHtml += '</div>';
+
+            // Span rows
+            let rowsHtml = '';
+            tree.forEach((s, idx) => {
+                const st = new Date(s.start_time).getTime();
+                const dur = (s.duration_ns || 0) / 1000000;
+                const leftPct = ((st - minStart) / totalDuration * 100).toFixed(3);
+                const widthPct = Math.max((dur / totalDuration * 100), 0.3).toFixed(3);
+                const color = getServiceColor(s.service_name || 'unknown', serviceColorMap);
+                const isError = s.status_code === 'ERROR';
+                const indent = s.depth * 16;
+                const barStyle = isError ? `background: var(--accent-error)` : `background: ${color}`;
+
+                rowsHtml += `<div class="waterfall-row${isError ? ' has-error' : ''}" data-span-idx="${idx}" onclick="selectWaterfallSpan(${idx})">
+                    <div class="waterfall-label" style="padding-left: ${8 + indent}px;" title="${escapeHtml(s.service_name || '')} — ${escapeHtml(s.span_name || '')}">
+                        ${isError ? '<span class="wf-err-icon">&#x26A0;</span>' : ''}
+                        <span class="wf-svc">${escapeHtml(s.service_name || '')}</span>
+                        <span class="wf-op">${escapeHtml(s.span_name || '')}</span>
+                    </div>
+                    <div class="waterfall-timeline">
+                        <div class="waterfall-bar" style="left:${leftPct}%;width:${widthPct}%;${barStyle}">
+                            <span class="waterfall-bar-label">${formatDurationMs(dur)}</span>
+                        </div>
+                    </div>
+                </div>`;
+            });
+
+            return legendHtml + axisHtml + '<div class="waterfall-container">' + rowsHtml + '</div>' +
+                   '<div id="span-detail-panel"></div>';
+        }
+
+        function formatDurationMs(ms) {
+            if (ms < 1) return '<1ms';
+            if (ms < 1000) return Math.round(ms) + 'ms';
+            if (ms < 60000) return (ms / 1000).toFixed(2) + 's';
+            return (ms / 60000).toFixed(1) + 'm';
+        }
+
+        function selectWaterfallSpan(idx) {
+            if (!currentTraceData) return;
+            const tree = buildSpanTree(currentTraceData.spans);
+            const span = tree[idx];
+            if (!span) return;
+
+            // Highlight selected row
+            document.querySelectorAll('#trace-modal .waterfall-row').forEach(r => r.classList.remove('selected'));
+            const row = document.querySelector(`#trace-modal .waterfall-row[data-span-idx="${idx}"]`);
+            if (row) row.classList.add('selected');
+
+            const panel = document.getElementById('span-detail-panel');
+            const events = currentTraceData.events[span.span_id] || [];
+            const dur = (span.duration_ns || 0) / 1000000;
+
+            let html = '<div class="span-detail-panel"><h4>Span Details</h4>';
+            html += '<div class="span-detail-grid">';
+            html += `<span class="sdg-key">Service</span><span class="sdg-val"><a href="#" onclick="closeTraceModal(); var e=resolveEntityType('${escapeHtml(span.service_name || '')}'); openEntityModal(e.type, e.name); return false;" style="color:var(--accent-primary);text-decoration:underline;">${escapeHtml(span.service_name || '-')}</a></span>`;
+            html += `<span class="sdg-key">Operation</span><span class="sdg-val">${escapeHtml(span.span_name || '-')}</span>`;
+            html += `<span class="sdg-key">Kind</span><span class="sdg-val">${escapeHtml(span.span_kind || '-')}</span>`;
+            html += `<span class="sdg-key">Duration</span><span class="sdg-val">${formatDurationMs(dur)}</span>`;
+            html += `<span class="sdg-key">Start Offset</span><span class="sdg-val">${formatDurationMs(new Date(span.start_time).getTime() - new Date(currentTraceData.spans[0]?.start_time).getTime())}</span>`;
+            html += `<span class="sdg-key">Status</span><span class="sdg-val" style="color:${span.status_code === 'ERROR' ? 'var(--accent-error)' : 'var(--accent-success)'}">${span.status_code || 'OK'}</span>`;
+            html += `<span class="sdg-key">Span ID</span><span class="sdg-val" style="font-family:monospace;font-size:11px;">${escapeHtml(span.span_id || '-')}</span>`;
+            html += '</div>';
+
+            // Attributes
+            if (span.attributes_json) {
+                let attrs;
+                try {
+                    attrs = typeof span.attributes_json === 'string' ? JSON.parse(span.attributes_json) : span.attributes_json;
+                } catch(e) { attrs = null; }
+                if (attrs && Object.keys(attrs).length > 0) {
+                    html += '<h4>Attributes</h4><table class="span-attrs-table">';
+                    Object.entries(attrs).forEach(([k, v]) => {
+                        html += `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(String(v))}</td></tr>`;
+                    });
+                    html += '</table>';
+                }
+            }
+
+            // Events
+            if (events.length > 0) {
+                html += '<h4>Span Events</h4>';
+                events.forEach(ev => {
+                    const isExc = ev.exception_type;
+                    html += `<div class="span-event-item${isExc ? ' exception' : ''}">`;
+                    html += `<strong>${escapeHtml(ev.event_name || 'event')}</strong>`;
+                    if (ev.timestamp) html += ` <span style="color:var(--text-muted);font-size:10px;">${new Date(ev.timestamp).toLocaleTimeString()}</span>`;
+                    if (isExc) {
+                        html += `<br><span style="color:var(--accent-error)">${escapeHtml(ev.exception_type)}: ${escapeHtml(ev.exception_message || '')}</span>`;
+                        if (ev.exception_stacktrace) {
+                            html += `<pre style="font-size:10px;max-height:200px;overflow:auto;margin-top:4px;padding:8px;background:var(--bg-secondary);border-radius:4px;white-space:pre-wrap;">${escapeHtml(ev.exception_stacktrace)}</pre>`;
+                        }
+                    }
+                    html += '</div>';
+                });
+            }
+
+            html += '</div>';
+            panel.innerHTML = html;
+        }
+
+        async function openTraceModal(traceId) {
+            currentTraceId = traceId;
+            document.getElementById('trace-modal').classList.add('active');
+            document.getElementById('trace-modal-title').textContent = `Trace ${traceId.substring(0, 12)}...`;
+            document.getElementById('trace-modal-body').innerHTML = '<div class="empty-state">Loading trace...</div>';
+
+            try {
+                const response = await fetch(`/api/trace/${encodeURIComponent(traceId)}`);
+                const data = await response.json();
+                currentTraceData = data;
+
+                // Header stats
+                let headerHtml = '<div class="waterfall-header">';
+                headerHtml += `<span class="wf-stat"><strong>Trace ID:</strong> <span style="font-family:monospace;font-size:11px;">${escapeHtml(traceId)}</span></span>`;
+                headerHtml += `<span class="wf-stat"><strong>Services:</strong> ${data.service_count}</span>`;
+                headerHtml += `<span class="wf-stat"><strong>Spans:</strong> ${data.total_spans}</span>`;
+                if (data.spans && data.spans.length > 0) {
+                    const minT = Math.min(...data.spans.map(s => new Date(s.start_time).getTime()));
+                    const maxT = Math.max(...data.spans.map(s => new Date(s.start_time).getTime() + (s.duration_ns || 0)/1000000));
+                    headerHtml += `<span class="wf-stat"><strong>Duration:</strong> ${formatDurationMs(maxT - minT)}</span>`;
+                    headerHtml += `<span class="wf-stat"><strong>Started:</strong> ${new Date(minT).toLocaleString()}</span>`;
+                }
+                headerHtml += '</div>';
+
+                const waterfallHtml = renderWaterfall(data.spans, data.events, traceId);
+                document.getElementById('trace-modal-body').innerHTML = headerHtml + waterfallHtml;
+            } catch (error) {
+                console.error('Failed to load trace:', error);
+                document.getElementById('trace-modal-body').innerHTML = '<div class="empty-state">Failed to load trace</div>';
+            }
+        }
+
+        function closeTraceModal() {
+            document.getElementById('trace-modal').classList.remove('active');
+            currentTraceData = null;
+        }
+
+        function refreshTraceModal() {
+            if (currentTraceId) openTraceModal(currentTraceId);
+        }
+
+        async function searchTraces() {
+            const input = document.getElementById('trace-search-input').value.trim();
+            const service = document.getElementById('trace-service-filter').value;
+            const time = document.getElementById('trace-time-filter').value;
+            const errorOnly = document.getElementById('trace-error-only').checked;
+            const listEl = document.getElementById('trace-explorer-list');
+
+            // If input looks like a trace ID (32 hex chars), open it directly
+            if (/^[a-f0-9]{32}$/i.test(input)) {
+                openTraceModal(input);
+                return;
+            }
+
+            listEl.innerHTML = '<div class="empty-state">Searching...</div>';
+
+            let url = `/api/traces/search?time=${time}&limit=20`;
+            if (service) url += `&service=${encodeURIComponent(service)}`;
+            if (errorOnly) url += `&error_only=1`;
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (!data.traces || data.traces.length === 0) {
+                    listEl.innerHTML = '<div class="empty-state">No traces found</div>';
+                    return;
+                }
+
+                listEl.innerHTML = data.traces.map(t => {
+                    const services = (t.services || []).join(', ');
+                    const shortId = (t.trace_id || '').substring(0, 16);
+                    const time = t.start_time ? new Date(t.start_time).toLocaleTimeString() : '';
+                    return `<div class="trace-list-item${t.has_error ? ' has-error' : ''}" onclick="openTraceModal('${escapeHtml(t.trace_id)}')">
+                        <div class="trace-item-id">${escapeHtml(shortId)}${t.has_error ? ' &#x26A0;' : ''}</div>
+                        <div class="trace-item-services">${escapeHtml(services)}</div>
+                        <div class="trace-item-meta">${escapeHtml(time)} &mdash; ${formatDurationMs(t.duration_ms)} &mdash; ${t.span_count} spans &mdash; ${t.service_count} services</div>
+                    </div>`;
+                }).join('');
+            } catch (error) {
+                console.error('Failed to search traces:', error);
+                listEl.innerHTML = '<div class="empty-state">Search failed</div>';
+            }
+        }
+
+        // Populate trace service filter from cached status data
+        function populateTraceServiceFilter() {
+            const sel = document.getElementById('trace-service-filter');
+            if (!sel || sel.options.length > 1) return;
+            const statusServices = document.querySelectorAll('#services-list .status-item');
+            const names = new Set();
+            statusServices.forEach(el => {
+                const name = el.getAttribute('data-service') || el.textContent.trim();
+                if (name) names.add(name);
+            });
+            // Also try from entity selector if available
+            const entitySel = document.getElementById('entity-selector');
+            if (entitySel) {
+                Array.from(entitySel.options).forEach(o => { if (o.value) names.add(o.value); });
+            }
+            names.forEach(n => {
+                const opt = document.createElement('option');
+                opt.value = n; opt.textContent = n;
+                sel.appendChild(opt);
+            });
+        }
+
         document.getElementById('entity-modal').addEventListener('click', function(e) {
             if (e.target === this) closeEntityModal();
         });
 
         document.getElementById('error-modal').addEventListener('click', function(e) {
             if (e.target === this) closeErrorModal();
+        });
+
+        document.getElementById('trace-modal').addEventListener('click', function(e) {
+            if (e.target === this) closeTraceModal();
         });
 
         document.getElementById('help-modal').addEventListener('click', function(e) {
@@ -9854,6 +10355,7 @@ Can you help me understand this issue further or suggest next steps?`;
             if (e.key === 'Escape') {
                 closeEntityModal();
                 closeErrorModal();
+                closeTraceModal();
                 closeHelpModal();
                 closeAlertModal();
                 closeJobModal();

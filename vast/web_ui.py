@@ -1364,12 +1364,14 @@ def error_details(trace_id, span_id):
     error_time = (data['error_info'] or {}).get('start_time')
     svc = (data['error_info'] or {}).get('service_name', '').replace("'", "''")
     if error_time and svc:
+        # Trino requires space-separated timestamp, not ISO 'T' separator
+        error_time_sql = str(error_time).replace('T', ' ')
         alerts_query = f"""
         SELECT alert_id, alert_type, severity, title, created_at
         FROM alerts
         WHERE service_name = '{svc}'
-          AND created_at BETWEEN TIMESTAMP '{error_time}' - INTERVAL '5' MINUTE
-                             AND TIMESTAMP '{error_time}' + INTERVAL '5' MINUTE
+          AND created_at BETWEEN TIMESTAMP '{error_time_sql}' - INTERVAL '5' MINUTE
+                             AND TIMESTAMP '{error_time_sql}' + INTERVAL '5' MINUTE
         ORDER BY created_at DESC LIMIT 5
         """
         result = executor.execute_query(alerts_query)
@@ -2943,6 +2945,117 @@ def host_logs_legacy(name):
 @app.route('/api/host/<name>/metrics')
 def host_metrics_legacy(name):
     return entity_metrics('host', name)
+
+
+# =============================================================================
+# Trace Viewer API
+# =============================================================================
+
+@app.route('/api/trace/<trace_id>', methods=['GET'])
+def trace_detail(trace_id):
+    """Get all spans and events for a trace, for the waterfall viewer."""
+    executor = get_query_executor()
+    safe_tid = trace_id.replace("'", "''")
+
+    spans_query = f"""
+    SELECT span_id, parent_span_id, service_name, span_name, span_kind,
+           start_time, duration_ns, status_code,
+           attributes_json
+    FROM traces_otel_analytic
+    WHERE trace_id = '{safe_tid}'
+    ORDER BY start_time
+    """
+    result = executor.execute_query(spans_query)
+    spans = result['rows'] if result['success'] else []
+
+    # Collect span events (exceptions, logs)
+    events_map = {}
+    if spans:
+        events_query = f"""
+        SELECT span_id, event_name, timestamp,
+               exception_type, exception_message, exception_stacktrace
+        FROM span_events_otel_analytic
+        WHERE trace_id = '{safe_tid}'
+        ORDER BY timestamp
+        """
+        ev_result = executor.execute_query(events_query)
+        if ev_result['success']:
+            for ev in ev_result['rows']:
+                sid = ev.get('span_id', '')
+                if sid not in events_map:
+                    events_map[sid] = []
+                events_map[sid].append(ev)
+
+    # Compute summary
+    services = list(set(s.get('service_name', '') for s in spans if s.get('service_name')))
+    return jsonify({
+        'trace_id': trace_id,
+        'spans': spans,
+        'events': events_map,
+        'service_count': len(services),
+        'total_spans': len(spans)
+    })
+
+
+@app.route('/api/traces/search', methods=['GET'])
+def traces_search():
+    """Search/list traces for the trace explorer sidebar."""
+    executor = get_query_executor()
+    service = request.args.get('service', '')
+    lookback = request.args.get('time', '1h')
+    limit = min(int(request.args.get('limit', '20')), 100)
+    min_duration_ms = request.args.get('min_duration_ms', '')
+    error_only = request.args.get('error_only', '') == '1'
+
+    # Parse lookback
+    lookback_map = {'5m': '5', '15m': '15', '1h': '60', '6h': '360', '24h': '1440'}
+    minutes = lookback_map.get(lookback, '60')
+    interval = f"'{minutes}' MINUTE"
+
+    where_clauses = [f"start_time > NOW() - INTERVAL {interval}"]
+    if service:
+        safe_svc = service.replace("'", "''")
+        where_clauses.append(f"service_name = '{safe_svc}'")
+    if min_duration_ms:
+        try:
+            min_ns = int(min_duration_ms) * 1000000
+            where_clauses.append(f"duration_ns >= {min_ns}")
+        except ValueError:
+            pass
+    if error_only:
+        where_clauses.append("status_code = 'ERROR'")
+
+    where_sql = " AND ".join(where_clauses)
+
+    query = f"""
+    SELECT trace_id,
+           MIN(start_time) as trace_start,
+           MAX(CAST(duration_ns AS BIGINT)) as max_duration_ns,
+           COUNT(*) as span_count,
+           COUNT(DISTINCT service_name) as service_count,
+           ARRAY_AGG(DISTINCT service_name) as services,
+           MAX(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) as has_error
+    FROM traces_otel_analytic
+    WHERE {where_sql}
+    GROUP BY trace_id
+    ORDER BY MIN(start_time) DESC
+    LIMIT {limit}
+    """
+    result = executor.execute_query(query)
+    traces = []
+    if result['success']:
+        for row in result['rows']:
+            dur_ns = row.get('max_duration_ns', 0) or 0
+            traces.append({
+                'trace_id': row.get('trace_id', ''),
+                'start_time': str(row.get('trace_start', '')),
+                'duration_ms': round(dur_ns / 1000000.0, 2) if dur_ns else 0,
+                'span_count': row.get('span_count', 0),
+                'service_count': row.get('service_count', 0),
+                'services': row.get('services', []),
+                'has_error': bool(row.get('has_error', 0))
+            })
+    return jsonify({'traces': traces})
 
 
 # =============================================================================

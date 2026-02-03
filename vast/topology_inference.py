@@ -396,26 +396,36 @@ class TopologyInferenceService:
             print("[Topology]   -> FAILED to materialize hosts")
 
     def _resolve_host_display_names(self):
-        """Set display_name on topology_hosts from the top service in topology_host_services."""
+        """Set display_name on topology_hosts from all services in topology_host_services."""
         rows = self.executor.execute(
             "SELECT host_name, service_name FROM topology_host_services ORDER BY data_point_count DESC"
         )
         if not rows:
             return
-        # Pick first (highest data_point_count) service per host
-        best = {}
+        # Collect all service names per host, ordered by data_point_count DESC
+        from collections import OrderedDict
+        host_services = OrderedDict()
         for r in rows:
             h = r.get("host_name")
-            if h and h not in best:
-                best[h] = r.get("service_name", "")
+            svc = r.get("service_name", "")
+            if h and svc:
+                if h not in host_services:
+                    host_services[h] = []
+                if svc not in host_services[h]:
+                    host_services[h].append(svc)
         updated = 0
-        for host_name, svc in best.items():
-            if not svc:
+        for host_name, services in host_services.items():
+            if not services:
                 continue
-            safe_svc = svc.replace("'", "''")
+            # Show top 3 services, with "..." if more
+            if len(services) > 3:
+                display = ", ".join(services[:3]) + ", ..."
+            else:
+                display = ", ".join(services)
+            safe_display = display.replace("'", "''")
             safe_host = host_name.replace("'", "''")
             ok = self.executor.execute_write(
-                f"UPDATE topology_hosts SET display_name = '{safe_svc}' WHERE host_name = '{safe_host}'"
+                f"UPDATE topology_hosts SET display_name = '{safe_display}' WHERE host_name = '{safe_host}'"
             )
             if ok:
                 updated += 1

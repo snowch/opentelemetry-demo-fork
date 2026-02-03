@@ -1139,7 +1139,7 @@ services:
     container_name: trino
     image: vastdataorg/trino-vast:${TRINO_VERSION}
     restart: unless-stopped
-    mem_limit: 14g
+    mem_limit: 20g
     ports:
       - 18080:8080
     platform: linux/amd64
