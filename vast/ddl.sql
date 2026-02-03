@@ -29,6 +29,7 @@ DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".threshold_overrides;
 DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".remediation_playbooks;
 DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".remediation_log;
 DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".entity_resource_baselines;
+DROP TABLE IF EXISTS ${CATALOG}."${SCHEMA}".alert_suppressions;
 
 -- ${CATALOG}."${SCHEMA}".logs_otel_analytic definition
 
