@@ -382,6 +382,16 @@ CREATE TABLE ${CATALOG}."${SCHEMA}".pinned_charts (
    created_at    timestamp(9)
 );
 
+-- Alert suppressions per exception type per service
+CREATE TABLE ${CATALOG}."${SCHEMA}".alert_suppressions (
+   service_name      varchar,     -- '*' = global, otherwise specific service
+   suppression_type  varchar,     -- 'exception_type' or 'error_operation'
+   exception_type    varchar,     -- exception class or span_name depending on suppression_type
+   reason            varchar,
+   created_by        varchar,
+   created_at        timestamp(9)
+);
+
 -- =============================================================================
 -- Remediation Playbooks
 -- =============================================================================

@@ -7825,16 +7825,23 @@ Can you help me understand this issue further or suggest next steps?`;
                 if (patterns.length > 0) {
                     html += `<div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">Error Patterns</div>`;
                     html += `<div class="data-table-container" style="margin-bottom:16px;"><table class="data-table"><thead><tr>
-                        <th>Operation</th><th>Count</th><th>Avg Duration</th><th>Last Seen</th>
+                        <th>Operation</th><th>Count</th><th>Avg Duration</th><th>Last Seen</th><th style="text-align:center;">Alerts</th>
                     </tr></thead><tbody>`;
-                    patterns.forEach(p => {
+                    patterns.forEach((p, idx) => {
                         const lastSeen = p.last_seen ? formatTimeAgo(p.last_seen) : '-';
                         const avgDur = p.avg_duration_ms != null ? Number(p.avg_duration_ms).toFixed(1) + ' ms' : '-';
+                        const isSuppressed = !!p.suppressed;
+                        const toggleId = `op-alert-toggle-${idx}`;
                         html += `<tr class="error-row">
                             <td style="font-family:var(--font-mono);font-size:11px;">${escapeHtml(p.span_name || '-')}</td>
                             <td style="color:var(--accent-error);font-weight:600;">${p.count}</td>
                             <td>${avgDur}</td>
                             <td style="color:var(--text-muted);">${lastSeen}</td>
+                            <td style="text-align:center;">
+                                <div class="toggle-switch ${isSuppressed ? '' : 'active'}" id="${toggleId}"
+                                     onclick="toggleExceptionAlert('${escapeHtml(name)}', '${escapeHtml(p.span_name)}', ${!isSuppressed}, this, 'error_operation')"
+                                     title="${isSuppressed ? 'Alerts suppressed – click to enable' : 'Alerts enabled – click to suppress'}"></div>
+                            </td>
                         </tr>`;
                     });
                     html += '</tbody></table></div>';
@@ -7844,14 +7851,21 @@ Can you help me understand this issue further or suggest next steps?`;
                 if (exceptionTypes.length > 0) {
                     html += `<div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">Exception Types</div>`;
                     html += `<div class="data-table-container" style="margin-bottom:16px;"><table class="data-table"><thead><tr>
-                        <th>Exception Type</th><th>Count</th><th>Last Seen</th>
+                        <th>Exception Type</th><th>Count</th><th>Last Seen</th><th style="text-align:center;">Alerts</th>
                     </tr></thead><tbody>`;
-                    exceptionTypes.forEach(e => {
+                    exceptionTypes.forEach((e, idx) => {
                         const lastSeen = e.last_seen ? formatTimeAgo(e.last_seen) : '-';
+                        const isSuppressed = !!e.suppressed;
+                        const toggleId = `exc-alert-toggle-${idx}`;
                         html += `<tr class="error-row">
                             <td style="font-family:var(--font-mono);font-size:11px;color:var(--accent-error);">${escapeHtml(e.exception_type || '-')}</td>
                             <td style="font-weight:600;">${e.count}</td>
                             <td style="color:var(--text-muted);">${lastSeen}</td>
+                            <td style="text-align:center;">
+                                <div class="toggle-switch ${isSuppressed ? '' : 'active'}" id="${toggleId}"
+                                     onclick="toggleExceptionAlert('${escapeHtml(name)}', '${escapeHtml(e.exception_type)}', ${!isSuppressed}, this)"
+                                     title="${isSuppressed ? 'Alerts suppressed – click to enable' : 'Alerts enabled – click to suppress'}"></div>
+                            </td>
                         </tr>`;
                     });
                     html += '</tbody></table></div>';
@@ -7883,6 +7897,24 @@ Can you help me understand this issue further or suggest next steps?`;
             } catch (err) {
                 console.error('Failed to load entity errors:', err);
                 body.innerHTML = '<div class="empty-state">Failed to load errors</div>';
+            }
+        }
+
+        async function toggleExceptionAlert(serviceName, exceptionType, currentlyActive, toggleEl, suppressionType) {
+            const method = currentlyActive ? 'PUT' : 'DELETE';
+            try {
+                const resp = await fetch('/api/alert-suppressions', {
+                    method: method,
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({service_name: serviceName, exception_type: exceptionType, suppression_type: suppressionType || 'exception_type'})
+                });
+                if (!resp.ok) throw new Error('Request failed');
+                toggleEl.classList.toggle('active');
+                toggleEl.title = toggleEl.classList.contains('active')
+                    ? 'Alerts enabled – click to suppress'
+                    : 'Alerts suppressed – click to enable';
+            } catch (err) {
+                console.error('Failed to toggle exception alert suppression:', err);
             }
         }
 

@@ -3429,6 +3429,92 @@ def delete_entity_threshold_override(entity_type, entity_name):
     return jsonify({"success": True, "effective_threshold": effective})
 
 
+@app.route('/api/alert-suppressions', methods=['GET'])
+def get_alert_suppressions():
+    """List alert suppressions for a service (includes global '*' entries)."""
+    executor = get_query_executor()
+    if not executor:
+        return jsonify({"error": "No database connection"}), 503
+
+    service = request.args.get('service', '*')
+    suppression_type = request.args.get('type', '')
+    type_filter = f"AND suppression_type = '{suppression_type}' " if suppression_type else ""
+    sql = (
+        f"SELECT service_name, suppression_type, exception_type, reason, created_by, created_at "
+        f"FROM alert_suppressions "
+        f"WHERE service_name IN ('{service}', '*') "
+        f"{type_filter}"
+        f"ORDER BY created_at DESC"
+    )
+    try:
+        result = executor.execute_query(sql)
+        return jsonify({"suppressions": result.get("rows", [])})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/alert-suppressions', methods=['PUT'])
+def put_alert_suppression():
+    """Create or update an alert suppression (DELETE + INSERT upsert)."""
+    executor = get_query_executor()
+    if not executor:
+        return jsonify({"error": "No database connection"}), 503
+
+    data = request.json or {}
+    service_name = data.get("service_name", "").strip()
+    exception_type = data.get("exception_type", "").strip()
+    suppression_type = data.get("suppression_type", "exception_type").strip()
+    reason = data.get("reason", "").strip() or "User suppressed"
+
+    if not service_name or not exception_type:
+        return jsonify({"error": "service_name and exception_type are required"}), 400
+
+    try:
+        executor.execute_write(
+            f"DELETE FROM alert_suppressions "
+            f"WHERE service_name = '{service_name}' "
+            f"AND suppression_type = '{suppression_type}' "
+            f"AND exception_type = '{exception_type}'"
+        )
+        executor.execute_write(
+            f"INSERT INTO alert_suppressions "
+            f"(service_name, suppression_type, exception_type, reason, created_by, created_at) "
+            f"VALUES ('{service_name}', '{suppression_type}', '{exception_type}', '{reason}', 'user', CURRENT_TIMESTAMP)"
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify({"success": True})
+
+
+@app.route('/api/alert-suppressions', methods=['DELETE'])
+def delete_alert_suppression():
+    """Remove an alert suppression."""
+    executor = get_query_executor()
+    if not executor:
+        return jsonify({"error": "No database connection"}), 503
+
+    data = request.json or {}
+    service_name = data.get("service_name", "").strip()
+    exception_type = data.get("exception_type", "").strip()
+    suppression_type = data.get("suppression_type", "exception_type").strip()
+
+    if not service_name or not exception_type:
+        return jsonify({"error": "service_name and exception_type are required"}), 400
+
+    try:
+        executor.execute_write(
+            f"DELETE FROM alert_suppressions "
+            f"WHERE service_name = '{service_name}' "
+            f"AND suppression_type = '{suppression_type}' "
+            f"AND exception_type = '{exception_type}'"
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify({"success": True})
+
+
 @app.route('/api/alerts', methods=['GET'])
 def get_alerts():
     """Get alerts with optional filtering.  Cached for CACHE_TTL_ALERTS seconds."""
@@ -4024,6 +4110,34 @@ def get_error_history():
         result = executor.execute_query(exception_query)
         if result.get('success'):
             exception_types = result['rows']
+
+        # Enrich with suppression status
+        if exception_types:
+            sup_query = (
+                f"SELECT exception_type FROM alert_suppressions "
+                f"WHERE service_name IN ('{service}', '*') "
+                f"AND suppression_type = 'exception_type'"
+            )
+            sup_result = executor.execute_query(sup_query)
+            suppressed_set = set()
+            if sup_result.get('success'):
+                suppressed_set = {r['exception_type'] for r in sup_result.get('rows', [])}
+            for et in exception_types:
+                et['suppressed'] = et.get('exception_type', '') in suppressed_set
+
+    # Enrich error patterns with suppression status
+    if service and error_patterns:
+        op_sup_query = (
+            f"SELECT exception_type FROM alert_suppressions "
+            f"WHERE service_name IN ('{service}', '*') "
+            f"AND suppression_type = 'error_operation'"
+        )
+        op_sup_result = executor.execute_query(op_sup_query)
+        suppressed_ops = set()
+        if op_sup_result.get('success'):
+            suppressed_ops = {r['exception_type'] for r in op_sup_result.get('rows', [])}
+        for ep in error_patterns:
+            ep['suppressed'] = ep.get('span_name', '') in suppressed_ops
 
     return jsonify({
         "errors": errors,

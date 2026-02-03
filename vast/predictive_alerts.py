@@ -1153,6 +1153,12 @@ class AnomalyDetector:
     @traced
     def _detect_error_rate_anomaly(self, service: str) -> Optional[Dict]:
         """Detect error rate spikes."""
+        # Exclude suppressed error operations from the calculation
+        suppressed_ops = self._get_suppressed_types(service, 'error_operation')
+        not_in_clause = ""
+        if suppressed_ops:
+            escaped = "', '".join(suppressed_ops)
+            not_in_clause = f"AND span_name NOT IN ('{escaped}') "
         # Get current error rate (last 5 minutes)
         sql = f"""
             SELECT
@@ -1162,7 +1168,7 @@ class AnomalyDetector:
                     NULLIF(COUNT(*), 0) as error_rate
             FROM traces_otel_analytic
             WHERE service_name = '{service}'
-            AND start_time > current_timestamp - interval '5' minute
+            {not_in_clause}AND start_time > current_timestamp - interval '5' minute
         """
         results = self.executor.execute(sql)
 
@@ -1610,19 +1616,37 @@ class AnomalyDetector:
 
         return anomalies
 
+    def _get_suppressed_types(self, service: str, suppression_type: str = 'exception_type') -> set:
+        """Return set of suppressed values for this service (includes global '*')."""
+        sql = (
+            f"SELECT exception_type FROM alert_suppressions "
+            f"WHERE service_name IN ('{service}', '*') "
+            f"AND suppression_type = '{suppression_type}'"
+        )
+        try:
+            results = self.executor.execute(sql)
+            return {r['exception_type'] for r in results} if results else set()
+        except Exception:
+            return set()
+
     def _detect_exception_issues(self, service: str) -> List[Dict]:
         """Detect exception-related root causes: surges and new exception types."""
         anomalies = []
+        suppressed = self._get_suppressed_types(service, 'exception_type')
 
         # Check exception rate surge
         baseline = self.baseline_computer.get_baseline(service, "exception_rate")
         if baseline:
+            not_in_clause = ""
+            if suppressed:
+                escaped = "', '".join(suppressed)
+                not_in_clause = f"AND exception_type NOT IN ('{escaped}') "
             sql = f"""
                 SELECT COUNT(*) as exception_count
                 FROM span_events_otel_analytic
                 WHERE service_name = '{service}'
                 AND exception_type IS NOT NULL AND exception_type != ''
-                AND timestamp > current_timestamp - interval '5' minute
+                {not_in_clause}AND timestamp > current_timestamp - interval '5' minute
             """
             results = self.executor.execute(sql)
 
@@ -1677,6 +1701,9 @@ class AnomalyDetector:
             for row in results:
                 exc_type = row["exception_type"]
                 exc_count = row["count"]
+
+                if exc_type in suppressed:
+                    continue
 
                 if exc_type not in known_types:
                     # New exception type detected
