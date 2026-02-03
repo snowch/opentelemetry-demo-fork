@@ -5516,6 +5516,9 @@
                         errorHistory.clear();
                         sorted.slice(0, MAX_HISTORY).forEach(([k, v]) => errorHistory.set(k, v));
                     }
+                } else if (totalErrors === 0) {
+                    // No current errors — clear stale history so suppressed/old errors don't linger
+                    errorHistory.clear();
                 }
 
                 if (totalErrors > 0 || errorHistory.size > 0) {

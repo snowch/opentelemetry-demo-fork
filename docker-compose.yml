@@ -673,6 +673,7 @@ services:
       - "${OBSERVABILITY_AGENT_PORT}:5000"
     environment:
       - OTEL_SERVICE_NAME=observability-agent
+      - OTEL_DEMO_HOST=frontend-proxy
     env_file:
       - .env
       - .env.override

@@ -940,27 +940,44 @@ def system_status():
         'timestamp': datetime.utcnow().isoformat()
     }
 
-    # Load suppressed error operations to exclude from error counts/lists
-    suppression_not_expr = ""  # e.g. "NOT ((svc=X AND span=Y) OR ...)" for use in CASE WHEN
-    suppression_where = ""     # e.g. "AND NOT (...)" for use in WHERE clauses
+    # Load all suppressions to exclude from error counts/lists
+    suppression_not_expr = ""  # for use inside CASE WHEN (same as suppression_where)
+    suppression_where = ""     # for use in WHERE clauses
     try:
         sup_result = executor.execute_query(
-            "SELECT service_name, exception_type FROM alert_suppressions "
-            "WHERE suppression_type = 'error_operation'"
+            "SELECT service_name, suppression_type, exception_type FROM alert_suppressions"
         )
         if sup_result.get('success') and sup_result.get('rows'):
-            clauses = []
+            op_clauses = []       # error_operation: filter by span_name
+            exc_types = set()     # exception_type: filter via NOT EXISTS on span_events
+
             for row in sup_result['rows']:
                 svc = row['service_name']
-                op = row['exception_type']
-                if svc == '*':
-                    clauses.append(f"span_name = '{op}'")
-                else:
-                    clauses.append(f"(service_name = '{svc}' AND span_name = '{op}')")
-            if clauses:
-                combined = " OR ".join(clauses)
-                suppression_not_expr = f"AND NOT ({combined})"
-                suppression_where = suppression_not_expr
+                val = row['exception_type']
+                stype = row.get('suppression_type', 'exception_type')
+
+                if stype == 'error_operation':
+                    if svc == '*':
+                        op_clauses.append(f"span_name = '{val}'")
+                    else:
+                        op_clauses.append(f"(service_name = '{svc}' AND span_name = '{val}')")
+                elif stype == 'exception_type':
+                    exc_types.add(val)
+
+            # suppression_op_expr: safe for use inside CASE WHEN (no subqueries)
+            # suppression_where: full filter for WHERE clauses (can include NOT EXISTS)
+            op_filter = f"AND NOT ({' OR '.join(op_clauses)})" if op_clauses else ""
+            exc_filter = ""
+            if exc_types:
+                escaped = "', '".join(exc_types)
+                exc_filter = (
+                    f"AND NOT EXISTS (SELECT 1 FROM span_events_otel_analytic se "
+                    f"WHERE se.trace_id = traces_otel_analytic.trace_id "
+                    f"AND se.span_id = traces_otel_analytic.span_id "
+                    f"AND se.exception_type IN ('{escaped}'))"
+                )
+            suppression_not_expr = op_filter  # safe for CASE WHEN (operations only)
+            suppression_where = f"{op_filter} {exc_filter}".strip()  # full filter for WHERE
     except Exception:
         pass
 
@@ -1866,11 +1883,6 @@ def host_services(host_name):
         data['services'] = topo_svc['rows']
         if topo_host['success'] and topo_host['rows']:
             row = topo_host['rows'][0]
-            data['current_metrics'] = {
-                'cpu_pct': row.get('cpu_pct'),
-                'memory_pct': row.get('memory_pct'),
-                'disk_pct': row.get('disk_pct')
-            }
             data['host_info'] = {
                 'last_seen': row.get('last_seen'),
                 'os_type': row.get('os_type', 'unknown')
@@ -1961,6 +1973,31 @@ def host_services(host_name):
             if data['host_info'] is None:
                 data['host_info'] = {}
             data['host_info']['os_type'] = result['rows'][0].get('os_type', 'unknown')
+
+    # Always fetch current metrics from live data (topology_hosts can be stale)
+    live_metrics_query = f"""
+    SELECT
+        MAX(CASE WHEN metric_name = 'system.cpu.utilization' AND value_double <= 1 THEN ROUND(value_double * 100, 1) END) as cpu_pct,
+        MAX(CASE WHEN metric_name = 'system.memory.utilization' AND attributes_flat LIKE '%state=used%' AND value_double <= 1 THEN ROUND(value_double * 100, 1) END) as memory_pct,
+        MAX(CASE WHEN metric_name = 'system.filesystem.utilization' AND value_double <= 1 THEN ROUND(value_double * 100, 1) END) as disk_pct,
+        MAX(timestamp) as last_seen
+    FROM metrics_otel_analytic
+    WHERE attributes_flat LIKE '%host.name={host_name}%'
+      AND metric_name IN ('system.cpu.utilization', 'system.memory.utilization', 'system.filesystem.utilization')
+      AND timestamp > NOW() - INTERVAL '5' MINUTE
+    """
+    live_result = executor.execute_query(live_metrics_query)
+    if live_result['success'] and live_result['rows']:
+        row = live_result['rows'][0]
+        if row.get('cpu_pct') is not None or row.get('memory_pct') is not None:
+            data['current_metrics'] = {
+                'cpu_pct': row.get('cpu_pct'),
+                'memory_pct': row.get('memory_pct'),
+                'disk_pct': row.get('disk_pct')
+            }
+            if data['host_info'] is None:
+                data['host_info'] = {}
+            data['host_info']['last_seen'] = row.get('last_seen')
 
     # Fetch resource attributes from attributes_flat
     res_attr_query = f"""

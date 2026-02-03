@@ -102,15 +102,13 @@ SCENARIOS = {
     },
     "instant_exceptions": {
         "name": "Instant Exceptions",
-        "description": "Immediately triggers 50% payment failures + cart failures + product catalog failures. Generates cross-service exception stacktraces for trace viewer testing.",
+        "description": "Triggers product catalog failures for 1 minute to generate exceptions for demo purposes.",
         "predicted_alerts": ["error_spike", "dependency_anomaly"],
-        "hold_at_peak_minutes": 3,
+        "hold_at_peak_minutes": 1,
         "steps": [
-            {"delay_seconds": 0, "action": "feature_flag", "params": {"flag": "paymentFailure", "variant": "50%"}, "label": "50% payment failures"},
-            {"delay_seconds": 0, "action": "feature_flag", "params": {"flag": "cartFailure", "variant": "on"}, "label": "Cart service failures"},
             {"delay_seconds": 0, "action": "feature_flag", "params": {"flag": "productCatalogFailure", "variant": "on"}, "label": "Product catalog failures"},
         ],
-        "cleanup": {"action": "multi_flag_cleanup", "params": {"flags": {"paymentFailure": "off", "cartFailure": "off", "productCatalogFailure": "off"}}},
+        "cleanup": {"action": "feature_flag", "params": {"flag": "productCatalogFailure", "variant": "off"}},
     },
 }
 
