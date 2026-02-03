@@ -29,7 +29,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 160M
+          memory: 250M
     restart: unless-stopped
     environment:
       - KAFKA_ADDR
@@ -373,8 +373,8 @@ services:
         condition: service_started
       load-generator:
         condition: service_started
-      jaeger:
-        condition: service_started
+      # jaeger:
+      #   condition: service_started
       # grafana:
       #   condition: service_started
       flagd-ui:
@@ -827,7 +827,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 200M
+          memory: 300M
     restart: always
     environment:
       - FLAGD_UI_PORT
@@ -920,7 +920,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 50M
+          memory: 100M
     restart: unless-stopped
     environment:
       - FLAGD_HOST
@@ -939,7 +939,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 80M
+          memory: 160M
     restart: unless-stopped
     ports:
       - ${POSTGRES_PORT}
@@ -975,30 +975,30 @@ services:
   # ********************
   # Telemetry Components
   # ********************
-  # Jaeger
-  jaeger:
-    image: ${JAEGERTRACING_IMAGE}
-    container_name: jaeger
-    command:
-      - "--config=file:/etc/jaeger/config.yml"
-    deploy:
-      resources:
-        limits:
-          memory: 1200M
-    restart: unless-stopped
-    ports:
-      - "${JAEGER_UI_PORT}"
-      - "${JAEGER_GRPC_PORT}"
-    environment:
-      - JAEGER_HOST
-      - JAEGER_GRPC_PORT
-      - PROMETHEUS_ADDR
-      - OTEL_COLLECTOR_HOST
-      - OTEL_COLLECTOR_PORT_HTTP
-      - MEMORY_MAX_TRACES=25000
-    volumes:
-      - ./src/jaeger/config.yml:/etc/jaeger/config.yml
-    logging: *logging
+  # Jaeger (disabled — traces already stored in VastDB via Kafka ingester)
+  # jaeger:
+  #   image: ${JAEGERTRACING_IMAGE}
+  #   container_name: jaeger
+  #   command:
+  #     - "--config=file:/etc/jaeger/config.yml"
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 1200M
+  #   restart: unless-stopped
+  #   ports:
+  #     - "${JAEGER_UI_PORT}"
+  #     - "${JAEGER_GRPC_PORT}"
+  #   environment:
+  #     - JAEGER_HOST
+  #     - JAEGER_GRPC_PORT
+  #     - PROMETHEUS_ADDR
+  #     - OTEL_COLLECTOR_HOST
+  #     - OTEL_COLLECTOR_PORT_HTTP
+  #     - MEMORY_MAX_TRACES=25000
+  #   volumes:
+  #     - ./src/jaeger/config.yml:/etc/jaeger/config.yml
+  #   logging: *logging
 
   # Grafana (disabled — not used by vast observability UI)
   # grafana:
@@ -1025,7 +1025,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 200M
+          memory: 400M
     restart: unless-stopped
     command: [ "--config=/etc/otelcol-config.yml", "--config=/etc/otelcol-config-extras.yml" ]
     user: 0:0
@@ -1038,9 +1038,9 @@ services:
     ports:
       - "${OTEL_COLLECTOR_PORT_GRPC}"
       - "${OTEL_COLLECTOR_PORT_HTTP}"
-    depends_on:
-      jaeger:
-        condition: service_started
+    # depends_on:
+      # jaeger:
+      #   condition: service_started
       # opensearch:
       #   condition: service_healthy
     logging: *logging
@@ -1132,7 +1132,7 @@ services:
     container_name: trino
     image: vastdataorg/trino-vast:${TRINO_VERSION}
     restart: unless-stopped
-    mem_limit: 8g
+    mem_limit: 14g
     ports:
       - 18080:8080
     platform: linux/amd64

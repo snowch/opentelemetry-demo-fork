@@ -185,12 +185,13 @@ exporters:
     protocol_version: 2.0.0
     topic: otel-logs
     encoding: otlp_json
-  otlp:
-    endpoint: "jaeger:4317"
-    tls:
-      insecure: true
-    sending_queue:
-      batch:
+  # otlp/jaeger (disabled — traces go to VastDB via Kafka ingester):
+  # otlp:
+  #   endpoint: "jaeger:4317"
+  #   tls:
+  #     insecure: true
+  #   sending_queue:
+  #     batch:
   otlphttp/prometheus:
     endpoint: "http://prometheus:${env:PROMETHEUS_PORT}/api/v1/otlp"
     tls:
@@ -279,7 +280,7 @@ service:
     traces:
       receivers: [otlp]
       processors: [resourcedetection, memory_limiter, transform, batch]
-      exporters: [otlp, debug, spanmetrics, kafka/traces]
+      exporters: [debug, spanmetrics, kafka/traces]
     metrics:
       receivers: [docker_stats, httpcheck/frontend-proxy, hostmetrics, kafkametrics, nginx, otlp, postgresql, redis, spanmetrics]
       processors: [resourcedetection, resource/add-host, memory_limiter, batch]

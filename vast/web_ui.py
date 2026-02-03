@@ -3672,10 +3672,29 @@ def get_error_history():
     if result.get('success'):
         error_patterns = result['rows']
 
+    # Exception types breakdown (only when filtering by service)
+    exception_types = []
+    if service:
+        exception_query = f"""
+        SELECT exception_type, COUNT(*) as count,
+               MAX(timestamp) as last_seen
+        FROM span_events_otel_analytic
+        WHERE service_name = '{service}'
+          AND exception_type IS NOT NULL AND exception_type != ''
+          AND timestamp > NOW() - INTERVAL '{hours}' HOUR
+        GROUP BY exception_type
+        ORDER BY count DESC
+        LIMIT 20
+        """
+        result = executor.execute_query(exception_query)
+        if result.get('success'):
+            exception_types = result['rows']
+
     return jsonify({
         "errors": errors,
         "by_service": by_service,
         "error_patterns": error_patterns,
+        "exception_types": exception_types,
         "total": total,
         "hours": hours,
     })

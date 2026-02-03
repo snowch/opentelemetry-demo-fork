@@ -251,6 +251,19 @@
             border-left: 3px solid var(--accent-primary);
         }
 
+        .error-row {
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .error-row:hover {
+            background: var(--bg-hover);
+        }
+
+        tr.error-row:hover td {
+            background: var(--bg-hover);
+        }
+
         .alert-header {
             display: flex;
             justify-content: space-between;
@@ -1256,7 +1269,7 @@
             background: var(--bg-secondary);
             border-radius: 20px;
             width: 100%;
-            max-width: 950px;
+            max-width: 1100px;
             max-height: 90vh;
             overflow-y: auto;
             border: 1px solid var(--border-color);
@@ -2394,7 +2407,48 @@
             margin-bottom: 10px;
             padding-bottom: 6px;
             border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 6px;
         }
+        .help-hint {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            font-size: 10px;
+            font-weight: 700;
+            cursor: help;
+            flex-shrink: 0;
+        }
+        .help-hint:hover { background: var(--accent-primary); color: #fff; border-color: var(--accent-primary); }
+        .help-hint .help-tooltip {
+            display: none;
+            position: absolute;
+            left: 24px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 300px;
+            padding: 10px 12px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+            font-size: 11px;
+            font-weight: 400;
+            line-height: 1.5;
+            color: var(--text-secondary);
+            z-index: 1000;
+            white-space: normal;
+        }
+        .help-hint .help-tooltip strong { color: var(--text-primary); }
+        .help-hint:hover .help-tooltip { display: block; }
         .threshold-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -2473,11 +2527,15 @@
         }
 
         /* Enhanced threshold gauge */
+        .threshold-gauge-wrap {
+            position: relative;
+            margin: 20px 0 22px;
+        }
         .threshold-gauge {
             position: relative;
             height: 28px;
             border-radius: 6px;
-            overflow: hidden;
+            overflow: visible;
             background: linear-gradient(90deg,
                 rgba(59, 130, 246, 0.15) 0%,
                 rgba(59, 130, 246, 0.15) 50%,
@@ -2486,14 +2544,15 @@
                 rgba(239, 68, 68, 0.25) 75%,
                 rgba(239, 68, 68, 0.25) 100%
             );
-            margin: 10px 0 6px;
         }
         .threshold-gauge-fill {
             height: 100%;
             border-radius: 6px 0 0 6px;
             background: linear-gradient(90deg, rgba(59, 130, 246, 0.3), rgba(59, 130, 246, 0.12));
             animation: gaugeFill 600ms ease-out;
-            position: relative;
+            position: absolute;
+            top: 0;
+            left: 0;
         }
         @keyframes gaugeFill {
             from { width: 0 !important; }
@@ -2513,12 +2572,29 @@
             background: #f59e0b;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
         }
-        .threshold-gauge-labels {
-            display: flex;
-            justify-content: space-between;
+        .gauge-label-alert {
+            position: absolute;
+            top: -16px;
+            transform: translateX(-50%);
+            font-size: 10px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+        .gauge-label-mean {
+            position: absolute;
+            bottom: -16px;
+            transform: translateX(-50%);
             font-size: 10px;
             color: var(--text-muted);
-            margin-top: 2px;
+            white-space: nowrap;
+        }
+        .gauge-label-zero {
+            position: absolute;
+            bottom: -16px;
+            left: 0;
+            font-size: 10px;
+            color: var(--text-muted);
+            white-space: nowrap;
         }
 
         /* Enhanced threshold card */
@@ -3216,18 +3292,18 @@
 
         .alert-no-investigation {
             text-align: center;
-            padding: 40px 20px;
+            padding: 16px 20px;
             color: var(--text-muted);
         }
 
         .alert-no-investigation-icon {
-            font-size: 48px;
-            margin-bottom: 16px;
+            font-size: 24px;
+            margin-bottom: 8px;
         }
 
         .alert-no-investigation-text {
-            font-size: 14px;
-            margin-bottom: 20px;
+            font-size: 13px;
+            margin-bottom: 12px;
         }
 
         .alert-actions {
@@ -4296,6 +4372,7 @@
                     { id: 'logs', label: 'Logs', loader: 'loadEntityLogs', hasBadge: true },
                     { id: 'metrics', label: 'Metrics', loader: 'loadEntityMetrics', hasBadge: true },
                     { id: 'alerts', label: 'Alerts', loader: 'loadEntityAlerts', hasBadge: true },
+                    { id: 'errors', label: 'Errors', loader: 'loadEntityErrors', hasBadge: true },
                     { id: 'thresholds', label: 'Thresholds', loader: 'loadEntityThresholds' },
                 ],
                 defaultTab: 'charts',
@@ -4314,6 +4391,7 @@
                     { id: 'logs', label: 'Logs', loader: 'loadEntityLogs', hasBadge: true },
                     { id: 'metrics', label: 'Metrics', loader: 'loadEntityMetrics', hasBadge: true },
                     { id: 'alerts', label: 'Alerts', loader: 'loadEntityAlerts', hasBadge: true },
+                    { id: 'errors', label: 'Errors', loader: 'loadEntityErrors', hasBadge: true },
                     { id: 'thresholds', label: 'Thresholds', loader: 'loadEntityThresholds' },
                 ],
                 defaultTab: 'charts',
@@ -4344,6 +4422,7 @@
                 tabs: [
                     { id: 'overview', label: 'Metrics', loader: 'loadContainerOverview' },
                     { id: 'alerts', label: 'Alerts', loader: 'loadEntityAlerts', hasBadge: true },
+                    { id: 'errors', label: 'Errors', loader: 'loadEntityErrors', hasBadge: true },
                     { id: 'logs', label: 'Logs', loader: 'loadEntityLogs', hasBadge: true },
                     { id: 'metrics', label: 'All Metrics', loader: 'loadEntityMetrics', hasBadge: true },
                     { id: 'thresholds', label: 'Thresholds', loader: 'loadEntityThresholds' },
@@ -4355,6 +4434,66 @@
         };
         const REFRESH_INTERVAL = 60000; // 60 seconds for sidebar (matches background job cycles)
         const MODAL_REFRESH_INTERVAL = 60000; // 60 seconds for drill-down modal
+
+        // Idle detection — progressively slow down refreshes when user is away
+        const IDLE_SLOW_AFTER = 5 * 60 * 1000;   // 5 min: switch to slow refresh
+        const IDLE_PAUSE_AFTER = 30 * 60 * 1000;  // 30 min: pause refreshes entirely
+        const IDLE_SLOW_INTERVAL = 5 * 60 * 1000; // slow = every 5 minutes
+        let lastUserActivity = Date.now();
+        let idleState = 'active'; // 'active' | 'slow' | 'paused'
+
+        function onUserActivity() {
+            lastUserActivity = Date.now();
+            if (idleState !== 'active') {
+                idleState = 'active';
+                updateIdleBanner();
+                startSidebarAutoRefresh();
+                if (entityModalAutoRefresh && currentEntityName) {
+                    startEntityModalAutoRefresh();
+                }
+                refreshStatus(); // immediate catch-up
+            }
+        }
+        ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'].forEach(evt =>
+            document.addEventListener(evt, onUserActivity, { passive: true }));
+
+        function updateIdleBanner() {
+            let banner = document.getElementById('idle-banner');
+            if (idleState === 'active') {
+                if (banner) banner.remove();
+                return;
+            }
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.id = 'idle-banner';
+                banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:rgba(245,158,11,0.9);color:#000;text-align:center;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;';
+                banner.onclick = onUserActivity;
+                document.body.appendChild(banner);
+            }
+            if (idleState === 'paused') {
+                banner.textContent = 'Auto-refresh paused due to inactivity. Click or press any key to resume.';
+            } else {
+                banner.textContent = 'Auto-refresh slowed due to inactivity. Move mouse to resume normal rate.';
+            }
+        }
+
+        setInterval(() => {
+            const idle = Date.now() - lastUserActivity;
+            if (!pageVisible) return; // visibility handler already paused timers
+            if (idle >= IDLE_PAUSE_AFTER && idleState !== 'paused') {
+                idleState = 'paused';
+                if (sidebarRefreshInterval) { clearInterval(sidebarRefreshInterval); sidebarRefreshInterval = null; }
+                if (entityModalRefreshInterval) { clearInterval(entityModalRefreshInterval); entityModalRefreshInterval = null; }
+                updateIdleBanner();
+            } else if (idle >= IDLE_SLOW_AFTER && idle < IDLE_PAUSE_AFTER && idleState === 'active') {
+                idleState = 'slow';
+                startSidebarAutoRefresh();
+                if (entityModalAutoRefresh && currentEntityName) {
+                    startEntityModalAutoRefresh();
+                }
+                updateIdleBanner();
+            }
+        }, 30000);
 
         const chartColors = ['#3b82f6', '#64748b', '#22c55e', '#f59e0b', '#ef4444', '#ec4899'];
 
@@ -4393,8 +4532,9 @@
 
         function startSidebarAutoRefresh() {
             if (sidebarRefreshInterval) clearInterval(sidebarRefreshInterval);
-            if (sidebarAutoRefresh && pageVisible) {
-                sidebarRefreshInterval = setInterval(refreshStatus, REFRESH_INTERVAL);
+            if (sidebarAutoRefresh && pageVisible && idleState !== 'paused') {
+                const interval = idleState === 'slow' ? IDLE_SLOW_INTERVAL : REFRESH_INTERVAL;
+                sidebarRefreshInterval = setInterval(refreshStatus, interval);
             }
         }
 
@@ -5678,6 +5818,15 @@ ${escapeHtml(alert.supporting_evidence)}</div>
                         <span class="alert-meta-label">Type</span>
                         <span class="alert-meta-value">${escapeHtml(alertType)}</span>
                     </div>
+                    ${alert.metric_type ? `
+                    <div class="alert-meta-item">
+                        <span class="alert-meta-label">Metric</span>
+                        <span class="alert-meta-value">
+                            ${escapeHtml(metricTypeLabel(alert.metric_type))}
+                            <a href="#" onclick="closeAlertModal(); var e=resolveEntityType('${escapeHtml(alert.service_name)}'); openEntityModal(e.type, e.name).then(()=>switchEntityTab('thresholds')); return false;" style="color:#3b82f6;font-size:10px;margin-left:6px;" title="View thresholds for this entity">Adjust Threshold</a>
+                        </span>
+                    </div>
+                    ` : ''}
                     <div class="alert-meta-item">
                         <span class="alert-meta-label">Created</span>
                         <span class="alert-meta-value">${createdAt}</span>
@@ -5692,6 +5841,12 @@ ${escapeHtml(alert.supporting_evidence)}</div>
                     <div class="alert-meta-item">
                         <span class="alert-meta-label">Baseline</span>
                         <span class="alert-meta-value">${formatMetricValue(alert.baseline_value, alert.metric_type)}</span>
+                    </div>
+                    ` : ''}
+                    ${alert.z_score ? `
+                    <div class="alert-meta-item">
+                        <span class="alert-meta-label">Z-Score</span>
+                        <span class="alert-meta-value">${Number(alert.z_score).toFixed(1)}σ</span>
                     </div>
                     ` : ''}
                 </div>
@@ -6332,8 +6487,9 @@ Can you help me understand this issue further or suggest next steps?`;
 
         function startEntityModalAutoRefresh() {
             if (entityModalRefreshInterval) clearInterval(entityModalRefreshInterval);
-            if (entityModalAutoRefresh && currentEntityName && pageVisible) {
-                entityModalRefreshInterval = setInterval(() => refreshEntityModal(), MODAL_REFRESH_INTERVAL);
+            if (entityModalAutoRefresh && currentEntityName && pageVisible && idleState !== 'paused') {
+                const interval = idleState === 'slow' ? IDLE_SLOW_INTERVAL : MODAL_REFRESH_INTERVAL;
+                entityModalRefreshInterval = setInterval(() => refreshEntityModal(), interval);
             }
         }
 
@@ -6676,8 +6832,11 @@ Can you help me understand this issue further or suggest next steps?`;
             if (!currentEntityName) return;
             const body = document.getElementById('entity-modal-body');
 
-            const hasContainerCharts = modalCharts.containerCpu || modalCharts.containerMemory;
+            const hasContainerCharts = (modalCharts.containerCpu || modalCharts.containerMemory)
+                && document.getElementById('container-cpu-history-chart');
             if (!hasContainerCharts) {
+                if (modalCharts.containerCpu) { try { modalCharts.containerCpu.destroy(); } catch(e) {} delete modalCharts.containerCpu; }
+                if (modalCharts.containerMemory) { try { modalCharts.containerMemory.destroy(); } catch(e) {} delete modalCharts.containerMemory; }
                 Object.values(modalCharts).forEach(c => c.destroy());
                 modalCharts = {};
                 body.innerHTML = `
@@ -7228,6 +7387,106 @@ Can you help me understand this issue further or suggest next steps?`;
         }
 
         // =================================================================
+        // Errors Tab
+        // =================================================================
+        async function loadEntityErrors() {
+            const body = document.getElementById('entity-modal-body');
+            body.innerHTML = '<div class="loading-indicator">Loading errors...</div>';
+            const name = currentEntityName;
+
+            try {
+                const resp = await fetch(`/api/errors/history?service=${encodeURIComponent(name)}&hours=24&limit=50`);
+                const data = await resp.json();
+                const errors = data.errors || [];
+                const patterns = data.error_patterns || [];
+                const exceptionTypes = data.exception_types || [];
+                const total = data.total || 0;
+
+                // Update badge
+                const countBadge = document.getElementById('entity-errors-count');
+                if (countBadge) countBadge.textContent = total;
+
+                if (total === 0 && errors.length === 0) {
+                    body.innerHTML = '<div class="empty-state" style="padding:24px 0;">No errors in the last 24 hours</div>';
+                    return;
+                }
+
+                let html = '<div style="padding:0;">';
+
+                // Summary bar
+                html += `<div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;padding:10px 14px;background:var(--bg-tertiary);border-radius:8px;font-size:12px;">
+                    <span style="font-weight:600;color:var(--accent-error);">${total} errors</span>
+                    <span style="color:var(--text-muted);">in the last ${data.hours || 24}h</span>
+                    <span style="color:var(--text-muted);">${patterns.length} unique patterns</span>
+                    ${exceptionTypes.length ? `<span style="color:var(--text-muted);">${exceptionTypes.length} exception types</span>` : ''}
+                </div>`;
+
+                // Error Patterns table
+                if (patterns.length > 0) {
+                    html += `<div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">Error Patterns</div>`;
+                    html += `<div class="data-table-container" style="margin-bottom:16px;"><table class="data-table"><thead><tr>
+                        <th>Operation</th><th>Count</th><th>Avg Duration</th><th>Last Seen</th>
+                    </tr></thead><tbody>`;
+                    patterns.forEach(p => {
+                        const lastSeen = p.last_seen ? formatTimeAgo(p.last_seen) : '-';
+                        const avgDur = p.avg_duration_ms != null ? Number(p.avg_duration_ms).toFixed(1) + ' ms' : '-';
+                        html += `<tr class="error-row">
+                            <td style="font-family:var(--font-mono);font-size:11px;">${escapeHtml(p.span_name || '-')}</td>
+                            <td style="color:var(--accent-error);font-weight:600;">${p.count}</td>
+                            <td>${avgDur}</td>
+                            <td style="color:var(--text-muted);">${lastSeen}</td>
+                        </tr>`;
+                    });
+                    html += '</tbody></table></div>';
+                }
+
+                // Exception Types
+                if (exceptionTypes.length > 0) {
+                    html += `<div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">Exception Types</div>`;
+                    html += `<div class="data-table-container" style="margin-bottom:16px;"><table class="data-table"><thead><tr>
+                        <th>Exception Type</th><th>Count</th><th>Last Seen</th>
+                    </tr></thead><tbody>`;
+                    exceptionTypes.forEach(e => {
+                        const lastSeen = e.last_seen ? formatTimeAgo(e.last_seen) : '-';
+                        html += `<tr class="error-row">
+                            <td style="font-family:var(--font-mono);font-size:11px;color:var(--accent-error);">${escapeHtml(e.exception_type || '-')}</td>
+                            <td style="font-weight:600;">${e.count}</td>
+                            <td style="color:var(--text-muted);">${lastSeen}</td>
+                        </tr>`;
+                    });
+                    html += '</tbody></table></div>';
+                }
+
+                // Recent Errors
+                if (errors.length > 0) {
+                    html += `<details ${patterns.length === 0 ? 'open' : ''} style="margin-top:4px;">
+                        <summary style="font-size:13px;font-weight:600;color:var(--text-secondary);cursor:pointer;padding:6px 0;">Recent Errors (${errors.length})</summary>
+                        <div style="margin-top:8px;">`;
+                    errors.forEach(e => {
+                        const time = e.start_time ? new Date(e.start_time).toLocaleString() : '-';
+                        const dur = e.duration_ms != null ? Number(e.duration_ms).toFixed(1) + ' ms' : '-';
+                        html += `<div class="alert-item alert-critical error-row" style="margin-bottom:6px;border-radius:8px;cursor:pointer;" onclick="window.open('/trace/${e.trace_id}', '_blank')">
+                            <div style="display:flex;justify-content:space-between;align-items:center;">
+                                <span style="font-family:var(--font-mono);font-size:11px;font-weight:600;">${escapeHtml(e.span_name || '-')}</span>
+                                <span style="font-size:10px;color:var(--text-muted);">${time}</span>
+                            </div>
+                            <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">
+                                ${e.service_name ? escapeHtml(e.service_name) + ' · ' : ''}${dur} · <span style="font-family:var(--font-mono);font-size:9px;opacity:0.7;">${escapeHtml((e.trace_id || '').substring(0, 16))}…</span>
+                            </div>
+                        </div>`;
+                    });
+                    html += '</div></details>';
+                }
+
+                html += '</div>';
+                body.innerHTML = html;
+            } catch (err) {
+                console.error('Failed to load entity errors:', err);
+                body.innerHTML = '<div class="empty-state">Failed to load errors</div>';
+            }
+        }
+
+        // =================================================================
         // Thresholds Tab
         // =================================================================
         const THRESHOLD_CATEGORIES_BY_TYPE = {
@@ -7259,14 +7518,16 @@ Can you help me understand this issue further or suggest next steps?`;
             const markerPct = Math.min(95, Math.max(5, (threshVal / maxVal) * 100));
             const fillPct = Math.min(100, (mean / maxVal) * 100);
             const markerClass = source === 'manual' ? 'manual' : '';
-            return `<div class="threshold-gauge">
-                <div class="threshold-gauge-fill" style="width:${fillPct}%"></div>
-                <div class="threshold-gauge-marker ${markerClass}" style="left:${markerPct}%" title="Alert at ${formatBaselineValue(threshVal, category)}"></div>
-            </div>
-            <div class="threshold-gauge-labels">
-                <span>0</span>
-                <span>Mean: ${formatBaselineValue(mean, category)}</span>
-                <span>Threshold: ${formatBaselineValue(threshVal, category)}</span>
+            const meanLabelPct = Math.min(92, Math.max(8, fillPct));
+            const alertLabelPct = Math.min(92, Math.max(8, markerPct));
+            return `<div class="threshold-gauge-wrap">
+                <span class="gauge-label-alert" style="left:${alertLabelPct}%">Alert: ${formatBaselineValue(threshVal, category)}</span>
+                <div class="threshold-gauge">
+                    <div class="threshold-gauge-fill" style="width:${fillPct}%"></div>
+                    <div class="threshold-gauge-marker ${markerClass}" style="left:${markerPct}%"></div>
+                </div>
+                <span class="gauge-label-zero">0</span>
+                <span class="gauge-label-mean" style="left:${meanLabelPct}%">Mean: ${formatBaselineValue(mean, category)}</span>
             </div>`;
         }
 
@@ -7298,10 +7559,10 @@ Can you help me understand this issue further or suggest next steps?`;
                 <div id="${editId}"></div>
                 ${gaugeHtml}
                 <div class="card-stats-row">
-                    <span>Effective: <strong>${catInfo.effective}σ</strong></span>
-                    <span>Base: ${catInfo.base}σ × ${catInfo.multiplier}</span>
-                    ${learnedAdj !== 0 ? `<span>Learned: <strong>${learnedAdj > 0 ? '+' : ''}${learnedAdj}</strong></span>` : ''}
-                    ${baseline ? `<span>Samples: <strong>${baseline.sample_count}</strong></span>` : ''}
+                    <span title="Final detection sensitivity after all adjustments. Higher = fewer alerts.">Effective: <strong>${catInfo.effective}σ</strong></span>
+                    <span title="Base sigma × category multiplier. Multiplier < 1 means more sensitive.">Base: ${catInfo.base}σ × ${catInfo.multiplier}</span>
+                    ${learnedAdj !== 0 ? `<span title="Auto-tuning adjustment from adaptive learning based on alert outcomes.">Learned: <strong>${learnedAdj > 0 ? '+' : ''}${learnedAdj}</strong></span>` : ''}
+                    ${baseline ? `<span title="Number of data points used to compute the baseline mean and standard deviation.">Samples: <strong>${baseline.sample_count}</strong></span>` : ''}
                 </div>
                 <div class="card-stats-row" style="margin-top:4px;">
                     <span>24h alerts: <strong>${alertCount}</strong></span>
@@ -7387,7 +7648,9 @@ Can you help me understand this issue further or suggest next steps?`;
                 // --- 1. Baselines & Thresholds — gauge cards ---
                 if (baselines.length > 0) {
                     html += `<div class="threshold-section">
-                        <div class="threshold-section-title">Baselines &amp; Thresholds for ${escapeHtml(currentEntityName)}</div>`;
+                        <div class="threshold-section-title">Baselines &amp; Thresholds for ${escapeHtml(currentEntityName)}
+                            <span class="help-hint">?<span class="help-tooltip">Each card shows a monitored metric. <strong>Mean</strong> is the average value over the baseline window. The gauge bar shows zones: <strong style="color:#3b82f6;">blue</strong> = normal range, <strong style="color:#f59e0b;">amber</strong> = elevated (approaching threshold), <strong style="color:#ef4444;">red</strong> = danger (above threshold). The vertical marker shows where the alert triggers. <strong>Effective &sigma;</strong> is the final sensitivity after multipliers and auto-tuning. <strong>Samples</strong> is how many data points built this baseline. Click the pencil icon to manually override the threshold.</span></span>
+                        </div>`;
                     for (const b of baselines) {
                         // Find matching category
                         let matchedCat = null;
@@ -7417,7 +7680,9 @@ Can you help me understand this issue further or suggest next steps?`;
                     html += '</div>';
                 } else if (type === 'service' || type === 'database') {
                     html += `<div class="threshold-section">
-                        <div class="threshold-section-title">Baselines &amp; Thresholds for ${escapeHtml(currentEntityName)}</div>
+                        <div class="threshold-section-title">Baselines &amp; Thresholds for ${escapeHtml(currentEntityName)}
+                            <span class="help-hint">?<span class="help-tooltip">Baselines are statistical profiles of normal behavior. They are computed from historical data and used to detect anomalies. Each metric needs a minimum number of samples before a baseline can be established.</span></span>
+                        </div>
                         <div class="empty-state" style="padding:12px 0;">No baselines computed yet. Baselines require ${data.baselines.min_samples}+ samples from the last ${data.baselines.window_hours}h.</div>
                     </div>`;
                 }
@@ -7426,7 +7691,9 @@ Can you help me understand this issue further or suggest next steps?`;
                 const relevantCategories = THRESHOLD_CATEGORIES_BY_TYPE[type] || [];
                 if (relevantCategories.length > 0 && data.root_cause && cats) {
                     html += `<div class="threshold-section">
-                        <div class="threshold-section-title">Detection Categories</div>
+                        <div class="threshold-section-title">Detection Categories
+                            <span class="help-hint">?<span class="help-tooltip">Each category is a type of anomaly the system detects. <strong>&sigma; (sigma)</strong> is the sensitivity in standard deviations &mdash; higher values mean fewer alerts. The formula is <strong>Base &times; Multiplier + Learned</strong>. Categories marked <em>more sensitive</em> have a multiplier &lt; 1. <strong>Auto-resolve rate</strong> shows how often alerts self-resolve, indicating possible noise.</span></span>
+                        </div>
                         <div class="detection-category-grid">`;
                     for (const catKey of relevantCategories) {
                         const cat = cats[catKey];
@@ -7454,7 +7721,9 @@ Can you help me understand this issue further or suggest next steps?`;
                 const adjustedCats = Object.entries(learnedAdj).filter(([, v]) => v !== 0);
                 if (data.root_cause?.adaptive_thresholds) {
                     html += `<div class="threshold-section">
-                        <div class="threshold-section-title">Auto-Tuning Status</div>
+                        <div class="threshold-section-title">Auto-Tuning Status
+                            <span class="help-hint">?<span class="help-tooltip">The system automatically adjusts detection thresholds based on alert outcomes. If alerts for a category are frequently auto-resolved (indicating false positives), the threshold is raised (<strong>&#9650;</strong>) to reduce noise. Conversely, thresholds can be lowered (<strong>&#9660;</strong>) for categories that need more sensitivity. These learned adjustments are added to the base threshold.</span></span>
+                        </div>
                         <div class="tuning-status-bar">
                             <span class="tuning-label">Adaptive Learning: ${data.root_cause.adaptive_thresholds ? 'Active' : 'Disabled'}</span>
                             <span>${adjustedCats.length} categories adjusted</span>`;
@@ -7469,7 +7738,9 @@ Can you help me understand this issue further or suggest next steps?`;
                 if (type === 'host' || type === 'container') {
                     const rp = data.resource_predictions;
                     html += `<div class="threshold-section">
-                        <div class="threshold-section-title">Resource Exhaustion Predictions</div>
+                        <div class="threshold-section-title">Resource Exhaustion Predictions
+                            <span class="help-hint">?<span class="help-tooltip">Uses linear regression on recent resource usage to predict when thresholds will be exceeded. <strong>R&sup2;</strong> is the regression fit quality (0&ndash;1) &mdash; predictions below the minimum are discarded as unreliable. The <strong>trend window</strong> controls how much history is analyzed.</span></span>
+                        </div>
                         <div class="threshold-grid">
                             <div class="threshold-card">
                                 <div class="threshold-label">Disk Threshold</div>
@@ -7507,7 +7778,9 @@ Can you help me understand this issue further or suggest next steps?`;
 
                 // --- 4. Global settings (collapsed by default) ---
                 html += `<details class="threshold-details">
-                    <summary class="threshold-details-summary">Global Detection Settings</summary>
+                    <summary class="threshold-details-summary">Global Detection Settings
+                        <span class="help-hint" style="margin-left:6px;">?<span class="help-tooltip">System-wide configuration that applies to all entities. These are the default values used when no per-entity override is set. <strong>Z-Score Threshold</strong> is the base sensitivity. <strong>Cooldown</strong> prevents alert storms by suppressing duplicate alerts. <strong>LLM</strong> settings control automatic AI-powered root cause investigation.</span></span>
+                    </summary>
                     <div class="threshold-section" style="margin-top:10px;">
                         <div class="threshold-grid">
                             <div class="threshold-card">

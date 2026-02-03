@@ -344,9 +344,10 @@ class TopologyInferenceService:
 
         sql = f"""
         INSERT INTO topology_hosts
+            (host_name, display_name, os_type, cpu_pct, memory_pct, disk_pct, last_seen, updated_at)
         SELECT
             REGEXP_EXTRACT(attributes_flat, 'host\\.name=([^,]+)', 1) as host_name,
-            NULL as display_name,
+            CAST(NULL AS varchar) as display_name,
             MAX(CASE
                 WHEN attributes_flat LIKE '%os.type=linux%' THEN 'linux'
                 WHEN attributes_flat LIKE '%os.type=windows%' THEN 'windows'
@@ -361,7 +362,7 @@ class TopologyInferenceService:
             MAX(CASE WHEN metric_name = 'system.filesystem.utilization' AND value_double <= 1
                 THEN ROUND(value_double * 100, 1) END) as disk_pct,
             MAX(timestamp) as last_seen,
-            NOW() as updated_at
+            CAST(NOW() AS timestamp(9)) as updated_at
         FROM metrics_otel_analytic
         WHERE metric_name IN ('system.cpu.utilization', 'system.memory.utilization', 'system.filesystem.utilization')
           AND timestamp > NOW() - INTERVAL '{lookback}' MINUTE

@@ -679,7 +679,13 @@ class BaselineComputer:
             return None
 
         error_rates = [r["error_rate"] for r in results if r["error_rate"] is not None]
-        return self._compute_stats(error_rates)
+        stats = self._compute_stats(error_rates)
+        if stats:
+            # Apply a minimum stddev floor so a perfectly clean history
+            # (stddev=0) still produces a meaningful threshold (e.g. 1.5%
+            # at 3σ) rather than an unhelpful 0%.
+            stats["stddev"] = max(stats["stddev"], 0.005)
+        return stats
 
     def _compute_latency_baseline(self, service: str, percentile: str) -> Optional[Dict]:
         """Compute latency baseline for a service."""
@@ -1128,6 +1134,13 @@ class AnomalyDetector:
 
         return anomalies
 
+    # Minimum stddev floor for error rate baselines.  When a service has a
+    # perfectly clean history (stddev=0), use this floor so the threshold
+    # isn't a meaningless 0% and small transient errors don't immediately
+    # trigger anomaly detection.  0.5% is a sensible default — any single-
+    # digit error rate blip stays below the 3σ alert line (1.5%).
+    ERROR_RATE_STDDEV_FLOOR = 0.005  # 0.5%
+
     def _detect_error_rate_anomaly(self, service: str) -> Optional[Dict]:
         """Detect error rate spikes."""
         # Get current error rate (last 5 minutes)
@@ -1153,8 +1166,9 @@ class AnomalyDetector:
         severity = None
         z_score = 0
 
-        if baseline and baseline["stddev"] > 0:
-            z_score = (current_rate - baseline["mean"]) / baseline["stddev"]
+        if baseline:
+            stddev = max(baseline["stddev"], self.ERROR_RATE_STDDEV_FLOOR)
+            z_score = (current_rate - baseline["mean"]) / stddev
 
             if z_score > self.config.zscore_threshold:
                 severity = Severity.WARNING
@@ -1773,6 +1787,11 @@ class AlertManager:
             title = f"{alert_type.replace('_', ' ').title()} - {service}"
         description = anomaly["message"]
 
+        baseline_val = anomaly['baseline_value']
+        z_score_val = anomaly['z_score']
+        baseline_sql = 'NULL' if baseline_val is None else str(baseline_val)
+        z_score_sql = 'NULL' if z_score_val is None else str(z_score_val)
+
         sql = f"""
             INSERT INTO alerts (
                 alert_id, created_at, updated_at, service_name,
@@ -1782,8 +1801,8 @@ class AlertManager:
             ) VALUES (
                 '{alert_id}', TIMESTAMP '{now}', TIMESTAMP '{now}', '{service}',
                 '{alert_type}', '{severity}', '{title}', '{description}',
-                '{metric_type}', {anomaly['current_value']}, 0, {anomaly['baseline_value']},
-                {anomaly['z_score']}, 'active', false
+                '{metric_type}', {anomaly['current_value']}, 0, {baseline_sql},
+                {z_score_sql}, 'active', false
             )
         """
 
@@ -1831,11 +1850,13 @@ class AlertManager:
         alert = self.active_alerts[key]
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
+        z_val = anomaly['z_score']
+        z_sql = 'NULL' if z_val is None else str(z_val)
         sql = f"""
             UPDATE alerts
             SET updated_at = TIMESTAMP '{now}',
                 current_value = {anomaly['current_value']},
-                z_score = {anomaly['z_score']},
+                z_score = {z_sql},
                 severity = '{anomaly['severity'].value}'
             WHERE alert_id = '{alert['alert_id']}'
         """
