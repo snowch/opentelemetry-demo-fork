@@ -1012,8 +1012,8 @@ def system_status():
         stats_query = f"""
         SELECT service_name,
                COUNT(*) as total_spans,
-               SUM(CASE WHEN status_code = 'ERROR' {suppression_not_expr} THEN 1 ELSE 0 END) as errors,
-               ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' {suppression_not_expr} THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) as error_pct,
+               SUM(CASE WHEN status_code = 'ERROR' AND (http_status IS NULL OR http_status < 200 OR http_status >= 300) {suppression_not_expr} THEN 1 ELSE 0 END) as errors,
+               ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' AND (http_status IS NULL OR http_status < 200 OR http_status >= 300) {suppression_not_expr} THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) as error_pct,
                ROUND(AVG(duration_ns / 1000000.0), 2) as avg_latency_ms
         FROM traces_otel_analytic
         WHERE start_time > NOW() - INTERVAL {interval}
@@ -1064,6 +1064,7 @@ def system_status():
         COUNT(DISTINCT service_name) as affected_services
     FROM traces_otel_analytic
     WHERE status_code = 'ERROR'
+      AND (http_status IS NULL OR http_status < 200 OR http_status >= 300)
       AND start_time > NOW() - INTERVAL {interval}
       {suppression_where}
     """
@@ -1078,6 +1079,7 @@ def system_status():
            start_time
     FROM traces_otel_analytic
     WHERE status_code = 'ERROR'
+      AND (http_status IS NULL OR http_status < 200 OR http_status >= 300)
       AND start_time > NOW() - INTERVAL {interval}
       {suppression_where}
     ORDER BY start_time DESC
@@ -2769,6 +2771,27 @@ def entity_metrics(entity_type, name):
 
 
 # Attribute keys that are always noise in per-entity chart legends
+def _deduplicate_series_labels(series_list):
+    """Remove key=value pairs that are identical across all series labels."""
+    if len(series_list) <= 1:
+        return
+    # Parse each label into a set of key=value parts
+    parsed = []
+    for s in series_list:
+        parts = {p.strip() for p in s['label'].split(',') if p.strip()}
+        parsed.append(parts)
+    # Find parts common to every series
+    common = parsed[0].copy()
+    for p in parsed[1:]:
+        common &= p
+    if not common:
+        return
+    # Rebuild labels without common parts
+    for i, s in enumerate(series_list):
+        unique = [p for p in s['label'].split(',') if p.strip() and p.strip() not in common]
+        s['label'] = ', '.join(p.strip() for p in unique) if unique else s['label']
+
+
 _NOISE_ATTR_PREFIXES = (
     'host.name=', 'os.type=', 'service.namespace=', 'service.version=',
     'service.name=', 'telemetry.sdk.', 'container.name=', 'container.id=',
@@ -2863,8 +2886,10 @@ def entity_metric_history(entity_type, name):
             'value': row['avg_value'],
         })
 
+    series_list = list(series_map.values())
+    _deduplicate_series_labels(series_list)
     return jsonify({
-        'series': list(series_map.values()),
+        'series': series_list,
         'metric_name': metric,
     })
 
@@ -4090,6 +4115,7 @@ def get_error_history():
     conditions = [
         "status_code = 'ERROR'",
         f"start_time > NOW() - INTERVAL '{hours}' HOUR",
+        "(http_status IS NULL OR http_status < 200 OR http_status >= 300)",
     ]
     if service:
         conditions.append(f"service_name = '{service}'")

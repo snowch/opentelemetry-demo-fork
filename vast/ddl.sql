@@ -393,6 +393,15 @@ CREATE TABLE ${CATALOG}."${SCHEMA}".alert_suppressions (
    created_at        timestamp(9)
 );
 
+-- Default suppressions for noisy Trino internal operations
+INSERT INTO ${CATALOG}."${SCHEMA}".alert_suppressions
+    (service_name, suppression_type, exception_type, reason, created_by, created_at)
+VALUES
+    ('trino', 'error_operation', 'task-status', 'Trino internal polling – not a real error', 'system', NOW()),
+    ('trino', 'error_operation', 'DELETE', 'Trino exchange cleanup – not a real error', 'system', NOW()),
+    ('trino', 'error_operation', 'exchange', 'Trino exchange operation – not a real error', 'system', NOW()),
+    ('trino', 'error_operation', 'exchange GET', 'Trino exchange GET – not a real error', 'system', NOW());
+
 -- =============================================================================
 -- Remediation Playbooks
 -- =============================================================================

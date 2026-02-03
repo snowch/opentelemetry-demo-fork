@@ -888,6 +888,58 @@
             max-height: 280px;
         }
 
+        .chart-container, .chart-card {
+            cursor: pointer;
+        }
+
+        .chart-zoom-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .chart-zoom-overlay.active { display: flex; }
+
+        .chart-zoom-modal {
+            background: var(--bg-secondary);
+            border-radius: 20px;
+            width: 90vw;
+            height: 85vh;
+            border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-lg);
+            animation: modalIn 0.3s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chart-zoom-modal .modal-header {
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+
+        .chart-zoom-modal .modal-body {
+            flex: 1 1 0;
+            padding: 0;
+            min-height: 0;
+            position: relative;
+        }
+
+        .chart-zoom-modal .modal-body canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100% !important;
+            height: 100% !important;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
         /* Query Results */
         .query-block {
             background: var(--bg-secondary);
@@ -1328,6 +1380,16 @@
 
         .modal-body { padding: 24px; }
 
+        #entity-modal-body {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        #entity-modal-body > :not(.chart-card) {
+            grid-column: 1 / -1;
+        }
+
         .chart-row {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -1457,6 +1519,23 @@
             display: flex;
             align-items: center;
             gap: 16px;
+        }
+
+        .modal-back-btn {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 6px 8px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+        }
+
+        .modal-back-btn:hover {
+            border-color: var(--accent-primary);
+            color: var(--accent-primary);
         }
 
         .modal-refresh-btn {
@@ -4245,6 +4324,11 @@
         <div class="modal">
             <div class="modal-header">
                 <div class="modal-title-row">
+                    <button class="modal-back-btn" id="entity-back-btn" onclick="entityNavBack()" title="Back" style="display:none">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M19 12H5M12 19l-7-7 7-7"/>
+                        </svg>
+                    </button>
                     <span class="modal-type-badge" id="entity-type-badge">Entity</span>
                     <select class="service-selector" id="entity-selector" onchange="switchEntity(this.value)">
                         <option value="">Loading...</option>
@@ -4576,6 +4660,19 @@
         </div>
     </div>
 
+    <!-- Chart Zoom Modal -->
+    <div class="chart-zoom-overlay" id="chart-zoom-overlay" onclick="closeChartZoom()">
+        <div class="chart-zoom-modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h2 id="chart-zoom-title">Chart</h2>
+                <button class="modal-close" onclick="closeChartZoom()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <canvas id="chart-zoom-canvas"></canvas>
+            </div>
+        </div>
+    </div>
+
     <script>
         const sessionId = 'session_' + Math.random().toString(36).substr(2, 9);
         let isLoading = false;
@@ -4583,6 +4680,9 @@
         let activeMetricChart = null;
         let activeMetricRow = null;
         let chatCharts = [];
+        const chartDataStore = {};
+        let zoomChartInstance = null;
+        const entityNavHistory = [];
 
         // History buffers for sidebar persistence
         const MAX_HISTORY = 50;
@@ -4790,6 +4890,13 @@
 
         const chartColors = ['#3b82f6', '#64748b', '#22c55e', '#f59e0b', '#ef4444', '#ec4899'];
 
+        function truncateMiddle(text, max) {
+            if (!text || text.length <= max) return text;
+            const tail = Math.ceil(max * 0.6);
+            const head = max - tail - 1;
+            return text.slice(0, head) + '…' + text.slice(-tail);
+        }
+
         Chart.defaults.color = '#a0a0b0';
         Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.06)';
 
@@ -4804,6 +4911,23 @@
             refreshStatus();
             startSidebarAutoRefresh();
             initSimulator();
+
+            // Click-to-expand for chart-cards in entity modals
+            document.getElementById('entity-modal').addEventListener('click', function(e) {
+                const card = e.target.closest('.chart-card');
+                if (!card) return;
+                const canvas = card.querySelector('canvas');
+                if (!canvas) return;
+                openChartZoomFromCanvas(canvas);
+            });
+
+            // Escape key to close chart zoom
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape' && document.getElementById('chart-zoom-overlay').classList.contains('active')) {
+                    closeChartZoom();
+                    e.stopImmediatePropagation();
+                }
+            });
         });
 
         // Pause all refresh timers when browser tab is hidden
@@ -5049,7 +5173,7 @@
                 chartsHtml = charts.map((chart, i) => {
                     const chartId = `chat-chart-${Date.now()}-${i}`;
                     setTimeout(() => renderChart(chartId, chart), 100);
-                    return `<div class="chart-container"><canvas id="${chartId}"></canvas></div>`;
+                    return `<div class="chart-container" onclick="openChartZoomFromCanvas(this.querySelector('canvas'))" title="Click to expand"><canvas id="${chartId}"></canvas></div>`;
                 }).join('');
             }
 
@@ -5089,6 +5213,8 @@
             const canvas = document.getElementById(canvasId);
             if (!canvas) return;
 
+            chartDataStore[canvasId] = chartData;
+
             const ctx = canvas.getContext('2d');
 
             const datasets = chartData.datasets.map((ds, i) => ({
@@ -5112,7 +5238,7 @@
                     maintainAspectRatio: true,
                     plugins: {
                         title: { display: true, text: chartData.title, color: '#3b82f6', font: { size: 14, weight: 600 } },
-                        legend: { labels: { color: '#a0a0b0', font: { size: 11 } } }
+                        legend: { labels: { color: '#a0a0b0', font: { size: 11 }, boxWidth: 12, padding: 6, filter: (item) => { item.text = truncateMiddle(item.text, 40); return true; } } }
                     },
                     scales: chartData.chart_type !== 'doughnut' ? {
                         x: { ticks: { color: '#606070' }, grid: { color: 'rgba(255,255,255,0.04)' } },
@@ -5120,6 +5246,56 @@
                     } : undefined
                 }
             });
+        }
+
+        function openChartZoom(chartConfig, title) {
+            if (zoomChartInstance) { zoomChartInstance.destroy(); zoomChartInstance = null; }
+            document.getElementById('chart-zoom-title').textContent = title || 'Chart';
+            document.getElementById('chart-zoom-overlay').classList.add('active');
+            // Delay chart creation so the overlay is visible and canvas has dimensions
+            requestAnimationFrame(() => {
+                const canvas = document.getElementById('chart-zoom-canvas');
+                const config = JSON.parse(JSON.stringify(chartConfig));
+                config.options = config.options || {};
+                config.options.responsive = true;
+                config.options.maintainAspectRatio = false;
+                config.options.animation = false;
+                if (config.options.plugins) {
+                    config.options.plugins.title = config.options.plugins.title || {};
+                    config.options.plugins.title.font = { size: 18, weight: 600 };
+                    if (config.options.plugins.legend && config.options.plugins.legend.labels) {
+                        config.options.plugins.legend.labels.font = { size: 13 };
+                    }
+                }
+                if (config.options.scales) {
+                    if (config.options.scales.x) config.options.scales.x.ticks = { ...config.options.scales.x.ticks, font: { size: 13 } };
+                    if (config.options.scales.y) config.options.scales.y.ticks = { ...config.options.scales.y.ticks, font: { size: 13 } };
+                }
+                zoomChartInstance = new Chart(canvas, config);
+            });
+        }
+
+        function closeChartZoom() {
+            document.getElementById('chart-zoom-overlay').classList.remove('active');
+            if (zoomChartInstance) { zoomChartInstance.destroy(); zoomChartInstance = null; }
+        }
+
+        function openChartZoomFromCanvas(canvasEl) {
+            // Try to find the Chart.js instance on this canvas
+            const chartInstance = Chart.getChart(canvasEl);
+            if (chartInstance) {
+                const title = (chartInstance.config.options?.plugins?.title?.text) || '';
+                // Find title from parent chart-card h4 if no chart title
+                let displayTitle = title;
+                if (!displayTitle) {
+                    const card = canvasEl.closest('.chart-card');
+                    if (card) {
+                        const h4 = card.querySelector('h4');
+                        if (h4) displayTitle = h4.textContent;
+                    }
+                }
+                openChartZoom({ type: chartInstance.config.type, data: chartInstance.config.data, options: chartInstance.config.options }, displayTitle);
+            }
         }
 
         function renderTopology(containerId, topoData) {
@@ -6696,6 +6872,11 @@ Can you help me understand this issue further or suggest next steps?`;
             const config = ENTITY_CONFIG[type];
             if (!config) { console.error('Unknown entity type:', type); return; }
 
+            // Push current entity to history before navigating (if already viewing one)
+            if (currentEntityType && currentEntityName && (currentEntityType !== type || currentEntityName !== name)) {
+                entityNavHistory.push({ type: currentEntityType, name: currentEntityName });
+            }
+
             currentEntityType = type;
             currentEntityName = name;
             // Legacy compat
@@ -6756,6 +6937,9 @@ Can you help me understand this issue further or suggest next steps?`;
             // Load related entity nav bar (fire-and-forget, non-blocking)
             loadEntityRelated(type, name);
 
+            // Show/hide back button
+            document.getElementById('entity-back-btn').style.display = entityNavHistory.length > 0 ? '' : 'none';
+
             // Load requested tab (or default)
             const targetTab = tab && config.tabs.some(t => t.id === tab) ? tab : config.defaultTab;
             await switchEntityTab(targetTab);
@@ -6800,9 +6984,19 @@ Can you help me understand this issue further or suggest next steps?`;
             }
         }
 
+        function entityNavBack() {
+            if (entityNavHistory.length === 0) return;
+            const prev = entityNavHistory.pop();
+            // Temporarily clear current so the push guard in openEntityModal doesn't re-push
+            currentEntityType = null;
+            currentEntityName = null;
+            openEntityModal(prev.type, prev.name);
+        }
+
         function closeEntityModal() {
             document.getElementById('entity-modal').classList.remove('active');
             stopEntityModalAutoRefresh();
+            entityNavHistory.length = 0;
             currentEntityType = null;
             currentEntityName = null;
             currentModalService = null;
@@ -6942,38 +7136,26 @@ Can you help me understand this issue further or suggest next steps?`;
 
                 if (currentEntityType === 'service') {
                     body.innerHTML = `
-                        <div class="chart-row">
-                            <div class="chart-card"><h4>Latency Over Time</h4><canvas id="entity-latency-chart"></canvas></div>
-                            <div class="chart-card"><h4>Error Rate Over Time</h4><canvas id="entity-error-chart"></canvas></div>
-                        </div>
-                        <div class="chart-row">
-                            <div class="chart-card"><h4>Request Volume</h4><canvas id="entity-throughput-chart"></canvas></div>
-                        </div>
-                        <div class="chart-row" style="grid-template-columns:1fr">
-                            <div class="chart-card">
-                                <div class="chart-card-header">
-                                    <h4>Top Operations</h4>
-                                </div>
-                                <table class="ops-table" id="ops-table"><thead><tr><th>Operation</th><th>Calls</th><th>Avg Latency</th><th>Error %</th></tr></thead><tbody></tbody></table>
+                        <div class="chart-card" style="grid-column:1/-1">
+                            <div class="chart-card-header">
+                                <h4>Top Operations</h4>
                             </div>
+                            <table class="ops-table" id="ops-table"><thead><tr><th>Operation</th><th>Calls</th><th>Avg Latency</th><th>Error %</th></tr></thead><tbody></tbody></table>
                         </div>
+                        <div class="chart-card"><h4>Latency Over Time</h4><canvas id="entity-latency-chart"></canvas></div>
+                        <div class="chart-card"><h4>Error Rate Over Time</h4><canvas id="entity-error-chart"></canvas></div>
+                        <div class="chart-card"><h4>Request Volume</h4><canvas id="entity-throughput-chart"></canvas></div>
                     `;
                 } else if (currentEntityType === 'database') {
                     body.innerHTML = `
-                        <div class="chart-row">
-                            <div class="chart-card"><h4>Query Latency Over Time</h4><canvas id="entity-latency-chart"></canvas></div>
-                            <div class="chart-card"><h4>Query Volume Over Time</h4><canvas id="entity-volume-chart"></canvas></div>
+                        <div class="chart-card"><h4>Query Latency Over Time</h4><canvas id="entity-latency-chart"></canvas></div>
+                        <div class="chart-card"><h4>Query Volume Over Time</h4><canvas id="entity-volume-chart"></canvas></div>
+                        <div class="chart-card"><h4>Error Rate Over Time</h4><canvas id="entity-error-chart"></canvas></div>
+                        <div class="chart-card"><h4>Slowest Queries</h4>
+                            <table class="ops-table" id="db-queries-table"><thead><tr><th>Service</th><th>Operation</th><th>Avg Latency</th><th>Error %</th></tr></thead><tbody></tbody></table>
                         </div>
-                        <div class="chart-row">
-                            <div class="chart-card"><h4>Error Rate Over Time</h4><canvas id="entity-error-chart"></canvas></div>
-                            <div class="chart-card"><h4>Slowest Queries</h4>
-                                <table class="ops-table" id="db-queries-table"><thead><tr><th>Service</th><th>Operation</th><th>Avg Latency</th><th>Error %</th></tr></thead><tbody></tbody></table>
-                            </div>
-                        </div>
-                        <div class="chart-row">
-                            <div class="chart-card"><h4>Deadlocks Over Time</h4><canvas id="entity-deadlocks-chart"></canvas></div>
-                            <div class="chart-card"><h4>Database Size Over Time</h4><canvas id="entity-size-chart"></canvas></div>
-                        </div>
+                        <div class="chart-card"><h4>Deadlocks Over Time</h4><canvas id="entity-deadlocks-chart"></canvas></div>
+                        <div class="chart-card"><h4>Database Size Over Time</h4><canvas id="entity-size-chart"></canvas></div>
                     `;
                 }
             }
@@ -7163,22 +7345,15 @@ Can you help me understand this issue further or suggest next steps?`;
                 Object.values(modalCharts).forEach(c => c.destroy());
                 modalCharts = {};
                 body.innerHTML = `
-                    <div class="chart-row">
                         <div class="chart-card"><h4>Current Resource Usage</h4>
                             <div class="host-detail-metrics" id="host-current-metrics"><div class="empty-state">Loading...</div></div>
                         </div>
                         <div class="chart-card"><h4>Host Information</h4>
                             <div class="host-info" id="host-info"><div class="empty-state">Loading...</div></div>
                         </div>
-                    </div>
-                    <div class="chart-row">
                         <div class="chart-card"><h4>CPU Over Time</h4><canvas id="host-cpu-history-chart"></canvas></div>
                         <div class="chart-card"><h4>Memory Over Time</h4><canvas id="host-memory-history-chart"></canvas></div>
-                    </div>
-                    <div class="chart-row">
                         <div class="chart-card"><h4>Disk Over Time</h4><canvas id="host-disk-history-chart"></canvas></div>
-                        <div class="chart-card"></div>
-                    </div>
                 `;
             }
             await loadHostData(currentEntityName);
@@ -7241,18 +7416,14 @@ Can you help me understand this issue further or suggest next steps?`;
                 Object.values(modalCharts).forEach(c => c.destroy());
                 modalCharts = {};
                 body.innerHTML = `
-                    <div class="chart-row">
                         <div class="chart-card"><h4>Container Resource Usage</h4>
                             <div class="host-detail-metrics" id="container-current-metrics"><div class="empty-state">Loading...</div></div>
                         </div>
                         <div class="chart-card"><h4>Container Information</h4>
                             <div class="host-detail-info" id="container-info"><div class="empty-state">Loading...</div></div>
                         </div>
-                    </div>
-                    <div class="chart-row">
                         <div class="chart-card"><h4>CPU Over Time</h4><canvas id="container-cpu-history-chart"></canvas></div>
                         <div class="chart-card"><h4>Memory Over Time</h4><canvas id="container-memory-history-chart"></canvas></div>
-                    </div>
                 `;
             }
             try {
@@ -7366,23 +7537,22 @@ Can you help me understand this issue further or suggest next steps?`;
             const body = document.getElementById('entity-modal-body');
 
             if (currentEntityType === 'service') {
-                body.innerHTML = `<div class="chart-row">
+                body.innerHTML = `
                     <div class="chart-card"><h4>Upstream (What Calls This Service)</h4>
                         <div class="deps-list" id="upstream-deps"><div class="empty-state">Loading...</div></div></div>
                     <div class="chart-card"><h4>Downstream (What This Service Calls)</h4>
                         <div class="deps-list" id="downstream-deps"><div class="empty-state">Loading...</div></div></div>
-                </div>`;
+                `;
                 await loadServiceDependencies();
             } else if (currentEntityType === 'database') {
-                body.innerHTML = `<div class="chart-row">
+                body.innerHTML = `
                     <div class="chart-card"><h4>Host</h4>
                         <div class="deps-list" id="db-host-dep"><div class="empty-state">Loading...</div></div></div>
                     <div class="chart-card"><h4>Upstream (Services Using This Database)</h4>
                         <div class="deps-list" id="db-upstream-deps"><div class="empty-state">Loading...</div></div></div>
-                </div><div class="chart-row">
                     <div class="chart-card"><h4>Downstream (Called by This Database's Spans)</h4>
                         <div class="deps-list" id="db-downstream-deps"><div class="empty-state">Loading...</div></div></div>
-                </div>`;
+                `;
                 await loadDatabaseDependencies();
             }
         }
@@ -7682,7 +7852,7 @@ Can you help me understand this issue further or suggest next steps?`;
                 opts.plugins.legend.labels = {
                     color: '#c0c0d0', font: { size: 11 },
                     boxWidth: 12, padding: 6,
-                    filter: (item) => { if (item.text.length > 60) item.text = item.text.slice(0, 57) + '...'; return true; }
+                    filter: (item) => { item.text = truncateMiddle(item.text, 60); return true; }
                 };
                 opts.plugins.legend.position = 'bottom';
                 // Metric name as chart title
@@ -8323,11 +8493,6 @@ Can you help me understand this issue further or suggest next steps?`;
                 if (chart) { chart.destroy(); delete modalCharts['pinned_' + pinId]; }
                 const card = document.getElementById('pinned-card-' + pinId);
                 if (card) card.remove();
-                // Remove header if no pinned cards remain
-                const container = document.getElementById('pinned-charts-container');
-                if (container && container.querySelectorAll('.chart-card').length === 0) {
-                    container.remove();
-                }
             } catch (err) {
                 console.error('Failed to unpin chart:', err);
             }
@@ -8350,20 +8515,12 @@ Can you help me understand this issue further or suggest next steps?`;
                 });
 
                 if (pins.length === 0) {
-                    const existing = document.getElementById('pinned-charts-container');
-                    if (existing) existing.remove();
+                    // Remove any existing pinned cards
+                    document.querySelectorAll('#entity-modal-body .pinned-chart-card').forEach(c => c.remove());
                     return;
                 }
 
                 const body = document.getElementById('entity-modal-body');
-                let container = document.getElementById('pinned-charts-container');
-                if (!container) {
-                    container = document.createElement('div');
-                    container.id = 'pinned-charts-container';
-                    container.innerHTML = '<h4 style="color:#a0a0b0;margin:18px 0 8px 0;font-weight:500;grid-column:1/-1;">Pinned Metrics</h4>';
-                    container.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;';
-                    body.appendChild(container);
-                }
 
                 for (const pin of pins) {
                     const chartKey = 'pinned_' + pin.pin_id;
@@ -8372,16 +8529,16 @@ Can you help me understand this issue further or suggest next steps?`;
                     // Create card if it doesn't exist yet
                     if (!document.getElementById('pinned-card-' + pin.pin_id)) {
                         const card = document.createElement('div');
-                        card.className = 'chart-card';
+                        card.className = 'chart-card pinned-chart-card';
                         card.id = 'pinned-card-' + pin.pin_id;
                         card.innerHTML = `
                             <div style="display:flex;justify-content:space-between;align-items:center;">
                                 <h4>${pin.display_name || pin.metric_name}</h4>
-                                <button onclick="unpinChart('${pin.pin_id}')" style="font-size:11px;padding:2px 10px;background:transparent;border:1px solid #555;color:#a0a0b0;border-radius:4px;cursor:pointer;">Unpin</button>
+                                <button onclick="event.stopPropagation();unpinChart('${pin.pin_id}')" style="font-size:11px;padding:2px 10px;background:transparent;border:1px solid #555;color:#a0a0b0;border-radius:4px;cursor:pointer;">Unpin</button>
                             </div>
                             <canvas id="${canvasId}"></canvas>
                         `;
-                        container.appendChild(card);
+                        body.appendChild(card);
                     }
 
                     // Fetch data
@@ -8463,7 +8620,7 @@ Can you help me understand this issue further or suggest next steps?`;
                 responsive: true,
                 maintainAspectRatio: true,
                 animation: false,
-                plugins: { legend: { labels: { color: '#a0a0b0', font: { size: 11 } } } },
+                plugins: { legend: { labels: { color: '#a0a0b0', font: { size: 11 }, boxWidth: 12, padding: 6, filter: (item) => { item.text = truncateMiddle(item.text, 40); return true; } } } },
                 scales: {
                     x: { ticks: { color: '#606070', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
                     y: { ticks: { color: '#606070', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } }
