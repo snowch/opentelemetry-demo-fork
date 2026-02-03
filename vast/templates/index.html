@@ -6545,6 +6545,30 @@ Can you help me understand this issue further or suggest next steps?`;
             // Common preamble every prompt can use
             const preamble = `This is a ${sev}${aType} on ${svc || 'unknown service'}.${timeCtx}${devCtx}${descCtx}`;
 
+            // Entity-aware resource drill-down (parse "entity:{type}:{name}:{metric}")
+            const entityMatch = metric && metric.match(/^entity:(\w+):([^:]+):(\w+)$/);
+            if (entityMatch) {
+                const [, entityType, entityName, metricName] = entityMatch;
+                const metricLabel = metricName.replace(/_/g, ' ');
+
+                if (entityType === 'host') {
+                    suggestions.push({
+                        label: `Break down by container`,
+                        prompt: `${preamble} This is a ${metricLabel} alert on host "${entityName}". Query container-level metrics (container CPU, memory) on this host to identify which container(s) are consuming the most resources. Use the topology_containers and topology_host_services tables to map containers to services, then check the metrics_otel_analytic table for container.* metrics. Which container is the top contributor?`
+                    });
+                } else if (entityType === 'container') {
+                    suggestions.push({
+                        label: `Check host for ${entityName}`,
+                        prompt: `${preamble} This is a ${metricLabel} alert on container "${entityName}". Check host-level metrics to determine if the entire host is under pressure or just this container. Use topology_host_services to identify what service runs in this container, then check if other containers on the same host are also stressed.`
+                    });
+                }
+
+                suggestions.push({
+                    label: `Find affected services`,
+                    prompt: `${preamble} The entity "${entityName}" (${entityType}) is under ${metricLabel} pressure. Identify all services running on or connected to this entity using the topology tables, then check those services for error rate increases, latency spikes, or throughput drops during this alert's time window. Are any services degraded as a result?`
+                });
+            }
+
             if (metric && svc) {
                 suggestions.push({
                     label: `Chart ${metric} trend`,

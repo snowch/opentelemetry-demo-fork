@@ -3892,6 +3892,12 @@ INVESTIGATION STRATEGY:
    - Use topology_database_hosts to find which host runs the database,
      then check that host's metrics.
 3. Check for correlated errors in other services during the same window.
+4. For resource pressure alerts, use topology tables to identify affected services:
+   - topology_host_services: maps host_name → service_name
+   - topology_containers: container_name, cpu_pct, memory_pct
+   - topology_hosts: host_name, cpu_pct, memory_pct, disk_pct
+   Then drill into container-level metrics in metrics_otel_analytic (container.cpu.percent,
+   container.memory.percent) to find the top resource consumer.
 
 STRICT ANTI-HALLUCINATION RULES:
 - ONLY state facts that came from query results in THIS investigation.
