@@ -6820,11 +6820,9 @@ Can you help me understand this issue further or suggest next steps?`;
         }
 
         function getEntityRangeParam() {
-            if (entityTimeMode === 'custom' && entityTimeStart && entityTimeEnd) {
-                return `start=${encodeURIComponent(entityTimeStart)}&end=${encodeURIComponent(entityTimeEnd)}`;
-            }
-            const presetHoursMap = {'5m': 1, '15m': 1, '1h': 1, '6h': 6, '24h': 24};
-            return `range=${presetHoursMap[entityTimePreset] || 1}`;
+            // Use same time= format as getEntityTimeParams so service/database
+            // charts respect the exact preset (5m, 15m, 1h, etc.)
+            return getEntityTimeParams();
         }
 
         function setEntityTimePreset(preset) {

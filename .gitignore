@@ -57,3 +57,6 @@ test/tracetesting/tracetesting-vars.yaml
 !src/currency/build
 src/cart/src/Program.cs.bak
 src/flagd/demo.flagd.json.bak
+
+# Downloaded OTel Java agent (fetched by full_rebuild.sh)
+vast/opentelemetry-javaagent.jar

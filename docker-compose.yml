@@ -1147,10 +1147,22 @@ services:
     env_file:
       - .env
       - .env.override
+    volumes:
+      - ./vast/opentelemetry-javaagent.jar:/opt/opentelemetry-javaagent.jar:ro
+    environment:
+      - OTEL_SERVICE_NAME=trino
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://${OTEL_COLLECTOR_HOST}:${OTEL_COLLECTOR_PORT_GRPC}
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_TRACES_EXPORTER=none
+      - OTEL_LOGS_EXPORTER=none
+      - OTEL_METRICS_EXPORTER=otlp
+      - OTEL_METRIC_EXPORT_INTERVAL=60000
     entrypoint:
       - /bin/sh
       - -c
       - |
+        # Add OTel Java agent for JVM metrics (memory, CPU, GC)
+        echo '-javaagent:/opt/opentelemetry-javaagent.jar' >> /etc/trino/jvm.config
         cat > /etc/trino/config.properties <<EOF
         coordinator=true
         node-scheduler.include-coordinator=true

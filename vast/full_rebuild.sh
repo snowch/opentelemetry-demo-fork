@@ -26,6 +26,18 @@ fi
 echo "=== Full Rebuild ==="
 echo ""
 
+# --- 0. Download OTel Java agent for Trino JVM metrics ---
+OTEL_AGENT_JAR="vast/opentelemetry-javaagent.jar"
+if [ ! -s "$OTEL_AGENT_JAR" ]; then
+  echo "--- Downloading OpenTelemetry Java agent ---"
+  curl -sSL -o "$OTEL_AGENT_JAR" \
+    "https://repo1.maven.org/maven2/io/opentelemetry/javaagent/opentelemetry-javaagent/2.12.0/opentelemetry-javaagent-2.12.0.jar"
+  echo "  Downloaded $(du -h "$OTEL_AGENT_JAR" | cut -f1) to $OTEL_AGENT_JAR"
+else
+  echo "--- OTel Java agent already present ($(du -h "$OTEL_AGENT_JAR" | cut -f1)) ---"
+fi
+echo ""
+
 # --- 1. Tear down all containers and volumes ---
 echo "--- Stopping containers and removing volumes ---"
 docker compose down -v

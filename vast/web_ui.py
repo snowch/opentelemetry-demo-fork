@@ -1208,14 +1208,7 @@ def service_details(service_name):
     is empty or missing.
     """
     executor = get_query_executor()
-    # Support start/end params or fall back to range (hours)
-    start = request.args.get('start', '').strip()
-    end = request.args.get('end', '').strip()
-    if start and end:
-        tr = parse_time_range(request)
-    else:
-        time_range = request.args.get('range', '1')  # hours
-        tr = {'mode': 'relative', 'interval': f"'{time_range}' HOUR"}
+    tr = parse_time_range(request, default_preset='1h')
     time_cond_bucket = time_filter_sql(tr, 'time_bucket')
     time_cond_start = time_filter_sql(tr, 'start_time')
 
@@ -1613,14 +1606,7 @@ def database_details(db_system):
     table is empty or missing.
     """
     executor = get_query_executor()
-    # Support start/end params or fall back to range (hours)
-    start = request.args.get('start', '').strip()
-    end = request.args.get('end', '').strip()
-    if start and end:
-        tr = parse_time_range(request)
-    else:
-        time_range = request.args.get('range', '1')  # hours
-        tr = {'mode': 'relative', 'interval': f"'{time_range}' HOUR"}
+    tr = parse_time_range(request, default_preset='1h')
     time_cond_bucket = time_filter_sql(tr, 'time_bucket')
     time_cond_start = time_filter_sql(tr, 'start_time')
     time_cond_ts = time_filter_sql(tr, 'timestamp')
