@@ -671,6 +671,8 @@ services:
     restart: unless-stopped
     ports:
       - "${OBSERVABILITY_AGENT_PORT}:5000"
+    environment:
+      - OTEL_SERVICE_NAME=observability-agent
     env_file:
       - .env
       - .env.override
@@ -693,6 +695,8 @@ services:
           memory: 256M
     restart: unless-stopped
     command: ["python", "otel_ingester.py"]
+    environment:
+      - OTEL_SERVICE_NAME=observability-ingester
     env_file:
       - .env
       - .env.override
@@ -717,6 +721,7 @@ services:
     command: ["python", "-u", "metric_aggregator.py"]
     environment:
       - PYTHONUNBUFFERED=1
+      - OTEL_SERVICE_NAME=observability-aggregator
     env_file:
       - .env
       - .env.override
@@ -739,6 +744,7 @@ services:
     command: ["python", "-u", "topology_inference.py"]
     environment:
       - PYTHONUNBUFFERED=1
+      - OTEL_SERVICE_NAME=observability-topology
     env_file:
       - .env
       - .env.override
@@ -761,6 +767,7 @@ services:
     command: ["python", "-u", "predictive_alerts.py"]
     environment:
       - PYTHONUNBUFFERED=1
+      - OTEL_SERVICE_NAME=observability-predictive
     env_file:
       - .env
       - .env.override

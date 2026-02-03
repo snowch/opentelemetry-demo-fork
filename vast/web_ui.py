@@ -29,6 +29,14 @@ from typing import Any, Dict, List
 from flask import Flask, render_template, request, jsonify, Response
 import anthropic
 
+from otel_init import init_telemetry, traced_cursor
+
+try:
+    from opentelemetry.instrumentation.flask import FlaskInstrumentor
+    _FLASK_INSTRUMENTOR_AVAILABLE = True
+except ImportError:
+    _FLASK_INSTRUMENTOR_AVAILABLE = False
+
 try:
     from trino.dbapi import connect as trino_connect
     from trino.auth import BasicAuthentication
@@ -57,6 +65,11 @@ TRINO_HTTP_SCHEME = os.getenv("TRINO_HTTP_SCHEME", "https")
 MAX_QUERY_ROWS = 100
 
 app = Flask(__name__)
+
+# Initialize OpenTelemetry tracing
+init_telemetry('observability-agent')
+if _FLASK_INSTRUMENTOR_AVAILABLE:
+    FlaskInstrumentor().instrument_app(app)
 
 # =============================================================================
 # Response Cache
@@ -334,9 +347,10 @@ class TrinoQueryExecutor:
 
         try:
             cursor = self.conn.cursor()
-            cursor.execute(sql)
-            columns = [desc[0] for desc in cursor.description] if cursor.description else []
-            raw_rows = cursor.fetchall()
+            with traced_cursor(cursor, sql) as cur:
+                cur.execute(sql)
+                columns = [desc[0] for desc in cur.description] if cur.description else []
+                raw_rows = cur.fetchall()
 
             rows = []
             for raw_row in raw_rows:
@@ -358,7 +372,8 @@ class TrinoQueryExecutor:
         sql = sql.strip().rstrip(";")
         try:
             cursor = self.conn.cursor()
-            cursor.execute(sql)
+            with traced_cursor(cursor, sql) as cur:
+                cur.execute(sql)
             return {"success": True}
         except Exception as e:
             return {"success": False, "error": f"{type(e).__name__}: {str(e)}"}
@@ -1986,6 +2001,213 @@ def container_info(container_name):
             result['rows'][0]['attributes_flat'], CONTAINER_RESOURCE_ATTR_KEYS
         )
     return jsonify({'resource_attributes': resource_attributes})
+
+
+# --- Relationship resolution strategies keyed by (source_type, target_type) ---
+# Each returns a list of entity names given (executor, source_name).
+_RELATED_RESOLVERS = {}
+
+
+def _related(source_type, target_type):
+    """Decorator to register a related-entity resolver."""
+    def decorator(fn):
+        _RELATED_RESOLVERS[(source_type, target_type)] = fn
+        return fn
+    return decorator
+
+
+def _attrs_from_metrics(executor, like_filter, wanted_keys, limit=1, require=None):
+    """Helper: fetch attributes_flat rows matching a LIKE filter and parse wanted keys.
+
+    Args:
+        require: Optional dict of {key: value} that must exactly match in the parsed
+                 attributes (Python-side verification since DB LIKE can return false positives).
+    """
+    all_keys = set(wanted_keys)
+    if require:
+        all_keys.update(require.keys())
+    r = executor.execute_query(f"""
+    SELECT attributes_flat FROM metrics_otel_analytic
+    WHERE {like_filter}
+      AND timestamp > NOW() - INTERVAL '5' MINUTE
+    LIMIT {limit}
+    """)
+    results = []
+    for row in (r['rows'] if r['success'] else []):
+        attrs = _parse_resource_attributes(row.get('attributes_flat', ''), all_keys)
+        if require and not all(attrs.get(k) == v for k, v in require.items()):
+            continue
+        # Only return the wanted_keys subset
+        filtered = {k: attrs[k] for k in wanted_keys if k in attrs}
+        if filtered:
+            results.append(filtered)
+    return results
+
+
+def _container_id_name_map(executor):
+    """Build container.id → container.name mapping from container metrics.
+
+    LIKE on long hex container IDs is unreliable due to predicate pushdown,
+    so we scan all containers (typically <50) and match in Python.
+    """
+    r = executor.execute_query("""
+    SELECT DISTINCT attributes_flat FROM metrics_otel_analytic
+    WHERE metric_name = 'container.cpu.utilization'
+      AND attributes_flat LIKE '%container.name=%'
+      AND timestamp > NOW() - INTERVAL '5' MINUTE
+    LIMIT 200
+    """)
+    mapping = {}
+    for row in (r['rows'] if r['success'] else []):
+        attrs = _parse_resource_attributes(
+            row.get('attributes_flat', ''), {'container.name', 'container.id'})
+        cid = attrs.get('container.id')
+        cname = attrs.get('container.name')
+        if cid and cname:
+            mapping[cid] = cname
+    return mapping
+
+
+def _service_id_map(executor):
+    """Build container.id → service.name mapping from service metrics.
+
+    Scans distinct service metric rows to map container.id to service.name.
+    LIKE may return false positives; we verify in Python with exact key parsing.
+    """
+    r = executor.execute_query("""
+    SELECT DISTINCT attributes_flat FROM metrics_otel_analytic
+    WHERE metric_name NOT LIKE 'container.%'
+      AND attributes_flat LIKE '%,service.name=%'
+      AND attributes_flat LIKE '%container.id=%'
+      AND timestamp > NOW() - INTERVAL '5' MINUTE
+    LIMIT 5000
+    """)
+    mapping = {}
+    for row in (r['rows'] if r['success'] else []):
+        attrs = _parse_resource_attributes(
+            row.get('attributes_flat', ''), {'service.name', 'container.id'})
+        cid = attrs.get('container.id')
+        sname = attrs.get('service.name')
+        if cid and sname:
+            mapping[cid] = sname
+    return mapping
+
+
+@_related('service', 'host')
+def _service_hosts(executor, name):
+    # Try topology table first, fall back to metrics
+    r = executor.execute_query(f"""
+    SELECT DISTINCT host_name FROM topology_host_services
+    WHERE service_name = '{name}' ORDER BY host_name
+    """)
+    hosts = [row['host_name'] for row in (r['rows'] if r['success'] else [])]
+    if hosts:
+        return hosts
+    rows = _attrs_from_metrics(executor,
+        f"attributes_flat LIKE '%service.name={name}%'", {'host.name'},
+        require={'service.name': name})
+    return list({a['host.name'] for a in rows if a.get('host.name')})
+
+
+@_related('service', 'container')
+def _service_containers(executor, name):
+    # Get container.id from service metrics, then resolve to name via scan
+    rows = _attrs_from_metrics(executor,
+        f"attributes_flat LIKE '%service.name={name}%'", {'container.id'},
+        require={'service.name': name})
+    cids = {a['container.id'] for a in rows if a.get('container.id')}
+    if not cids:
+        return []
+    cid_to_name = _container_id_name_map(executor)
+    return sorted({cid_to_name[cid] for cid in cids if cid in cid_to_name})
+
+
+@_related('container', 'host')
+def _container_hosts(executor, name):
+    rows = _attrs_from_metrics(executor,
+        f"attributes_flat LIKE '%container.name={name}%'", {'host.name'},
+        require={'container.name': name})
+    return list({a['host.name'] for a in rows if a.get('host.name')})
+
+
+@_related('container', 'service')
+def _container_services(executor, name):
+    # Get container.id from container metrics, then resolve to service via scan
+    rows = _attrs_from_metrics(executor,
+        f"attributes_flat LIKE '%container.name={name}%'", {'container.id'},
+        require={'container.name': name})
+    cids = {a['container.id'] for a in rows if a.get('container.id')}
+    if not cids:
+        return []
+    cid_to_svc = _service_id_map(executor)
+    return sorted({cid_to_svc[cid] for cid in cids if cid in cid_to_svc})
+
+
+@_related('host', 'service')
+def _host_services_related(executor, name):
+    r = executor.execute_query(f"""
+    SELECT DISTINCT service_name FROM topology_host_services
+    WHERE host_name = '{name}' ORDER BY service_name
+    """)
+    topo = [row['service_name'] for row in (r['rows'] if r['success'] else [])]
+    # Also discover app services from metrics on this host
+    mr = executor.execute_query(f"""
+    SELECT DISTINCT attributes_flat FROM metrics_otel_analytic
+    WHERE attributes_flat LIKE '%host.name={name}%'
+      AND attributes_flat LIKE '%service.name=%'
+      AND timestamp > NOW() - INTERVAL '5' MINUTE
+    LIMIT 2000
+    """)
+    svc_set = set(topo)
+    for row in (mr['rows'] if mr['success'] else []):
+        attrs = _parse_resource_attributes(row.get('attributes_flat', ''),
+                                           {'service.name', 'host.name'})
+        if attrs.get('host.name') == name and attrs.get('service.name'):
+            svc_set.add(attrs['service.name'])
+    return sorted(svc_set)
+
+
+@_related('host', 'container')
+def _host_containers(executor, name):
+    r = executor.execute_query(f"""
+    SELECT DISTINCT attributes_flat FROM metrics_otel_analytic
+    WHERE attributes_flat LIKE '%host.name={name}%'
+      AND attributes_flat LIKE '%container.name=%'
+      AND timestamp > NOW() - INTERVAL '5' MINUTE
+    LIMIT 2000
+    """)
+    containers = set()
+    for row in (r['rows'] if r['success'] else []):
+        attrs = _parse_resource_attributes(row.get('attributes_flat', ''),
+                                           {'container.name', 'host.name'})
+        if attrs.get('host.name') == name and attrs.get('container.name'):
+            containers.add(attrs['container.name'])
+    return sorted(containers)
+
+
+@_related('database', 'host')
+def _database_hosts(executor, name):
+    r = executor.execute_query(f"""
+    SELECT host_name FROM topology_database_hosts
+    WHERE db_system = '{name}' LIMIT 1
+    """)
+    return [row['host_name'] for row in (r['rows'] if r['success'] else []) if row.get('host_name')]
+
+
+@app.route('/api/entity/<entity_type>/<name>/related', methods=['GET'])
+def entity_related(entity_type, name):
+    """Get related entities for cross-navigation. Data-driven via _RELATED_RESOLVERS."""
+    executor = get_query_executor()
+    related = {}
+    for (src, tgt), resolver in _RELATED_RESOLVERS.items():
+        if src == entity_type:
+            try:
+                values = resolver(executor, name)
+                if values:
+                    related[tgt] = values
+            except Exception as e:
+                app.logger.warning(f"Related resolver {src}->{tgt} failed for {name}: {e}")
+    return jsonify(related)
 
 
 @app.route('/api/host/<host_name>/resource-history', methods=['GET'])

@@ -549,7 +549,10 @@
         .error-triage-row {
             padding: 5px 0;
             border-bottom: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            transition: background 0.15s;
         }
+        .error-triage-row:hover { background: rgba(255,255,255,0.04); }
         .error-triage-row:last-child { border-bottom: none; }
         .error-triage-op {
             font-size: 11px;
@@ -1582,6 +1585,61 @@
             border: 1px solid rgba(245, 158, 11, 0.3);
         }
 
+        /* Related entity navigation bar */
+        .entity-nav-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            padding: 6px 16px;
+            border-bottom: 1px solid var(--border);
+            align-items: center;
+        }
+        .entity-nav-bar .nav-label {
+            font-size: 10px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-right: 2px;
+        }
+        .entity-nav-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: filter 0.15s;
+            border: 1px solid transparent;
+        }
+        .entity-nav-chip:hover { filter: brightness(1.3); }
+        .entity-nav-chip.type-service {
+            background: rgba(59, 130, 246, 0.12);
+            color: var(--accent-primary);
+            border-color: rgba(59, 130, 246, 0.25);
+        }
+        .entity-nav-chip.type-container {
+            background: rgba(245, 158, 11, 0.12);
+            color: #f59e0b;
+            border-color: rgba(245, 158, 11, 0.25);
+        }
+        .entity-nav-chip.type-host {
+            background: rgba(6, 182, 212, 0.12);
+            color: #06b6d4;
+            border-color: rgba(6, 182, 212, 0.25);
+        }
+        .entity-nav-chip.type-database {
+            background: rgba(100, 116, 139, 0.12);
+            color: var(--accent-secondary);
+            border-color: rgba(100, 116, 139, 0.25);
+        }
+        .entity-nav-more {
+            font-size: 10px;
+            color: var(--text-muted);
+            padding: 3px 6px;
+        }
+
         /* Time window selector */
         .chart-card-header {
             display: flex;
@@ -1820,6 +1878,7 @@
 
         .error-attributes-row {
             display: flex;
+            gap: 12px;
             margin-bottom: 4px;
             font-size: 12px;
         }
@@ -2001,6 +2060,10 @@
             border-left: 3px solid var(--accent-error);
         }
 
+        .error-summary-card.has-warnings {
+            border-left: 3px solid var(--accent-warning);
+        }
+
         .error-summary-card.no-errors {
             border-left: 3px solid var(--accent-success);
         }
@@ -2051,6 +2114,18 @@
         }
 
         .errors-list-expanded {
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 8px;
+        }
+
+        .alerts-list-collapsed {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+
+        .alerts-list-expanded {
             max-height: 400px;
             overflow-y: auto;
             margin-top: 8px;
@@ -3850,7 +3925,15 @@
                 <button class="sidebar-tab" id="alerts-tab-history" onclick="switchAlertsTab('history')">History</button>
             </div>
             <div id="alerts-active-panel">
-                <div id="combined-alerts-list" class="combined-alerts-list" style="max-height: 400px; overflow-y: auto;">
+                <div id="alert-summary" class="error-summary-card no-errors">
+                    <div class="error-summary-stats">
+                        <div>
+                            <div class="error-count zero" id="alert-summary-count">0</div>
+                            <div class="error-label">active alerts</div>
+                        </div>
+                    </div>
+                </div>
+                <div id="combined-alerts-list" class="alerts-list-collapsed">
                     <div class="empty-state">No alerts</div>
                 </div>
             </div>
@@ -4027,6 +4110,7 @@
                     <button class="time-apply-btn" onclick="applyCustomTimeRange()">Apply</button>
                 </div>
             </div>
+            <div class="entity-nav-bar" id="entity-nav-bar" style="display:none;"></div>
             <div class="modal-tabs" id="entity-modal-tabs">
                 <!-- Built dynamically by openEntityModal -->
             </div>
@@ -4432,6 +4516,16 @@
                 sidebarRenderer: 'renderContainerItem',
             },
         };
+
+        // Data-driven entity navigation chip styling — keyed by entity type
+        const ENTITY_NAV_STYLE = {
+            service:   { icon: '⚙', cssClass: 'type-service' },
+            container: { icon: '📦', cssClass: 'type-container' },
+            host:      { icon: '🖥', cssClass: 'type-host' },
+            database:  { icon: '🗄', cssClass: 'type-database' },
+        };
+        const ENTITY_NAV_MAX_CHIPS = 5; // per entity type before truncation
+
         const REFRESH_INTERVAL = 60000; // 60 seconds for sidebar (matches background job cycles)
         const MODAL_REFRESH_INTERVAL = 60000; // 60 seconds for drill-down modal
 
@@ -4548,6 +4642,20 @@
                 if (expandHint) expandHint.textContent = 'Click to expand';
             } else {
                 errorsList.className = 'errors-list-expanded';
+                if (expandHint) expandHint.textContent = 'Click to collapse';
+            }
+        }
+
+        function toggleAlertsList() {
+            const alertsList = document.getElementById('combined-alerts-list');
+            const alertSummary = document.getElementById('alert-summary');
+            const expandHint = alertSummary.querySelector('.expand-hint');
+
+            if (alertsList.classList.contains('alerts-list-expanded')) {
+                alertsList.className = 'alerts-list-collapsed';
+                if (expandHint) expandHint.textContent = 'Click to expand';
+            } else {
+                alertsList.className = 'alerts-list-expanded';
                 if (expandHint) expandHint.textContent = 'Click to collapse';
             }
         }
@@ -5170,7 +5278,7 @@
                         hostsList.innerHTML = data.hosts.map(h => renderHostItem(h, 'host', 'host_name')).join('');
                         data.hosts.forEach(h => {
                             if (h.display_name) {
-                                hostDisplayNames[h.host_name] = `${h.display_name} (${h.host_name.slice(0,5)})`;
+                                hostDisplayNames[h.host_name] = `${h.host_name.slice(0,8)} (${h.display_name})`;
                             }
                         });
                     } else {
@@ -5358,6 +5466,53 @@
                     }
                 } else {
                     alertsBadge.style.display = 'none';
+                }
+
+                // Update alert summary card
+                const alertSummary = document.getElementById('alert-summary');
+                const alertsList = document.getElementById('combined-alerts-list');
+                const criticalCount = activeAlerts.filter(a => a.severity === 'critical').length;
+                const warningCount = activeAlerts.filter(a => a.severity === 'warning').length;
+                const totalActiveItems = activeCount + resolvedAlerts.length;
+
+                if (activeCount > 0) {
+                    alertSummary.className = criticalCount > 0 ? 'error-summary-card has-errors' : 'error-summary-card has-warnings';
+                    const severityParts = [];
+                    if (criticalCount > 0) severityParts.push(`${criticalCount} critical`);
+                    if (warningCount > 0) severityParts.push(`${warningCount} warning`);
+                    const forecastCount = activeForecasts.length;
+                    if (forecastCount > 0) severityParts.push(`${forecastCount} forecast`);
+                    alertSummary.innerHTML = `
+                        <div class="error-summary-stats">
+                            <div>
+                                <div class="error-count">${activeCount}</div>
+                                <div class="error-label">active alerts</div>
+                            </div>
+                            <div class="error-services">
+                                <div class="error-services-count">${resolvedAlerts.length}</div>
+                                <div class="error-label">resolved</div>
+                            </div>
+                        </div>
+                        <div class="expand-hint">Click to ${alertsList.classList.contains('alerts-list-expanded') ? 'collapse' : 'expand'}</div>
+                    `;
+                    alertSummary.onclick = toggleAlertsList;
+                } else {
+                    alertSummary.className = 'error-summary-card no-errors';
+                    alertSummary.innerHTML = `
+                        <div class="error-summary-stats">
+                            <div>
+                                <div class="error-count zero">0</div>
+                                <div class="error-label">active alerts</div>
+                            </div>
+                            ${resolvedAlerts.length > 0 ? `
+                            <div class="error-services">
+                                <div class="error-services-count">${resolvedAlerts.length}</div>
+                                <div class="error-label">resolved</div>
+                            </div>` : ''}
+                        </div>
+                        ${resolvedAlerts.length > 0 ? `<div class="expand-hint">Click to ${alertsList.classList.contains('alerts-list-expanded') ? 'collapse' : 'expand'}</div>` : ''}
+                    `;
+                    alertSummary.onclick = resolvedAlerts.length > 0 ? toggleAlertsList : null;
                 }
 
                 // Render combined list
@@ -5558,7 +5713,7 @@
                             hintClass = 'triage-info';
                         }
 
-                        html += `<div class="error-triage-row">`;
+                        html += `<div class="error-triage-row" style="cursor:pointer;" onclick="openEntityModal('service', '${escapeHtml(svc)}', 'errors')">`;
                         html += `<div class="error-triage-op" title="${escapeHtml(op)}"><strong>${escapeHtml(svc)}</strong> · ${escapeHtml(op.length > 40 ? '...' + op.slice(-37) : op)}</div>`;
                         html += `<div class="error-triage-stats">`;
                         html += `<span class="triage-count">${count}x</span>`;
@@ -5570,14 +5725,6 @@
                     html += '</div>';
                 }
 
-                // Summary by service
-                if (data.by_service && data.by_service.length > 0) {
-                    html += '<div style="margin-bottom:8px;font-size:10px;color:var(--text-muted);">';
-                    html += data.by_service.map(s =>
-                        `<span style="margin-right:8px;">${escapeHtml(s.service_name)}: <strong style="color:var(--accent-error);">${s.error_count}</strong></span>`
-                    ).join('');
-                    html += '</div>';
-                }
 
                 data.errors.forEach(e => {
                     const time = e.start_time ? new Date(e.start_time).toLocaleString() : '';
@@ -6293,7 +6440,47 @@ Can you help me understand this issue further or suggest next steps?`;
         // Generic Entity Modal Functions
         // =================================================================
 
-        async function openEntityModal(type, name) {
+        async function loadEntityRelated(type, name) {
+            const bar = document.getElementById('entity-nav-bar');
+            bar.style.display = 'none';
+            bar.innerHTML = '';
+            try {
+                const resp = await fetch(`/api/entity/${encodeURIComponent(type)}/${encodeURIComponent(name)}/related`);
+                if (!resp.ok) return;
+                const related = await resp.json();
+                // related is { entityType: [name1, name2, ...], ... }
+                const entries = Object.entries(related).filter(([, v]) => v && v.length);
+                if (!entries.length) return;
+                // Bail out if modal switched to a different entity while we were fetching
+                if (type !== currentEntityType || name !== currentEntityName) return;
+                bar.innerHTML = '<span class="nav-label">Related</span>';
+                for (const [targetType, names] of entries) {
+                    const style = ENTITY_NAV_STYLE[targetType] || { icon: '🔗', cssClass: '' };
+                    const displayLabel = (ENTITY_CONFIG[targetType] || {}).displayName || targetType;
+                    const shown = names.slice(0, ENTITY_NAV_MAX_CHIPS);
+                    const remaining = names.length - shown.length;
+                    for (const n of shown) {
+                        const chip = document.createElement('span');
+                        chip.className = `entity-nav-chip ${style.cssClass}`;
+                        chip.title = `${displayLabel}: ${n}`;
+                        chip.textContent = `${style.icon} ${n}`;
+                        chip.onclick = () => openEntityModal(targetType, n);
+                        bar.appendChild(chip);
+                    }
+                    if (remaining > 0) {
+                        const more = document.createElement('span');
+                        more.className = 'entity-nav-more';
+                        more.textContent = `+${remaining} more ${displayLabel.toLowerCase()}s`;
+                        bar.appendChild(more);
+                    }
+                }
+                bar.style.display = 'flex';
+            } catch (e) {
+                console.error('Failed to load related entities:', e);
+            }
+        }
+
+        async function openEntityModal(type, name, tab) {
             const config = ENTITY_CONFIG[type];
             if (!config) { console.error('Unknown entity type:', type); return; }
 
@@ -6354,8 +6541,12 @@ Can you help me understand this issue further or suggest next steps?`;
             // Clear the modal body so stale content from a previous entity type is never visible
             document.getElementById('entity-modal-body').innerHTML = '';
 
-            // Load default tab
-            await switchEntityTab(config.defaultTab);
+            // Load related entity nav bar (fire-and-forget, non-blocking)
+            loadEntityRelated(type, name);
+
+            // Load requested tab (or default)
+            const targetTab = tab && config.tabs.some(t => t.id === tab) ? tab : config.defaultTab;
+            await switchEntityTab(targetTab);
             startEntityModalAutoRefresh();
         }
 
@@ -8077,7 +8268,8 @@ Can you help me understand this issue further or suggest next steps?`;
             const cpuClass = cpu === '-' ? '' : (cpu > 80 ? 'metric-error' : cpu > 60 ? 'metric-warn' : 'metric-ok');
             const memClass = mem === '-' ? '' : (mem > 85 ? 'metric-error' : mem > 70 ? 'metric-warn' : 'metric-ok');
             const diskClass = disk === '-' ? '' : (disk > 90 ? 'metric-error' : disk > 75 ? 'metric-warn' : 'metric-ok');
-            const hostLabel = h.display_name ? `${h.display_name} (${h[nameField].slice(0,8)})` : h[nameField];
+            const shortId = h[nameField].slice(0,8);
+            const hostLabel = h.display_name ? `${shortId} (${h.display_name})` : h[nameField];
             return `
                 <div class="host-item" onclick="openEntityModal('host', '${escapeHtml(h[nameField])}')" style="cursor: pointer;">
                     <div class="host-name">${escapeHtml(hostLabel)}</div>

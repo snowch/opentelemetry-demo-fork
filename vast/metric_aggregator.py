@@ -35,6 +35,8 @@ from typing import Dict, List, Any
 
 warnings.filterwarnings("ignore")
 
+from otel_init import init_telemetry, traced, traced_cursor
+
 try:
     from trino.dbapi import connect as trino_connect
     from trino.auth import BasicAuthentication
@@ -114,11 +116,12 @@ class TrinoExecutor:
         """Execute a query and return results as list of dicts."""
         try:
             cursor = self._conn.cursor()
-            cursor.execute(sql)
-            if cursor.description:
-                columns = [desc[0] for desc in cursor.description]
-                rows = cursor.fetchall()
-                return [dict(zip(columns, row)) for row in rows]
+            with traced_cursor(cursor, sql) as cur:
+                cur.execute(sql)
+                if cur.description:
+                    columns = [desc[0] for desc in cur.description]
+                    rows = cur.fetchall()
+                    return [dict(zip(columns, row)) for row in rows]
             return []
         except Exception as e:
             error_msg = str(e)
@@ -131,7 +134,8 @@ class TrinoExecutor:
         """Execute a write query (INSERT/UPDATE/DELETE)."""
         try:
             cursor = self._conn.cursor()
-            cursor.execute(sql)
+            with traced_cursor(cursor, sql) as cur:
+                cur.execute(sql)
             return True
         except Exception as e:
             print(f"[Trino] Write error: {e}")
@@ -197,6 +201,7 @@ class MetricAggregatorService:
             return f"start_time > TIMESTAMP '{earliest}' + INTERVAL '{warmup}' MINUTE"
         return None
 
+    @traced
     def _aggregate_service_metrics_1m(self):
         """Recompute recent 1-minute service metric buckets.
 
@@ -250,6 +255,7 @@ class MetricAggregatorService:
         else:
             print("[Aggregator]   -> FAILED to aggregate service metrics")
 
+    @traced
     def _aggregate_db_metrics_1m(self):
         """Recompute recent 1-minute database metric buckets."""
         overlap = self.config.overlap_minutes
@@ -296,6 +302,7 @@ class MetricAggregatorService:
         else:
             print("[Aggregator]   -> FAILED to aggregate database metrics")
 
+    @traced
     def _aggregate_operations_5m(self):
         """Recompute recent 5-minute per-service, per-operation rollups."""
         overlap = self.config.overlap_minutes
@@ -346,6 +353,7 @@ class MetricAggregatorService:
         else:
             print("[Aggregator]   -> FAILED to aggregate operation metrics")
 
+    @traced
     def _purge_old_data(self):
         """Delete rows older than retention period from all rollup tables."""
         retention = self.config.retention_hours
@@ -441,6 +449,8 @@ def main():
     except ValueError as e:
         print(f"[Error] {e}")
         return 1
+
+    init_telemetry('observability-aggregator')
 
     service = MetricAggregatorService(config)
     service.run()

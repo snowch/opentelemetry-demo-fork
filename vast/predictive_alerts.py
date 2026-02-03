@@ -50,6 +50,8 @@ import hashlib
 # Suppress warnings
 warnings.filterwarnings("ignore")
 
+from otel_init import init_telemetry, traced, traced_cursor
+
 # Optional: Anthropic for LLM-powered investigations
 try:
     import anthropic
@@ -555,12 +557,13 @@ class TrinoExecutor:
         """
         try:
             cursor = self._conn.cursor()
-            cursor.execute(sql)
+            with traced_cursor(cursor, sql) as cur:
+                cur.execute(sql)
 
-            if cursor.description:
-                columns = [desc[0] for desc in cursor.description]
-                rows = cursor.fetchall()
-                return [dict(zip(columns, row)) for row in rows]
+                if cur.description:
+                    columns = [desc[0] for desc in cur.description]
+                    rows = cur.fetchall()
+                    return [dict(zip(columns, row)) for row in rows]
             return []
         except Exception as e:
             error_msg = str(e)
@@ -576,7 +579,8 @@ class TrinoExecutor:
         """Execute a write query (INSERT/UPDATE/DELETE)."""
         try:
             cursor = self._conn.cursor()
-            cursor.execute(sql)
+            with traced_cursor(cursor, sql) as cur:
+                cur.execute(sql)
             return True
         except Exception as e:
             print(f"[Trino] Write error: {e}")
@@ -595,6 +599,7 @@ class BaselineComputer:
         self.config = config
         self.baselines: Dict[str, Dict[str, Dict]] = {}  # service -> metric_type -> baseline
 
+    @traced
     def compute_all_baselines(self) -> Dict[str, Dict[str, Dict]]:
         """Compute baselines for all services and metrics."""
         print("[Baseline] Computing baselines...")
@@ -658,6 +663,7 @@ class BaselineComputer:
         results = self.executor.execute(sql)
         return [r["service_name"] for r in results]
 
+    @traced
     def _compute_error_rate_baseline(self, service: str) -> Optional[Dict]:
         """Compute error rate baseline for a service."""
         sql = f"""
@@ -687,6 +693,7 @@ class BaselineComputer:
             stats["stddev"] = max(stats["stddev"], 0.005)
         return stats
 
+    @traced
     def _compute_latency_baseline(self, service: str, percentile: str) -> Optional[Dict]:
         """Compute latency baseline for a service."""
         pct_value = {"p50": 0.5, "p95": 0.95, "p99": 0.99}[percentile]
@@ -711,6 +718,7 @@ class BaselineComputer:
         latencies = [r["latency_ms"] for r in results if r["latency_ms"] is not None]
         return self._compute_stats(latencies)
 
+    @traced
     def _compute_throughput_baseline(self, service: str) -> Optional[Dict]:
         """Compute throughput (requests per minute) baseline."""
         sql = f"""
@@ -1081,6 +1089,7 @@ class AnomalyDetector:
         """Learn adaptive thresholds from alert history."""
         self.threshold_manager.learn_from_alert_history(self.executor)
 
+    @traced
     def detect_all(self) -> List[Dict]:
         """Run all anomaly detection methods and return detected anomalies."""
         anomalies = []
@@ -1141,6 +1150,7 @@ class AnomalyDetector:
     # digit error rate blip stays below the 3σ alert line (1.5%).
     ERROR_RATE_STDDEV_FLOOR = 0.005  # 0.5%
 
+    @traced
     def _detect_error_rate_anomaly(self, service: str) -> Optional[Dict]:
         """Detect error rate spikes."""
         # Get current error rate (last 5 minutes)
@@ -1204,6 +1214,7 @@ class AnomalyDetector:
 
         return None
 
+    @traced
     def _detect_latency_anomaly(self, service: str) -> Optional[Dict]:
         """Detect latency degradation."""
         # Get current P95 latency
@@ -1251,6 +1262,7 @@ class AnomalyDetector:
 
         return None
 
+    @traced
     def _detect_throughput_anomaly(self, service: str) -> Optional[Dict]:
         """Detect throughput drops (potential upstream issues)."""
         # Get current throughput (requests per minute)
@@ -1301,6 +1313,7 @@ class AnomalyDetector:
 
         return None
 
+    @traced
     def _detect_service_down(self, service: str) -> Optional[Dict]:
         """Detect if a service has stopped sending data.
 
@@ -3222,6 +3235,8 @@ def main():
     except ValueError as e:
         print(f"[Error] {e}")
         return 1
+
+    init_telemetry('observability-predictive')
 
     service = PredictiveAlertsService(config)
     service.run()

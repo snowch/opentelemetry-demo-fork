@@ -38,6 +38,8 @@ from typing import Dict, List, Any
 
 warnings.filterwarnings("ignore")
 
+from otel_init import init_telemetry, traced, traced_cursor, get_tracer
+
 try:
     from trino.dbapi import connect as trino_connect
     from trino.auth import BasicAuthentication
@@ -120,11 +122,12 @@ class TrinoExecutor:
         """Execute a query and return results as list of dicts."""
         try:
             cursor = self._conn.cursor()
-            cursor.execute(sql)
-            if cursor.description:
-                columns = [desc[0] for desc in cursor.description]
-                rows = cursor.fetchall()
-                return [dict(zip(columns, row)) for row in rows]
+            with traced_cursor(cursor, sql) as cur:
+                cur.execute(sql)
+                if cur.description:
+                    columns = [desc[0] for desc in cur.description]
+                    rows = cur.fetchall()
+                    return [dict(zip(columns, row)) for row in rows]
             return []
         except Exception as e:
             error_msg = str(e)
@@ -137,7 +140,8 @@ class TrinoExecutor:
         """Execute a write query (INSERT/UPDATE/DELETE)."""
         try:
             cursor = self._conn.cursor()
-            cursor.execute(sql)
+            with traced_cursor(cursor, sql) as cur:
+                cur.execute(sql)
             return True
         except Exception as e:
             print(f"[Trino] Write error: {e}")
@@ -192,19 +196,25 @@ class TopologyInferenceService:
     # Materialization Steps
     # -------------------------------------------------------------------------
 
-    def _warmup_cutoff(self):
+    def _warmup_cutoff(self, alias=''):
         """Return SQL clause that excludes the first N minutes of trace data.
 
         Filters out transient startup errors (e.g. Kafka topic not yet
         available) that occur before all services are fully initialized.
+
+        Args:
+            alias: Optional table alias prefix (e.g. 'parent') for queries
+                   that JOIN traces_otel_analytic to itself.
         """
         warmup = self.config.warmup_minutes
         rows = self.executor.execute("SELECT MIN(start_time) as earliest FROM traces_otel_analytic")
         earliest = rows[0]['earliest'] if rows and rows[0]['earliest'] else None
         if earliest:
-            return f"start_time > TIMESTAMP '{earliest}' + INTERVAL '{warmup}' MINUTE"
+            col = f"{alias}.start_time" if alias else "start_time"
+            return f"{col} > TIMESTAMP '{earliest}' + INTERVAL '{warmup}' MINUTE"
         return None
 
+    @traced
     def _materialize_services(self):
         """Materialize active services from traces."""
         lookback = self.config.services_lookback_hours
@@ -239,6 +249,7 @@ class TopologyInferenceService:
         else:
             print("[Topology]   -> FAILED to materialize services")
 
+    @traced
     def _materialize_dependencies(self):
         """Materialize service-to-service and service-to-database dependencies."""
         lookback = self.config.deps_lookback_minutes
@@ -248,6 +259,9 @@ class TopologyInferenceService:
 
         warmup = self._warmup_cutoff()
         warmup_clause = f"AND {warmup}" if warmup else ""
+        # For self-join queries, qualify start_time with parent alias
+        warmup_join = self._warmup_cutoff(alias='parent')
+        warmup_join_clause = f"AND {warmup_join}" if warmup_join else ""
 
         # Service-to-service dependencies via parent/child span join
         svc_sql = f"""
@@ -268,7 +282,7 @@ class TopologyInferenceService:
         WHERE parent.start_time > NOW() - INTERVAL '{lookback}' MINUTE
           AND child.service_name != parent.service_name
           AND child.db_system IS NULL
-          {warmup_clause}
+          {warmup_join_clause}
         GROUP BY parent.service_name, child.service_name
         """
         self.executor.execute_write(svc_sql)
@@ -298,6 +312,7 @@ class TopologyInferenceService:
         self._last_table_rows['topology_dependencies'] = count
         print(f"[Topology]   -> {count} dependencies materialized")
 
+    @traced
     def _materialize_host_services(self):
         """Materialize host-to-service mappings from metrics."""
         lookback = self.config.deps_lookback_minutes
@@ -335,6 +350,7 @@ class TopologyInferenceService:
         self._last_table_rows['topology_host_services'] = count
         print(f"[Topology]   -> {count} host-service mappings materialized")
 
+    @traced
     def _materialize_hosts(self):
         """Materialize host registry with system metrics."""
         lookback = self.config.hosts_lookback_minutes
@@ -406,6 +422,7 @@ class TopologyInferenceService:
         if updated:
             print(f"[Topology]   -> {updated} host display names resolved")
 
+    @traced
     def _materialize_database_hosts(self):
         """Materialize database-to-host mappings from metric attributes."""
         lookback = self.config.deps_lookback_minutes
@@ -439,6 +456,7 @@ class TopologyInferenceService:
         else:
             print("[Topology]   -> FAILED to materialize database-hosts")
 
+    @traced
     def _materialize_containers(self):
         """Materialize container registry with resource metrics from docker_stats."""
         lookback = self.config.hosts_lookback_minutes
@@ -488,18 +506,26 @@ class TopologyInferenceService:
 
         print(f"[Service] Starting materialization loop (interval: {self.config.inference_interval}s)...\n")
 
+        _tracer = get_tracer(__name__)
+
         while self.running:
             try:
                 loop_start = time.time()
 
                 print(f"[Service] Starting materialization cycle at {datetime.now(timezone.utc).isoformat()}")
 
-                self._materialize_services()
-                self._materialize_dependencies()
-                self._materialize_host_services()
-                self._materialize_hosts()
-                self._materialize_database_hosts()
-                self._materialize_containers()
+                _ctx = _tracer.start_as_current_span("materialization-cycle") if _tracer else None
+                _span = _ctx.__enter__() if _ctx else None
+                try:
+                    self._materialize_services()
+                    self._materialize_dependencies()
+                    self._materialize_host_services()
+                    self._materialize_hosts()
+                    self._materialize_database_hosts()
+                    self._materialize_containers()
+                finally:
+                    if _ctx:
+                        _ctx.__exit__(None, None, None)
 
                 elapsed = time.time() - loop_start
                 print(f"[Service] Cycle complete in {elapsed:.1f}s\n")
@@ -553,6 +579,8 @@ def main():
     except ValueError as e:
         print(f"[Error] {e}")
         return 1
+
+    init_telemetry('observability-topology')
 
     service = TopologyInferenceService(config)
     service.run()

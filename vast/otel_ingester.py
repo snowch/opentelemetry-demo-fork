@@ -30,6 +30,8 @@ import pyarrow as pa
 import vastdb
 from kafka import KafkaConsumer
 
+from otel_init import init_telemetry, traced, get_tracer
+
 
 # =============================================================================
 # Configuration
@@ -765,6 +767,7 @@ class VastDBWriter:
     def write_span_links(self, records: List[Dict]):
         self._write_records(self.config.span_links_table, records, SPAN_LINKS_SCHEMA)
     
+    @traced
     def _write_records(self, table_name: str, records: List[Dict], schema: pa.Schema):
         """Write records to a VastDB table."""
         if not records:
@@ -835,6 +838,7 @@ class OTelKafkaConsumer:
             self.consumer.close()
             print("[Consumer] Closed")
     
+    @traced
     def _process_message(self, message):
         """Parse Kafka message and add to buffer."""
         topic = message.topic
@@ -874,8 +878,15 @@ class OTelKafkaConsumer:
         records = self.buffers[signal_type]
         if not records:
             return
-        
+
+        tracer = get_tracer(__name__)
+        ctx = tracer.start_as_current_span("flush_buffer") if tracer else None
+        span = ctx.__enter__() if ctx else None
         try:
+            if span:
+                span.set_attribute("signal_type", signal_type)
+                span.set_attribute("batch.size", len(records))
+
             if signal_type == "logs":
                 self.writer.write_logs(records)
             elif signal_type == "metrics":
@@ -886,10 +897,13 @@ class OTelKafkaConsumer:
                 self.writer.write_span_events(records)
             elif signal_type == "span_links":
                 self.writer.write_span_links(records)
-            
+
             self.buffers[signal_type] = []
         except Exception as e:
             print(f"[Consumer] Error writing {signal_type}: {type(e).__name__}: {e}")
+        finally:
+            if ctx:
+                ctx.__exit__(None, None, None)
     
     def _flush_all(self):
         """Flush all buffers."""
@@ -906,7 +920,9 @@ def main():
     print("=" * 60)
     print("OTLP Kafka -> VastDB Ingestion")
     print("=" * 60)
-    
+
+    init_telemetry('observability-ingester')
+
     config = Config()
     try:
         config.validate()
