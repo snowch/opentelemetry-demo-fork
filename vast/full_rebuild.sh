@@ -58,22 +58,25 @@ echo "--- Starting all services ---"
 docker compose up -d
 
 # --- 4. Wait for Trino to be healthy, then reset data ---
+source .env.override 2>/dev/null || true
+TRINO_HOST="${TRINO_HOST:-10.143.11.241}"
+TRINO_PORT="${TRINO_PORT:-8443}"
+TRINO_HTTP_SCHEME="${TRINO_HTTP_SCHEME:-https}"
 echo ""
-echo "--- Waiting for Trino to be healthy ---"
+echo "--- Waiting for Trino at ${TRINO_HOST}:${TRINO_PORT} ---"
 MAX_WAIT=120
 ELAPSED=0
 while [ $ELAPSED -lt $MAX_WAIT ]; do
-  STATUS=$(docker inspect --format='{{.State.Health.Status}}' trino 2>/dev/null || echo "missing")
-  if [ "$STATUS" = "healthy" ]; then
+  if curl -sf -k -o /dev/null "${TRINO_HTTP_SCHEME}://${TRINO_HOST}:${TRINO_PORT}/v1/info" 2>/dev/null; then
     echo "  Trino is healthy (${ELAPSED}s)"
     break
   fi
-  echo "  Trino status: ${STATUS} (${ELAPSED}s elapsed, waiting...)"
+  echo "  Trino not ready (${ELAPSED}s elapsed, waiting...)"
   sleep 5
   ELAPSED=$((ELAPSED + 5))
 done
-if [ "$STATUS" != "healthy" ]; then
-  echo "  WARNING: Trino not healthy after ${MAX_WAIT}s, proceeding anyway..."
+if [ $ELAPSED -ge $MAX_WAIT ]; then
+  echo "  WARNING: Trino not reachable after ${MAX_WAIT}s, proceeding anyway..."
 fi
 
 echo ""

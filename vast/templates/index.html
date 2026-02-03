@@ -6977,6 +6977,11 @@ Can you help me understand this issue further or suggest next steps?`;
             const activeTab = document.querySelector(`#entity-modal-tabs .modal-tab[onclick*="${tabId}"]`);
             if (activeTab) activeTab.classList.add('active');
 
+            // Destroy existing charts before switching tabs so loaders rebuild correctly
+            Object.values(modalCharts).forEach(c => { try { c.destroy(); } catch(e) {} });
+            modalCharts = {};
+            destroyActiveMetricChart();
+
             // Find tab config and call loader
             const tabConfig = config.tabs.find(t => t.id === tabId);
             if (tabConfig && window[tabConfig.loader]) {

@@ -36,32 +36,32 @@ if docker network inspect opentelemetry-demo >/dev/null 2>&1; then
 fi
 
 # Wait for Trino to accept connections before running DDL
-echo "  Waiting for Trino at ${TRINO_HOST}:${TRINO_PORT} ..."
-MAX_WAIT=120
-ELAPSED=0
-while [ $ELAPSED -lt $MAX_WAIT ]; do
-    if docker run --rm "${DOCKER_NET_ARGS[@]}" python:3.12-slim \
-        python3 -c "
-import urllib.request, ssl, sys
-ctx = ssl.create_default_context()
-ctx.check_hostname = False
-ctx.verify_mode = ssl.CERT_NONE
-try:
-    r = urllib.request.urlopen('${TRINO_HTTP_SCHEME}://${TRINO_HOST}:${TRINO_PORT}/v1/info', timeout=5, context=ctx)
-    sys.exit(0 if r.status == 200 else 1)
-except Exception:
-    sys.exit(1)
-" 2>/dev/null; then
-        echo "  Trino is accepting connections (${ELAPSED}s)"
-        break
-    fi
-    sleep 5
-    ELAPSED=$((ELAPSED + 5))
-    echo "  ... not ready yet (${ELAPSED}s elapsed)"
-done
-if [ $ELAPSED -ge $MAX_WAIT ]; then
-    echo "  WARNING: Trino not reachable after ${MAX_WAIT}s, attempting DDL anyway..."
-fi
+#echo "  Waiting for Trino at ${TRINO_HOST}:${TRINO_PORT} ..."
+#MAX_WAIT=120
+#ELAPSED=0
+#while [ $ELAPSED -lt $MAX_WAIT ]; do
+#    if docker run --rm "${DOCKER_NET_ARGS[@]}" python:3.12-slim \
+#        python3 -c "
+#import urllib.request, ssl, sys
+#ctx = ssl.create_default_context()
+#ctx.check_hostname = False
+#ctx.verify_mode = ssl.CERT_NONE
+#try:
+#    r = urllib.request.urlopen('${TRINO_HTTP_SCHEME}://${TRINO_HOST}:${TRINO_PORT}/v1/info', timeout=5, context=ctx)
+#    sys.exit(0 if r.status == 200 else 1)
+#except Exception:
+#    sys.exit(1)
+#" 2>/dev/null; then
+#        echo "  Trino is accepting connections (${ELAPSED}s)"
+#        break
+#    fi
+#    sleep 5
+#    ELAPSED=$((ELAPSED + 5))
+#    echo "  ... not ready yet (${ELAPSED}s elapsed)"
+#done
+#if [ $ELAPSED -ge $MAX_WAIT ]; then
+#    echo "  WARNING: Trino not reachable after ${MAX_WAIT}s, attempting DDL anyway..."
+#fi
 
 docker run --rm \
     "${DOCKER_NET_ARGS[@]}" \
