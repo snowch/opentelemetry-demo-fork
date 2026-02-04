@@ -4027,6 +4027,23 @@ db_metrics_1m (pre-aggregated per-minute database metrics):
   time_bucket (timestamp), db_system (varchar), avg_latency_ms (double),
   max_latency_ms (double), query_count (bigint), error_count (bigint), error_pct (double)
 
+alerts (generated alerts with severity and status):
+  alert_id (varchar), created_at (timestamp), updated_at (timestamp),
+  service_name (varchar), alert_type (varchar), severity (varchar),
+  title (varchar), description (varchar), metric_type (varchar),
+  current_value (double), baseline_value (double), z_score (double),
+  status (varchar), resolved_at (timestamp), auto_resolved (boolean)
+  -- alert_type values: 'error_spike', 'latency_degradation', 'throughput_drop',
+  --   'anomaly', 'trend', 'service_down', 'dependency_anomaly', 'exception_surge', 'new_exception_type'
+  -- severity values: 'info', 'warning', 'critical'
+  -- status values: 'active', 'acknowledged', 'resolved', 'archived'
+
+alert_investigations (LLM root cause analysis for alerts):
+  investigation_id (varchar), alert_id (varchar), investigated_at (timestamp),
+  service_name (varchar), alert_type (varchar), model_used (varchar),
+  root_cause_summary (varchar), recommended_actions (varchar),
+  supporting_evidence (varchar), queries_executed (integer), tokens_used (integer)
+
 CRITICAL SQL RULES:
 - Time filter for traces: WHERE {time_filter_traces}
 - Time filter for logs/events and metrics: WHERE {time_filter_logs}

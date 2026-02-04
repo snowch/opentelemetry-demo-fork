@@ -209,6 +209,42 @@ Columns:
 - last_seen (timestamp) - Last metric report time
 - updated_at (timestamp) - When this row was last refreshed
 
+### 12. alerts
+Generated alerts with severity and status tracking.
+Alert types include symptom-based ('error_spike', 'latency_degradation', 'throughput_drop', 'anomaly', 'trend', 'service_down') and root-cause ('dependency_anomaly', 'exception_surge', 'new_exception_type').
+Columns:
+- alert_id (varchar) - Unique alert identifier
+- created_at (timestamp) - When the alert was created
+- updated_at (timestamp) - Last update time
+- service_name (varchar) - Affected service
+- alert_type (varchar) - Type of alert (see above)
+- severity (varchar) - 'info', 'warning', 'critical'
+- title (varchar) - Alert title
+- description (varchar) - Alert description
+- metric_type (varchar) - Which metric triggered the alert
+- current_value (double) - Current metric value
+- threshold_value (double) - Threshold that was exceeded
+- baseline_value (double) - Normal baseline value
+- z_score (double) - Statistical z-score of the anomaly
+- status (varchar) - 'active', 'acknowledged', 'resolved', 'archived'
+- resolved_at (timestamp) - When the alert was resolved
+- auto_resolved (boolean) - Whether it was auto-resolved
+
+### 13. alert_investigations
+LLM-powered root cause analysis results for alerts.
+Columns:
+- investigation_id (varchar) - Unique investigation identifier
+- alert_id (varchar) - Associated alert ID (join with alerts table)
+- investigated_at (timestamp) - When the investigation ran
+- service_name (varchar) - Investigated service
+- alert_type (varchar) - Type of the investigated alert
+- model_used (varchar) - LLM model used for analysis
+- root_cause_summary (varchar) - Summary of identified root cause
+- recommended_actions (varchar) - Suggested remediation steps
+- supporting_evidence (varchar) - JSON with relevant traces/errors found
+- queries_executed (integer) - Number of SQL queries the LLM ran
+- tokens_used (integer) - Total LLM tokens consumed
+
 ## Common Service Names (OpenTelemetry Demo)
 - frontend - Web frontend
 - adservice - Advertisement service
@@ -1281,6 +1317,8 @@ Available tables:
 - topology_host_services: host_name, service_name, source, data_point_count, last_seen
 - service_metrics_1m: time_bucket, service_name, avg_latency_ms, max_latency_ms, p95_latency_ms, request_count, error_count, error_pct
 - db_metrics_1m: time_bucket, db_system, avg_latency_ms, max_latency_ms, query_count, error_count, error_pct
+- alerts: alert_id, created_at, updated_at, service_name, alert_type, severity, title, description, metric_type, current_value, baseline_value, z_score, status, resolved_at, auto_resolved
+- alert_investigations: investigation_id, alert_id, investigated_at, service_name, alert_type, model_used, root_cause_summary, recommended_actions, supporting_evidence, queries_executed, tokens_used
 
 CRITICAL: No semicolons. GROUP BY aliases not allowed in Trino — use positional refs (GROUP BY 1, 2).
 Always include a LIMIT clause to avoid returning too many results.
