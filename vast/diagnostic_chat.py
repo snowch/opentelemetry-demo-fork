@@ -1317,6 +1317,7 @@ Available tables:
 - topology_host_services: host_name, service_name, source, data_point_count, last_seen
 - service_metrics_1m: time_bucket, service_name, avg_latency_ms, max_latency_ms, p95_latency_ms, request_count, error_count, error_pct
 - db_metrics_1m: time_bucket, db_system, avg_latency_ms, max_latency_ms, query_count, error_count, error_pct
+- operation_metrics_5m: time_bucket, service_name, span_name, call_count, avg_latency_ms, error_count, error_pct
 - alerts: alert_id, created_at, updated_at, service_name, alert_type, severity, title, description, metric_type, current_value, baseline_value, z_score, status, resolved_at, auto_resolved
 - alert_investigations: investigation_id, alert_id, investigated_at, service_name, alert_type, model_used, root_cause_summary, recommended_actions, supporting_evidence, queries_executed, tokens_used
 

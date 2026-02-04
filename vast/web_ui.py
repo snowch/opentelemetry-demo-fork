@@ -4027,6 +4027,10 @@ db_metrics_1m (pre-aggregated per-minute database metrics):
   time_bucket (timestamp), db_system (varchar), avg_latency_ms (double),
   max_latency_ms (double), query_count (bigint), error_count (bigint), error_pct (double)
 
+operation_metrics_5m (pre-aggregated per-operation metrics, 5-minute buckets):
+  time_bucket (timestamp), service_name (varchar), span_name (varchar),
+  call_count (bigint), avg_latency_ms (double), error_count (bigint), error_pct (double)
+
 alerts (generated alerts with severity and status):
   alert_id (varchar), created_at (timestamp), updated_at (timestamp),
   service_name (varchar), alert_type (varchar), severity (varchar),
