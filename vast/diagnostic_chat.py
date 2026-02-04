@@ -197,6 +197,16 @@ Columns:
 - last_seen (timestamp) - Last observation time
 - updated_at (timestamp) - When this row was last refreshed
 
+### 11. topology_containers
+Pre-computed container resource snapshot (refreshed periodically).
+Columns:
+- container_name (varchar) - Container name
+- cpu_pct (double) - CPU usage percentage
+- memory_pct (double) - Memory usage percentage
+- memory_usage_mb (double) - Memory usage in MB
+- last_seen (timestamp) - Last metric report time
+- updated_at (timestamp) - When this row was last refreshed
+
 ## Common Service Names (OpenTelemetry Demo)
 - frontend - Web frontend
 - adservice - Advertisement service
@@ -398,6 +408,9 @@ When investigating an issue, cross-reference these data sources:
 - BETWEEN with timestamps: `timestamp BETWEEN TIMESTAMP '2026-01-31 18:40:00' AND TIMESTAMP '2026-01-31 18:45:00'`
 - NO semicolons at the end of queries
 - Interval syntax: `INTERVAL '15' MINUTE` (quoted number, unquoted unit)
+- **GROUP BY column aliases are NOT allowed in Trino.** Use positional references instead:
+  `GROUP BY 1, 2` (refers to 1st and 2nd SELECT columns). NEVER write `GROUP BY my_alias` — it will fail with COLUMN_NOT_FOUND.
+  Similarly for ORDER BY with computed columns, prefer positional references: `ORDER BY 3 DESC`
 - When investigating a specific trace_id, query it WITHOUT a time filter to get all spans: `WHERE trace_id = '...'`
 - To query a time window around a known event, use BETWEEN with TIMESTAMP literals (space-separated, not T)
 """
@@ -1088,17 +1101,94 @@ class TrinoQueryExecutor:
     def get_backend_name(self) -> str:
         return f"Trino ({TRINO_HOST}:{TRINO_PORT})"
 
+    @staticmethod
+    def _fix_group_by_aliases(sql: str) -> str:
+        """Rewrite GROUP BY / ORDER BY column aliases to positional references.
+
+        Trino (unlike MySQL/PostgreSQL) does not allow column aliases in
+        GROUP BY or ORDER BY — e.g. ``GROUP BY container_name`` fails with
+        COLUMN_NOT_FOUND when ``container_name`` is a SELECT alias.
+
+        LLM-generated SQL (from alert investigations and diagnostic chat)
+        frequently produces this pattern despite prompt instructions to use
+        positional refs.  Rather than relying solely on prompt engineering,
+        we intercept the SQL here and rewrite alias references to ordinals
+        (e.g. ``GROUP BY 1, 2``) so queries succeed reliably.
+        """
+        select_match = re.search(r'\bSELECT\b(.*?)\bFROM\b', sql, re.IGNORECASE | re.DOTALL)
+        if not select_match:
+            return sql
+
+        select_body = select_match.group(1)
+        aliases: list[str] = []
+        depth = 0
+        current_expr_start = 0
+        for i, ch in enumerate(select_body):
+            if ch == '(':
+                depth += 1
+            elif ch == ')':
+                depth -= 1
+            elif ch == ',' and depth == 0:
+                fragment = select_body[current_expr_start:i]
+                alias_m = re.search(r'\bAS\s+(\w+)\s*$', fragment, re.IGNORECASE)
+                aliases.append(alias_m.group(1) if alias_m else '')
+                current_expr_start = i + 1
+        fragment = select_body[current_expr_start:]
+        alias_m = re.search(r'\bAS\s+(\w+)\s*$', fragment, re.IGNORECASE)
+        aliases.append(alias_m.group(1) if alias_m else '')
+
+        alias_map = {}
+        for idx, alias in enumerate(aliases, 1):
+            if alias:
+                alias_map[alias.lower()] = str(idx)
+
+        if not alias_map:
+            return sql
+
+        def _replace_refs(clause_match: re.Match) -> str:
+            keyword = clause_match.group(1)
+            body = clause_match.group(2)
+            parts = body.split(',')
+            new_parts = []
+            for part in parts:
+                stripped = part.strip()
+                token_m = re.match(r'^(\w+)(\s+(?:ASC|DESC))?\s*$', stripped, re.IGNORECASE)
+                if token_m and token_m.group(1).lower() in alias_map:
+                    replacement = alias_map[token_m.group(1).lower()]
+                    suffix = token_m.group(2) or ''
+                    new_parts.append(f' {replacement}{suffix}')
+                else:
+                    new_parts.append(part)
+            # Preserve trailing whitespace so we don't merge with the next keyword
+            # (e.g. "DESC\nLIMIT" becoming "DESCLIMIT")
+            result = f'{keyword}{",".join(new_parts)}'
+            if body and body[-1] in (' ', '\n', '\t', '\r'):
+                result += '\n'
+            return result
+
+        sql = re.sub(
+            r'(GROUP\s+BY|ORDER\s+BY)\b(.*?)(?=\bHAVING\b|\bORDER\b|\bLIMIT\b|\bUNION\b|\)|\;|$)',
+            _replace_refs,
+            sql,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        return sql
+
     def execute_query(self, sql: str) -> Dict[str, Any]:
         """Execute a SQL query via Trino."""
         sql = sql.strip()
 
-        if not sql.lower().startswith("select"):
+        # Allow CTEs (WITH ... AS SELECT) — they are read-only queries
+        if not sql.lower().startswith(("select", "with")):
             return {
                 "success": False,
                 "error": "Only SELECT queries are supported",
                 "rows": [],
                 "columns": []
             }
+
+        # Fix LLM-generated GROUP BY alias references (Trino rejects these)
+        sql = self._fix_group_by_aliases(sql)
 
         # Enforce limit
         sql_lower = sql.lower()
@@ -1169,12 +1259,21 @@ class DiagnosticChat:
 Use this tool to query logs, metrics, traces, span events, and span links.
 
 Available tables:
-- logs_otel_analytic: Log records with timestamp, service_name, severity_text, body_text, trace_id
-- metrics_otel_analytic: Metrics with timestamp, service_name, metric_name, value_double
-- traces_otel_analytic: Trace spans with trace_id, span_id, service_name, span_name, duration_ns, status_code
-- span_events_otel_analytic: Span events including exceptions with exception_type, exception_message
-- span_links_otel_analytic: Links between spans
+- logs_otel_analytic: Log records with timestamp, service_name, severity_number, severity_text, body_text, trace_id, span_id, attributes_json
+- metrics_otel_analytic: Metrics with timestamp, service_name, metric_name, metric_unit, value_double, attributes_flat
+- traces_otel_analytic: Trace spans with trace_id, span_id, parent_span_id, start_time, duration_ns, service_name, span_name, span_kind, status_code, http_status, db_system, attributes_json
+- span_events_otel_analytic: Span events including exceptions with timestamp, trace_id, span_id, service_name, span_name, event_name, event_attributes_json, exception_type, exception_message, exception_stacktrace
+- span_links_otel_analytic: Links between spans with trace_id, span_id, service_name, span_name, linked_trace_id, linked_span_id
+- topology_services: service_name, service_type, span_count, error_pct, avg_latency_ms, last_seen
+- topology_dependencies: source_service, target_service, dependency_type, call_count, avg_latency_ms, error_pct
+- topology_hosts: host_name, display_name, os_type, cpu_pct, memory_pct, disk_pct, last_seen
+- topology_containers: container_name, cpu_pct, memory_pct, memory_usage_mb, last_seen
+- topology_database_hosts: db_system, host_name, last_seen
+- topology_host_services: host_name, service_name, source, data_point_count, last_seen
+- service_metrics_1m: time_bucket, service_name, avg_latency_ms, max_latency_ms, p95_latency_ms, request_count, error_count, error_pct
+- db_metrics_1m: time_bucket, db_system, avg_latency_ms, max_latency_ms, query_count, error_count, error_pct
 
+CRITICAL: No semicolons. GROUP BY aliases not allowed in Trino — use positional refs (GROUP BY 1, 2).
 Always include a LIMIT clause to avoid returning too many results.
 Results are limited to 100 rows maximum.""",
                 "input_schema": {

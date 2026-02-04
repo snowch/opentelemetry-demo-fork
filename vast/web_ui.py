@@ -330,12 +330,101 @@ class TrinoQueryExecutor:
             verify=False,
         )
 
+    @staticmethod
+    def _fix_group_by_aliases(sql: str) -> str:
+        """Rewrite GROUP BY / ORDER BY column aliases to positional references.
+
+        Trino (unlike MySQL/PostgreSQL) does not allow column aliases in
+        GROUP BY or ORDER BY — e.g. ``GROUP BY container_name`` fails with
+        COLUMN_NOT_FOUND when ``container_name`` is a SELECT alias.
+
+        LLM-generated SQL (from alert investigations and diagnostic chat)
+        frequently produces this pattern despite prompt instructions to use
+        positional refs.  Rather than relying solely on prompt engineering,
+        we intercept the SQL here and rewrite alias references to ordinals
+        (e.g. ``GROUP BY 1, 2``) so queries succeed reliably.
+        """
+        # Extract aliases from the outermost SELECT clause
+        select_match = re.search(r'\bSELECT\b(.*?)\bFROM\b', sql, re.IGNORECASE | re.DOTALL)
+        if not select_match:
+            return sql
+
+        select_body = select_match.group(1)
+
+        # Parse aliases: look for  "AS alias" patterns, respecting parentheses depth
+        aliases: list[str] = []
+        depth = 0
+        current_expr_start = 0
+        for i, ch in enumerate(select_body):
+            if ch == '(':
+                depth += 1
+            elif ch == ')':
+                depth -= 1
+            elif ch == ',' and depth == 0:
+                fragment = select_body[current_expr_start:i]
+                alias_m = re.search(r'\bAS\s+(\w+)\s*$', fragment, re.IGNORECASE)
+                aliases.append(alias_m.group(1) if alias_m else '')
+                current_expr_start = i + 1
+        # last column
+        fragment = select_body[current_expr_start:]
+        alias_m = re.search(r'\bAS\s+(\w+)\s*$', fragment, re.IGNORECASE)
+        aliases.append(alias_m.group(1) if alias_m else '')
+
+        if not any(aliases):
+            return sql
+
+        # Build alias -> position map (1-indexed)
+        alias_map = {}
+        for idx, alias in enumerate(aliases, 1):
+            if alias:
+                alias_map[alias.lower()] = str(idx)
+
+        if not alias_map:
+            return sql
+
+        def _replace_refs(clause_match: re.Match) -> str:
+            keyword = clause_match.group(1)  # GROUP BY or ORDER BY
+            body = clause_match.group(2)
+            # Split on commas (top-level only)
+            parts = body.split(',')
+            new_parts = []
+            for part in parts:
+                stripped = part.strip()
+                # Check if the whole token (ignoring trailing ASC/DESC) is an alias
+                token_m = re.match(r'^(\w+)(\s+(?:ASC|DESC))?\s*$', stripped, re.IGNORECASE)
+                if token_m and token_m.group(1).lower() in alias_map:
+                    replacement = alias_map[token_m.group(1).lower()]
+                    suffix = token_m.group(2) or ''
+                    new_parts.append(f' {replacement}{suffix}')
+                else:
+                    new_parts.append(part)
+            # Preserve trailing whitespace so we don't merge with the next keyword
+            # (e.g. "DESC\nLIMIT" becoming "DESCLIMIT")
+            result = f'{keyword}{",".join(new_parts)}'
+            if body and body[-1] in (' ', '\n', '\t', '\r'):
+                result += '\n'
+            return result
+
+        # Replace GROUP BY and ORDER BY references
+        sql = re.sub(
+            r'(GROUP\s+BY|ORDER\s+BY)\b(.*?)(?=\bHAVING\b|\bORDER\b|\bLIMIT\b|\bUNION\b|\)|\;|$)',
+            _replace_refs,
+            sql,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+
+        return sql
+
     def execute_query(self, sql: str) -> Dict[str, Any]:
         """Execute a SQL query via Trino."""
         sql = sql.strip()
 
-        if not sql.lower().startswith("select"):
+        # Allow CTEs (WITH ... AS SELECT) — they are read-only queries
+        if not sql.lower().startswith(("select", "with")):
             return {"success": False, "error": "Only SELECT queries are supported", "rows": [], "columns": []}
+
+        # Fix LLM-generated GROUP BY alias references (Trino rejects these)
+        sql = self._fix_group_by_aliases(sql)
 
         sql_lower = sql.lower()
         if "limit" not in sql_lower:
@@ -3842,35 +3931,72 @@ You have access to observability data via SQL queries (Trino/Presto dialect).
 Available tables and their EXACT columns (use ONLY these):
 
 traces_otel_analytic (time column: start_time):
-  start_time, trace_id, span_id, parent_span_id, service_name, span_name,
-  span_kind, status_code, http_status, duration_ns, db_system, attributes_json
+  trace_id (varchar), span_id (varchar), parent_span_id (varchar),
+  start_time (timestamp), duration_ns (bigint), service_name (varchar),
+  span_name (varchar), span_kind (varchar), status_code (varchar),
+  http_status (integer), db_system (varchar), attributes_json (varchar)
 
 logs_otel_analytic (time column: timestamp):
-  timestamp, service_name, severity_number, severity_text, body_text, trace_id, span_id
+  timestamp (timestamp), service_name (varchar), severity_number (integer),
+  severity_text (varchar), body_text (varchar), trace_id (varchar),
+  span_id (varchar), attributes_json (varchar)
 
 span_events_otel_analytic (time column: timestamp):
-  timestamp, trace_id, span_id, service_name, span_name, event_name,
-  exception_type, exception_message, exception_stacktrace
+  timestamp (timestamp), trace_id (varchar), span_id (varchar),
+  service_name (varchar), span_name (varchar), event_name (varchar),
+  event_attributes_json (varchar), exception_type (varchar),
+  exception_message (varchar), exception_stacktrace (varchar),
+  gen_ai_system (varchar), gen_ai_operation (varchar),
+  gen_ai_request_model (varchar), gen_ai_usage_prompt_tokens (integer),
+  gen_ai_usage_completion_tokens (integer)
+
+span_links_otel_analytic (no time column):
+  trace_id (varchar), span_id (varchar), service_name (varchar),
+  span_name (varchar), linked_trace_id (varchar), linked_span_id (varchar),
+  linked_trace_state (varchar), link_attributes_json (varchar)
 
 metrics_otel_analytic (time column: timestamp):
-  timestamp, service_name, metric_name, metric_unit, value_double, attributes_flat
+  timestamp (timestamp), service_name (varchar), metric_name (varchar),
+  metric_unit (varchar), value_double (double), attributes_flat (varchar)
   -- Contains infrastructure metrics: system.cpu.utilization, system.memory.utilization,
   --   system.disk.utilization, system.filesystem.utilization, container.cpu.percent,
-  --   container.memory.percent, postgresql.* metrics, etc.
+  --   container.memory.percent, container.memory.usage.total, postgresql.* metrics, etc.
   -- service_name is typically the collector name; use attributes_flat to filter by host/container.
-  -- attributes_flat contains key=value pairs like host.name=..., container.name=..., etc.
+  -- attributes_flat contains comma-separated key=value pairs like host.name=..., container.name=..., etc.
+
+topology_services (latest snapshot, no time column):
+  service_name (varchar), service_type (varchar), span_count (bigint),
+  error_pct (double), avg_latency_ms (double), last_seen (timestamp), updated_at (timestamp)
+
+topology_dependencies (latest snapshot, no time column):
+  source_service (varchar), target_service (varchar), dependency_type (varchar),
+  call_count (bigint), avg_latency_ms (double), error_pct (double),
+  last_seen (timestamp), updated_at (timestamp)
 
 topology_hosts (latest snapshot, no time column):
-  host_name, os_type, cpu_pct, memory_pct, disk_pct, last_seen, updated_at
+  host_name (varchar), display_name (varchar), os_type (varchar),
+  cpu_pct (double), memory_pct (double), disk_pct (double),
+  last_seen (timestamp), updated_at (timestamp)
 
 topology_containers (latest snapshot, no time column):
-  container_name, cpu_pct, memory_pct, memory_usage_mb, last_seen, updated_at
+  container_name (varchar), cpu_pct (double), memory_pct (double),
+  memory_usage_mb (double), last_seen (timestamp), updated_at (timestamp)
 
 topology_database_hosts (maps db to host):
-  db_system, host_name, last_seen, updated_at
+  db_system (varchar), host_name (varchar), last_seen (timestamp), updated_at (timestamp)
 
 topology_host_services (maps host to services):
-  host_name, service_name, source, data_point_count, last_seen, updated_at
+  host_name (varchar), service_name (varchar), source (varchar),
+  data_point_count (bigint), last_seen (timestamp), updated_at (timestamp)
+
+service_metrics_1m (pre-aggregated per-minute service metrics):
+  time_bucket (timestamp), service_name (varchar), avg_latency_ms (double),
+  max_latency_ms (double), p95_latency_ms (double), request_count (bigint),
+  error_count (bigint), error_pct (double)
+
+db_metrics_1m (pre-aggregated per-minute database metrics):
+  time_bucket (timestamp), db_system (varchar), avg_latency_ms (double),
+  max_latency_ms (double), query_count (bigint), error_count (bigint), error_pct (double)
 
 CRITICAL SQL RULES:
 - Time filter for traces: WHERE {time_filter_traces}
@@ -3883,6 +4009,9 @@ CRITICAL SQL RULES:
 - Interval syntax: INTERVAL '15' MINUTE (quoted number)
 - Timestamp literals MUST use a space, NOT 'T': TIMESTAMP '2026-01-31 18:42:00' (correct)
   TIMESTAMP '2026-01-31T18:42:00' is INVALID in Trino and will error
+- GROUP BY column aliases are NOT allowed in Trino. Use positional references instead:
+  GROUP BY 1, 2 (refers to 1st and 2nd SELECT columns). NEVER write GROUP BY my_alias.
+  Similarly for ORDER BY with computed columns, prefer positional references: ORDER BY 3 DESC
 
 INVESTIGATION STRATEGY:
 1. First examine the error traces and exceptions to understand WHAT failed.
