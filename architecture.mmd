@@ -1,0 +1,125 @@
+graph LR
+    MS["Demo Microservices<br/>accounting | ad | cart | checkout<br/>currency | email | fraud-detection<br/>frontend | payment | product-catalog<br/>recommendation | shipping"]
+
+    subgraph Receivers["OTel Receivers"]
+        R1["OTLP gRPC<br/>:4317"]
+        R2["OTLP HTTP<br/>:4318"]
+        R3["docker_stats"]
+        R4["hostmetrics"]
+        R5["postgresql"]
+        R6["redis"]
+        R7["kafkametrics"]
+        R8["filelog<br/>container logs"]
+        R9["httpcheck"]
+        R10["nginx"]
+    end
+
+    Collector["OTel Collector"]
+
+    subgraph Exporters["OTel Exporters"]
+        E1["kafka/traces<br/>OTLP JSON"]
+        E2["kafka/metrics<br/>OTLP JSON"]
+        E3["kafka/logs<br/>OTLP JSON"]
+        E4["otlphttp/prometheus"]
+    end
+
+    subgraph Kafka["VAST Kafka<br/>:9092"]
+        T1["otel-traces"]
+        T2["otel-metrics"]
+        T3["otel-logs"]
+    end
+
+    subgraph Ingester["observability-ingester"]
+        ING["Kafka Consumer<br/>PyArrow Batches<br/>VastDB HTTP API"]
+    end
+
+    subgraph VastDB["VAST Database"]
+        DB1["traces_otel_analytic"]
+        DB2["metrics_otel_analytic"]
+        DB3["logs_otel_analytic"]
+        DB4["span_events_otel_analytic"]
+        DB5["span_links_otel_analytic"]
+        DB6["service_metrics_1m / 5m"]
+        DB7["topology_services"]
+        DB8["topology_dependencies"]
+        DB9["alerts"]
+        DB10["anomaly_scores"]
+        DB11["service_baselines"]
+    end
+
+    subgraph Trino["Trino Query Engine<br/>:18080"]
+        TQ["SQL Interface<br/>VAST Connector"]
+    end
+
+    subgraph ObsServices["Observability Agent Services"]
+        OA["observability-agent<br/>Web UI :5000<br/>Diagnostic Chat"]
+        OAG["observability-aggregator<br/>Metric Rollups<br/>60s cycle"]
+        OT["observability-topology<br/>Service Discovery<br/>60s cycle"]
+        OP["observability-predictive<br/>Anomaly Detection<br/>Baseline Learning"]
+    end
+
+    LLM["Claude 3.5 Haiku<br/>Root Cause Analysis"]
+
+    %% Microservices to Receivers
+    MS -->|OTLP| R1
+    MS -->|Browser Traces| R2
+
+    %% Receivers to Collector
+    R1 & R2 & R3 & R4 & R5 & R6 & R7 & R8 & R9 & R10 --> Collector
+
+    %% Collector to Exporters
+    Collector --> E1 & E2 & E3 & E4
+
+    %% Exporters to Kafka
+    E1 --> T1
+    E2 --> T2
+    E3 --> T3
+
+    %% Kafka to Ingester
+    T1 & T2 & T3 --> ING
+
+    %% Ingester to VastDB
+    ING --> DB1 & DB2 & DB3 & DB4 & DB5
+
+    %% VastDB to Trino
+    VastDB <-->|VAST Connector| TQ
+
+    %% Trino to Obs Services
+    TQ <--> OA
+    TQ <--> OAG
+    TQ <--> OT
+    TQ <--> OP
+
+    %% Obs Services write back to VastDB
+    OAG -.->|materialize| DB6
+    OT -.->|materialize| DB7 & DB8
+    OP -.->|materialize| DB9 & DB10 & DB11
+
+    %% LLM connection
+    OA <-->|Investigation| LLM
+    OP <-->|Alert Analysis| LLM
+
+    %% Prometheus
+    E4 --> Prometheus["Prometheus<br/>:9090"]
+
+    %% Styling
+    classDef receiver fill:#4a9eff,stroke:#2670c2,color:#fff
+    classDef collector fill:#ff9f43,stroke:#cc7a2e,color:#fff
+    classDef exporter fill:#ee5a24,stroke:#b8451c,color:#fff
+    classDef kafka fill:#6c5ce7,stroke:#4a3db0,color:#fff
+    classDef vastdb fill:#00b894,stroke:#008c6e,color:#fff
+    classDef trino fill:#0984e3,stroke:#0767b0,color:#fff
+    classDef obs fill:#fdcb6e,stroke:#c9a033,color:#000
+    classDef llm fill:#e056a0,stroke:#b0407d,color:#fff
+    classDef service fill:#dfe6e9,stroke:#b2bec3,color:#2d3436
+
+    class R1,R2,R3,R4,R5,R6,R7,R8,R9,R10 receiver
+    class Collector collector
+    class E1,E2,E3,E4 exporter
+    class T1,T2,T3 kafka
+    class DB1,DB2,DB3,DB4,DB5,DB6,DB7,DB8,DB9,DB10,DB11 vastdb
+    class TQ trino
+    class OA,OAG,OT,OP obs
+    class LLM llm
+    class MS service
+    class Prometheus trino
