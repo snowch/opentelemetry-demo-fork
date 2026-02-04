@@ -6518,6 +6518,12 @@ Can you help me understand this issue further or suggest next steps?`;
             sendMessage();
         }
 
+        function formatTimestampForPrompt(dateInput) {
+            const d = new Date(dateInput);
+            const pad = (n) => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        }
+
         function generateAlertSuggestions(alert) {
             const suggestions = [];
             const svc = alert.service_name || alert.entity_name;
@@ -6529,7 +6535,7 @@ Can you help me understand this issue further or suggest next steps?`;
             let timeCtx = '';
             if (alert.created_at) {
                 const start = new Date(alert.created_at);
-                const startStr = start.toLocaleString();
+                const startStr = formatTimestampForPrompt(start);
                 if (alert.resolved_at) {
                     const end = new Date(alert.resolved_at);
                     const durMin = Math.round((end - start) / 60000);
@@ -6591,7 +6597,7 @@ Can you help me understand this issue further or suggest next steps?`;
                 });
             }
             if (alert.created_at) {
-                const ts = new Date(alert.created_at).toLocaleString();
+                const ts = formatTimestampForPrompt(alert.created_at);
                 suggestions.push({
                     label: 'Explore around alert time',
                     prompt: `${preamble} What was happening across all services around ${ts} (±10 minutes)? Look for correlated anomalies, error spikes, or latency changes that overlap this alert's time window.`
@@ -6644,7 +6650,7 @@ Can you help me understand this issue further or suggest next steps?`;
             const op = info.span_name;
             const excType = exc.exception_type ? exc.exception_type.split('.').pop() : '';
             const excMsg = exc.exception_message || '';
-            const ts = info.start_time ? new Date(info.start_time).toLocaleString() : '';
+            const ts = info.start_time ? formatTimestampForPrompt(info.start_time) : '';
 
             // Build preamble with error context
             let preamble = `This is an error on ${svc || 'unknown service'}`;
@@ -6675,7 +6681,7 @@ Can you help me understand this issue further or suggest next steps?`;
             if (svc) {
                 suggestions.push({
                     label: 'Check infrastructure metrics',
-                    prompt: `${preamble} Check infrastructure metrics for ${svc} around ${ts || 'the time of the error'} — CPU, memory, and any resource pressure. Could resource exhaustion have caused this error?`
+                    prompt: `${preamble} Check infrastructure metrics for ${svc} around ${ts || 'the time of the error'}. Use the topology tables to discover what infrastructure this service runs on: (1) Find the host via topology_host_services WHERE service_name = '${svc}'. (2) Check for a matching container in topology_containers (container_name may match or contain the service name). (3) If a container exists, query container metrics (container.cpu.percent, container.memory.percent, container.memory.usage.total) from metrics_otel_analytic WHERE attributes_flat LIKE '%container.name=<name>%' around the error time. (4) Query host-level metrics (system.cpu.utilization, system.memory.utilization, system.filesystem.utilization) from metrics_otel_analytic WHERE attributes_flat LIKE '%host.name=<name>%' around the error time. Could resource exhaustion at the container or host level have caused this error?`
                 });
             }
 
