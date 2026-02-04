@@ -3704,6 +3704,7 @@ def get_alerts():
     status = request.args.get('status', 'active')  # active, resolved, all
     severity = request.args.get('severity')  # info, warning, critical
     service = request.args.get('service')
+    time_param = request.args.get('time')  # e.g. 1m, 5m, 15m, 1h
     limit = min(int(request.args.get('limit', 50)), 100)
 
     data = {
@@ -3730,6 +3731,23 @@ def get_alerts():
 
     if service:
         conditions.append(f"service_name = '{service}'")
+
+    if time_param:
+        try:
+            time_value = int(time_param[:-1])
+            time_unit = time_param[-1]
+            if time_unit == 's':
+                interval = f"'{time_value}' SECOND"
+            elif time_unit == 'm':
+                interval = f"'{time_value}' MINUTE"
+            elif time_unit == 'h':
+                interval = f"'{time_value}' HOUR"
+            else:
+                interval = None
+            if interval:
+                conditions.append(f"created_at > NOW() - INTERVAL {interval}")
+        except (ValueError, IndexError):
+            pass
 
     where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
 

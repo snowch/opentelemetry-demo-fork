@@ -5769,10 +5769,17 @@
             if (alertsRefreshInFlight) return;
             alertsRefreshInFlight = true;
             try {
+                // Use the same time window as the main sidebar selector
+                const timeSelector = document.getElementById('services-time-selector');
+                const timeWindow = timeSelector ? timeSelector.value : '1h';
+
+                // Convert time window to minutes for activity endpoint
+                const timeMinutes = { '1m': 1, '5m': 5, '15m': 15, '1h': 60 }[timeWindow] || 60;
+
                 // Fetch all three sources in parallel
                 const [alertsResp, activityResp, predictionsResp] = await Promise.all([
-                    fetch('/api/alerts?status=all&limit=50'),
-                    fetch('/api/alerts/activity?minutes=60&limit=50'),
+                    fetch(`/api/alerts?status=all&limit=50&time=${timeWindow}`),
+                    fetch(`/api/alerts/activity?minutes=${timeMinutes}&limit=50`),
                     fetch('/api/predictions')
                 ]);
                 const [alertsData, activityData, predictionsData] = await Promise.all([
@@ -5782,10 +5789,12 @@
                 const alertsBadge = document.getElementById('alerts-badge');
                 const container = document.getElementById('combined-alerts-list');
 
-                // Merge alerts into alertHistory
+                // Sync alertHistory with time-filtered API response
                 window.alertsCache = window.alertsCache || {};
+                const returnedAlertIds = new Set();
                 if (alertsData.alerts) {
                     alertsData.alerts.forEach(alert => {
+                        returnedAlertIds.add(alert.alert_id);
                         window.alertsCache[alert.alert_id] = alert;
                         const existing = alertHistory.get(alert.alert_id);
                         if (existing) {
@@ -5795,6 +5804,12 @@
                             alertHistory.set(alert.alert_id, alert);
                         }
                     });
+                }
+                // Remove alerts no longer in the time-filtered response
+                for (const [id] of alertHistory) {
+                    if (!returnedAlertIds.has(id)) {
+                        alertHistory.delete(id);
+                    }
                 }
 
                 // Merge predictions into forecastHistory
@@ -5881,7 +5896,7 @@
                         <div class="error-summary-stats">
                             <div>
                                 <div class="error-count">${activeCount}</div>
-                                <div class="error-label">active alerts</div>
+                                <div class="error-label">alerts (${timeWindow})</div>
                             </div>
                             <div class="error-services">
                                 <div class="error-services-count">${resolvedAlerts.length}</div>
@@ -5897,7 +5912,7 @@
                         <div class="error-summary-stats">
                             <div>
                                 <div class="error-count zero">0</div>
-                                <div class="error-label">active alerts</div>
+                                <div class="error-label">alerts (${timeWindow})</div>
                             </div>
                             ${resolvedAlerts.length > 0 ? `
                             <div class="error-services">
