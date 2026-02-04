@@ -4462,7 +4462,7 @@
                 </div>
 
                 <div class="error-detail-card">
-                    <h4 style="display:flex;align-items:center;justify-content:space-between;">Full Trace <button id="view-waterfall-btn" class="diag-action-btn" style="font-size:11px;padding:4px 10px;display:none;" onclick="closeErrorModal(); openTraceModal(document.getElementById('view-waterfall-btn').dataset.traceId);">View Waterfall</button></h4>
+                    <h4 style="display:flex;align-items:center;justify-content:space-between;">Full Trace <button id="view-waterfall-btn" class="diag-action-btn" style="font-size:11px;padding:4px 10px;display:none;" onclick="var _tid=document.getElementById('view-waterfall-btn').dataset.traceId, _sid=document.getElementById('view-waterfall-btn').dataset.spanId; closeErrorModal(); openTraceModal(_tid, {type:'error', traceId:_tid, spanId:_sid});">View Waterfall</button></h4>
                     <div style="overflow-x: auto;">
                         <table class="trace-table" id="trace-table">
                             <thead>
@@ -4486,6 +4486,11 @@
         <div class="modal">
             <div class="modal-header">
                 <div class="modal-title-row">
+                    <button class="modal-back-btn" id="trace-back-btn" onclick="traceNavBack()" title="Back" style="display:none">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M19 12H5M12 19l-7-7 7-7"/>
+                        </svg>
+                    </button>
                     <span class="modal-type-badge" style="background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);">Trace</span>
                     <h2 id="trace-modal-title">Trace Viewer</h2>
                 </div>
@@ -4571,7 +4576,7 @@
                             <div class="flow-icon">T</div>
                             <div class="flow-info">
                                 <div class="flow-name">Traces</div>
-                                <div class="flow-path">otel-traces → spans_otel_analytic</div>
+                                <div class="flow-path">otel-traces → traces_otel_analytic</div>
                             </div>
                         </div>
                         <div class="flow-card metrics">
@@ -7762,13 +7767,13 @@ Can you help me understand this issue further or suggest next steps?`;
                                 <td title="${escapeHtml(t.span_name || '')}">${escapeHtml(t.span_name || '-')}</td>
                                 <td>${t.duration_ms ? t.duration_ms + 'ms' : '-'}</td>
                                 <td style="color:${isError?'var(--accent-error)':'var(--accent-success)'}">${t.status_code || 'OK'}</td>
-                                <td title="${t.trace_id || ''}"><a href="#" onclick="event.stopPropagation(); openTraceModal('${t.trace_id}'); return false;" style="color:var(--accent-primary);text-decoration:underline;font-family:monospace;font-size:11px;">${(t.trace_id || '-').substring(0,12)}</a></td></tr>`;
+                                <td title="${t.trace_id || ''}"><a href="#" onclick="event.stopPropagation(); openTraceModal('${t.trace_id}', {type:'entity', entityType:currentEntityType, entityName:currentEntityName, tab:'traces'}); return false;" style="color:var(--accent-primary);text-decoration:underline;font-family:monospace;font-size:11px;">${(t.trace_id || '-').substring(0,12)}</a></td></tr>`;
                         } else {
                             return `<tr class="${isError ? 'error-row' : ''}" onclick="openErrorModal('${t.trace_id}', '${t.span_id}')" style="cursor:pointer;">
                                 <td>${time}</td><td title="${escapeHtml(t.span_name || '')}">${escapeHtml(t.span_name || '-')}</td>
                                 <td>${t.span_kind || '-'}</td><td>${t.duration_ms}ms</td>
                                 <td style="color:${isError?'var(--accent-error)':'var(--accent-success)'}">${t.status_code || 'OK'}</td>
-                                <td title="${t.trace_id}"><a href="#" onclick="event.stopPropagation(); openTraceModal('${t.trace_id}'); return false;" style="color:var(--accent-primary);text-decoration:underline;font-family:monospace;font-size:11px;">${(t.trace_id || '-').substring(0,12)}</a></td></tr>`;
+                                <td title="${t.trace_id}"><a href="#" onclick="event.stopPropagation(); openTraceModal('${t.trace_id}', {type:'entity', entityType:currentEntityType, entityName:currentEntityName, tab:'traces'}); return false;" style="color:var(--accent-primary);text-decoration:underline;font-family:monospace;font-size:11px;">${(t.trace_id || '-').substring(0,12)}</a></td></tr>`;
                         }
                     }).join('');
                 } else {
@@ -9034,7 +9039,7 @@ Can you help me understand this issue further or suggest next steps?`;
                     document.getElementById('error-operation').textContent = info.span_name || '-';
                     document.getElementById('error-timestamp').textContent = info.start_time ? new Date(info.start_time).toLocaleString() : '-';
                     document.getElementById('error-duration').textContent = info.duration_ms ? `${info.duration_ms}ms` : '-';
-                    document.getElementById('error-trace-id').innerHTML = `<a href="#" onclick="closeErrorModal(); openTraceModal('${escapeHtml(traceId)}'); return false;" style="color:var(--accent-primary);text-decoration:underline;font-family:monospace;">${escapeHtml(traceId)}</a>`;
+                    document.getElementById('error-trace-id').innerHTML = `<a href="#" onclick="closeErrorModal(); openTraceModal('${escapeHtml(traceId)}', {type:'error', traceId:'${escapeHtml(traceId)}', spanId:'${escapeHtml(spanId || '')}'}); return false;" style="color:var(--accent-primary);text-decoration:underline;font-family:monospace;">${escapeHtml(traceId)}</a>`;
                 }
 
                 // Exception details
@@ -9249,6 +9254,7 @@ Can you help me understand this issue further or suggest next steps?`;
                 const traceTable = document.getElementById('trace-table').querySelector('tbody');
                 const waterfallBtn = document.getElementById('view-waterfall-btn');
                 waterfallBtn.dataset.traceId = traceId;
+                waterfallBtn.dataset.spanId = spanId || '';
                 waterfallBtn.style.display = 'inline-block';
                 if (data.trace && data.trace.length > 0) {
                     traceTable.innerHTML = data.trace.map(span => `
@@ -10555,8 +10561,14 @@ Can you help me understand this issue further or suggest next steps?`;
             panel.innerHTML = html;
         }
 
-        async function openTraceModal(traceId) {
+        // Track where we navigated from so the back button can return there
+        let traceNavOrigin = null;  // {type: 'entity'|'error', ...context}
+
+        async function openTraceModal(traceId, origin) {
             currentTraceId = traceId;
+            traceNavOrigin = origin || null;
+            const backBtn = document.getElementById('trace-back-btn');
+            backBtn.style.display = traceNavOrigin ? '' : 'none';
             document.getElementById('trace-modal').classList.add('active');
             document.getElementById('trace-modal-title').textContent = `Trace ${traceId.substring(0, 12)}...`;
             document.getElementById('trace-modal-body').innerHTML = '<div class="empty-state">Loading trace...</div>';
@@ -10590,6 +10602,22 @@ Can you help me understand this issue further or suggest next steps?`;
         function closeTraceModal() {
             document.getElementById('trace-modal').classList.remove('active');
             currentTraceData = null;
+            traceNavOrigin = null;
+            document.getElementById('trace-back-btn').style.display = 'none';
+        }
+
+        function traceNavBack() {
+            if (!traceNavOrigin) return;
+            const origin = traceNavOrigin;
+            document.getElementById('trace-modal').classList.remove('active');
+            currentTraceData = null;
+            traceNavOrigin = null;
+            document.getElementById('trace-back-btn').style.display = 'none';
+            if (origin.type === 'entity') {
+                openEntityModal(origin.entityType, origin.entityName, origin.tab);
+            } else if (origin.type === 'error') {
+                openErrorModal(origin.traceId, origin.spanId);
+            }
         }
 
         function refreshTraceModal() {

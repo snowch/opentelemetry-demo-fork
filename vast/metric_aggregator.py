@@ -156,6 +156,10 @@ class MetricAggregatorService:
         self.executor = TrinoExecutor(config)
         self.running = True
 
+        # Cached warmup cutoff (stable after initial ingestion)
+        self._warmup_earliest = None
+        self._warmup_earliest_ts = 0
+
         # Track row counts per table for job status details
         self._last_table_rows = {}
 
@@ -193,12 +197,17 @@ class MetricAggregatorService:
 
         This filters out transient startup errors (e.g. Kafka topic not yet
         available) that occur before all services are fully initialized.
+        The MIN(start_time) result is cached for 10 minutes since it's
+        effectively static after initial ingestion.
         """
         warmup = self.config.warmup_minutes
-        rows = self.executor.execute("SELECT MIN(start_time) as earliest FROM traces_otel_analytic")
-        earliest = rows[0]['earliest'] if rows and rows[0]['earliest'] else None
-        if earliest:
-            return f"start_time > TIMESTAMP '{earliest}' + INTERVAL '{warmup}' MINUTE"
+        now = time.time()
+        if self._warmup_earliest is None or (now - self._warmup_earliest_ts) > 600:
+            rows = self.executor.execute("SELECT MIN(start_time) as earliest FROM traces_otel_analytic")
+            self._warmup_earliest = rows[0]['earliest'] if rows and rows[0]['earliest'] else None
+            self._warmup_earliest_ts = now
+        if self._warmup_earliest:
+            return f"start_time > TIMESTAMP '{self._warmup_earliest}' + INTERVAL '{warmup}' MINUTE"
         return None
 
     @traced

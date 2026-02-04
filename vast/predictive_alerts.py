@@ -1092,49 +1092,220 @@ class AnomalyDetector:
         """Learn adaptive thresholds from alert history."""
         self.threshold_manager.learn_from_alert_history(self.executor)
 
+    # -----------------------------------------------------------------
+    # Bulk data fetching (replaces per-service queries)
+    # -----------------------------------------------------------------
+
+    def _load_all_suppressions(self) -> Dict[str, Dict[str, set]]:
+        """Load all suppressions in one query.
+
+        Returns {service_name: {suppression_type: {values...}}}.
+        Global ('*') entries are merged into every service.
+        """
+        sql = "SELECT service_name, suppression_type, exception_type FROM alert_suppressions"
+        try:
+            results = self.executor.execute(sql)
+        except Exception:
+            return {}
+        by_svc: Dict[str, Dict[str, set]] = {}
+        for r in results:
+            svc = r['service_name']
+            stype = r['suppression_type']
+            by_svc.setdefault(svc, {}).setdefault(stype, set()).add(r['exception_type'])
+        return by_svc
+
+    def _get_suppressed_from_cache(self, service: str, suppression_type: str,
+                                   all_suppressions: Dict) -> set:
+        """Look up suppressed values from pre-loaded suppressions dict."""
+        result = set()
+        for svc_key in (service, '*'):
+            svc_data = all_suppressions.get(svc_key, {})
+            result |= svc_data.get(suppression_type, set())
+        return result
+
+    def _fetch_all_service_metrics(self, services: List[str]) -> Dict[str, Dict]:
+        """Fetch error rate, latency, throughput, and span counts for all
+        services in 4 bulk queries (instead of 4 * N).
+
+        Returns {service_name: {error_rate: {...}, latency: {...},
+                                throughput: {...}, down: {...}}}.
+        """
+        data: Dict[str, Dict] = {s: {} for s in services}
+
+        # 1) Error rates
+        sql = """
+            SELECT service_name,
+                   COUNT(*) as total,
+                   SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) as errors,
+                   CAST(SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) AS DOUBLE) /
+                       NULLIF(COUNT(*), 0) as error_rate
+            FROM traces_otel_analytic
+            WHERE start_time > current_timestamp - interval '5' minute
+              AND service_name IS NOT NULL
+            GROUP BY service_name
+        """
+        for row in self.executor.execute(sql):
+            svc = row.get('service_name')
+            if svc in data:
+                data[svc]['error_rate'] = row
+
+        # 2) P95 latency
+        sql = """
+            SELECT service_name,
+                   approx_percentile(duration_ns / 1e6, 0.95) as latency_p95,
+                   COUNT(*) as cnt
+            FROM traces_otel_analytic
+            WHERE start_time > current_timestamp - interval '5' minute
+              AND duration_ns > 0
+              AND service_name IS NOT NULL
+            GROUP BY service_name
+            HAVING COUNT(*) >= 5
+        """
+        for row in self.executor.execute(sql):
+            svc = row.get('service_name')
+            if svc in data:
+                data[svc]['latency'] = row
+
+        # 3) Throughput (SERVER spans only)
+        sql = """
+            SELECT service_name,
+                   COUNT(*) as requests
+            FROM traces_otel_analytic
+            WHERE start_time > current_timestamp - interval '5' minute
+              AND span_kind = 'SERVER'
+              AND service_name IS NOT NULL
+            GROUP BY service_name
+        """
+        for row in self.executor.execute(sql):
+            svc = row.get('service_name')
+            if svc in data:
+                data[svc]['throughput'] = row
+
+        # 4) Service down — span counts + last seen in configurable window
+        window = self.config.service_down_minutes
+        sql = f"""
+            SELECT service_name,
+                   COUNT(*) as requests,
+                   MAX(start_time) as last_seen
+            FROM traces_otel_analytic
+            WHERE start_time > current_timestamp - interval '{window}' minute
+              AND service_name IS NOT NULL
+            GROUP BY service_name
+        """
+        for row in self.executor.execute(sql):
+            svc = row.get('service_name')
+            if svc in data:
+                data[svc]['down'] = row
+
+        return data
+
+    def _fetch_all_exception_metrics(self, services: List[str]) -> Dict[str, Dict]:
+        """Fetch exception counts and distinct types for all services in 2
+        bulk queries.
+
+        Returns {service_name: {count: N, types: [{exception_type, count}]}}.
+        """
+        data: Dict[str, Dict] = {s: {'count': 0, 'types': []} for s in services}
+
+        # 1) Exception counts per service (last 5 min)
+        sql = """
+            SELECT service_name, COUNT(*) as exception_count
+            FROM span_events_otel_analytic
+            WHERE exception_type IS NOT NULL AND exception_type != ''
+              AND timestamp > current_timestamp - interval '5' minute
+              AND service_name IS NOT NULL
+            GROUP BY service_name
+        """
+        for row in self.executor.execute(sql):
+            svc = row.get('service_name')
+            if svc in data:
+                data[svc]['count'] = int(row.get('exception_count', 0))
+
+        # 2) Distinct exception types per service (last 15 min)
+        sql = """
+            SELECT service_name, exception_type, COUNT(*) as count
+            FROM span_events_otel_analytic
+            WHERE exception_type IS NOT NULL AND exception_type != ''
+              AND timestamp > current_timestamp - interval '15' minute
+              AND service_name IS NOT NULL
+            GROUP BY service_name, exception_type
+            HAVING COUNT(*) >= 2
+        """
+        for row in self.executor.execute(sql):
+            svc = row.get('service_name')
+            if svc in data:
+                data[svc]['types'].append(row)
+
+        return data
+
+    # -----------------------------------------------------------------
+
     @traced
     def detect_all(self) -> List[Dict]:
-        """Run all anomaly detection methods and return detected anomalies."""
-        anomalies = []
+        """Run all anomaly detection methods and return detected anomalies.
 
-        # Get current metrics for all services
+        Uses bulk queries to fetch metrics for all services at once, then
+        runs per-service anomaly logic on the pre-fetched data.
+        """
+        anomalies = []
         services = list(self.baseline_computer.baselines.keys())
+        if not services:
+            return anomalies
+
+        # Pre-fetch data in bulk
+        all_metrics = self._fetch_all_service_metrics(services)
+        all_suppressions = self._load_all_suppressions()
+
+        # Cache MIN(start_time) once per cycle for the data-age guard
+        self._cycle_oldest = None
+        age_results = self.executor.execute(
+            "SELECT MIN(start_time) as oldest FROM traces_otel_analytic"
+        )
+        if age_results and age_results[0]["oldest"] is not None:
+            self._cycle_oldest = age_results[0]["oldest"]
+
+        # Pre-fetch exception metrics if root-cause detection needs them
+        all_exceptions = None
+        if self.config.root_cause_enabled and (
+            self.threshold_manager.is_root_cause_enabled("exception_surge") or
+            self.threshold_manager.is_root_cause_enabled("new_exception")
+        ):
+            all_exceptions = self._fetch_all_exception_metrics(services)
 
         for service in services:
-            # === SYMPTOM-BASED DETECTION (existing) ===
+            svc_metrics = all_metrics.get(service, {})
 
-            # Check error rate
-            error_anomaly = self._detect_error_rate_anomaly(service)
+            # === SYMPTOM-BASED DETECTION ===
+            error_anomaly = self._detect_error_rate_anomaly(
+                service, svc_metrics.get('error_rate'), all_suppressions)
             if error_anomaly:
                 anomalies.append(error_anomaly)
 
-            # Check latency
-            latency_anomaly = self._detect_latency_anomaly(service)
+            latency_anomaly = self._detect_latency_anomaly(
+                service, svc_metrics.get('latency'))
             if latency_anomaly:
                 anomalies.append(latency_anomaly)
 
-            # Check throughput drop
-            throughput_anomaly = self._detect_throughput_anomaly(service)
+            throughput_anomaly = self._detect_throughput_anomaly(
+                service, svc_metrics.get('throughput'))
             if throughput_anomaly:
                 anomalies.append(throughput_anomaly)
 
-            # Check for service down
-            down_anomaly = self._detect_service_down(service)
+            down_anomaly = self._detect_service_down(
+                service, svc_metrics.get('down'))
             if down_anomaly:
                 anomalies.append(down_anomaly)
 
             # === ROOT CAUSE DETECTION (configurable) ===
             if self.config.root_cause_enabled:
-                # Check all dependency anomalies (db, messaging, rpc, http, service)
                 if self.threshold_manager.is_root_cause_enabled("dependency_latency") or \
                    self.threshold_manager.is_root_cause_enabled("dependency_error"):
                     dep_anomalies = self._detect_dependency_anomalies(service)
                     anomalies.extend(dep_anomalies)
 
-                # Check exception patterns
-                if self.threshold_manager.is_root_cause_enabled("exception_surge") or \
-                   self.threshold_manager.is_root_cause_enabled("new_exception"):
-                    exc_anomalies = self._detect_exception_issues(service)
+                if all_exceptions is not None:
+                    exc_anomalies = self._detect_exception_issues(
+                        service, all_exceptions.get(service, {}), all_suppressions)
                     anomalies.extend(exc_anomalies)
 
         # === ENTITY RESOURCE DETECTION (container/host saturation) ===
@@ -1154,31 +1325,16 @@ class AnomalyDetector:
     ERROR_RATE_STDDEV_FLOOR = 0.005  # 0.5%
 
     @traced
-    def _detect_error_rate_anomaly(self, service: str) -> Optional[Dict]:
-        """Detect error rate spikes."""
-        # Exclude suppressed error operations from the calculation
-        suppressed_ops = self._get_suppressed_types(service, 'error_operation')
-        not_in_clause = ""
-        if suppressed_ops:
-            escaped = "', '".join(suppressed_ops)
-            not_in_clause = f"AND span_name NOT IN ('{escaped}') "
-        # Get current error rate (last 5 minutes)
-        sql = f"""
-            SELECT
-                COUNT(*) as total,
-                SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) as errors,
-                CAST(SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) AS DOUBLE) /
-                    NULLIF(COUNT(*), 0) as error_rate
-            FROM traces_otel_analytic
-            WHERE service_name = '{service}'
-            {not_in_clause}AND start_time > current_timestamp - interval '5' minute
-        """
-        results = self.executor.execute(sql)
-
-        if not results or results[0]["total"] < 5:
+    def _detect_error_rate_anomaly(self, service: str,
+                                    prefetched: Optional[Dict] = None,
+                                    all_suppressions: Optional[Dict] = None) -> Optional[Dict]:
+        """Detect error rate spikes using pre-fetched bulk data."""
+        if prefetched is None:
+            return None
+        if prefetched.get("total", 0) < 5:
             return None
 
-        current_rate = results[0]["error_rate"] or 0
+        current_rate = prefetched.get("error_rate") or 0
         baseline = self.baseline_computer.get_baseline(service, "error_rate")
 
         # Determine severity based on absolute thresholds and Z-score
@@ -1224,24 +1380,13 @@ class AnomalyDetector:
         return None
 
     @traced
-    def _detect_latency_anomaly(self, service: str) -> Optional[Dict]:
-        """Detect latency degradation."""
-        # Get current P95 latency
-        sql = f"""
-            SELECT
-                approx_percentile(duration_ns / 1e6, 0.95) as latency_p95
-            FROM traces_otel_analytic
-            WHERE service_name = '{service}'
-            AND start_time > current_timestamp - interval '5' minute
-            AND duration_ns > 0
-            HAVING COUNT(*) >= 5
-        """
-        results = self.executor.execute(sql)
-
-        if not results or results[0]["latency_p95"] is None:
+    def _detect_latency_anomaly(self, service: str,
+                                 prefetched: Optional[Dict] = None) -> Optional[Dict]:
+        """Detect latency degradation using pre-fetched bulk data."""
+        if prefetched is None or prefetched.get("latency_p95") is None:
             return None
 
-        current_latency = results[0]["latency_p95"]
+        current_latency = prefetched["latency_p95"]
         baseline = self.baseline_computer.get_baseline(service, "latency_p95")
 
         if not baseline or baseline["stddev"] == 0:
@@ -1272,23 +1417,14 @@ class AnomalyDetector:
         return None
 
     @traced
-    def _detect_throughput_anomaly(self, service: str) -> Optional[Dict]:
-        """Detect throughput drops (potential upstream issues)."""
-        # Get current throughput (requests per minute)
-        sql = f"""
-            SELECT COUNT(*) as requests
-            FROM traces_otel_analytic
-            WHERE service_name = '{service}'
-            AND start_time > current_timestamp - interval '5' minute
-            AND span_kind = 'SERVER'
-        """
-        results = self.executor.execute(sql)
-
-        if not results:
+    def _detect_throughput_anomaly(self, service: str,
+                                    prefetched: Optional[Dict] = None) -> Optional[Dict]:
+        """Detect throughput drops using pre-fetched bulk data."""
+        if prefetched is None:
             return None
 
         # Normalize to per-minute
-        current_throughput = results[0]["requests"] / 5.0
+        current_throughput = prefetched.get("requests", 0) / 5.0
         baseline = self.baseline_computer.get_baseline(service, "throughput")
 
         if not baseline or baseline["stddev"] == 0 or baseline["mean"] < 1:
@@ -1323,7 +1459,8 @@ class AnomalyDetector:
         return None
 
     @traced
-    def _detect_service_down(self, service: str) -> Optional[Dict]:
+    def _detect_service_down(self, service: str,
+                              prefetched: Optional[Dict] = None) -> Optional[Dict]:
         """Detect if a service has stopped sending data.
 
         Uses the throughput baseline to detect silence quickly:
@@ -1333,18 +1470,14 @@ class AnomalyDetector:
           critical availability issue.
         - Falls back to a simple silence check if no baseline exists yet.
 
-        Includes a data-age guard: if the oldest trace is too recent we don't
-        have enough history to judge, so we skip.
+        Uses the per-cycle cached MIN(start_time) for the data-age guard.
         """
         window = self.config.service_down_minutes  # default 5
 
-        # Guard: ensure we have at least <window> minutes of data.
-        age_sql = "SELECT MIN(start_time) as oldest FROM traces_otel_analytic"
-        age_results = self.executor.execute(age_sql)
-        if age_results and age_results[0]["oldest"] is not None:
-            oldest = age_results[0]["oldest"]
+        # Guard: ensure we have at least <window> minutes of data (use cycle cache).
+        oldest = getattr(self, '_cycle_oldest', None)
+        if oldest is not None:
             try:
-                from datetime import datetime, timezone, timedelta
                 now_utc = datetime.now(timezone.utc)
                 cutoff = now_utc - timedelta(minutes=window)
 
@@ -1352,7 +1485,7 @@ class AnomalyDetector:
                     if oldest.tzinfo is None:
                         oldest = oldest.replace(tzinfo=timezone.utc)
                     if oldest > cutoff:
-                        return None  # Not enough history yet
+                        return None
                 elif isinstance(oldest, str):
                     oldest_dt = datetime.fromisoformat(oldest.replace('Z', '+00:00'))
                     if oldest_dt.tzinfo is None:
@@ -1360,21 +1493,14 @@ class AnomalyDetector:
                     if oldest_dt > cutoff:
                         return None
             except (ValueError, TypeError):
-                pass  # If we can't parse, proceed with normal detection
+                pass
 
-        # Count spans in the detection window
-        sql = f"""
-            SELECT COUNT(*) as requests,
-                   MAX(start_time) as last_seen
-            FROM traces_otel_analytic
-            WHERE service_name = '{service}'
-            AND start_time > current_timestamp - interval '{window}' minute
-        """
-        results = self.executor.execute(sql)
-        if not results:
-            return None
+        # Use pre-fetched span counts (services missing from bulk results have 0 spans)
+        if prefetched is None:
+            # Service had no spans at all in the window
+            prefetched = {"requests": 0, "last_seen": None}
 
-        current_count = int(results[0].get("requests", 0) or 0)
+        current_count = int(prefetched.get("requests", 0) or 0)
         current_rpm = current_count / max(window, 1)
 
         baseline = self.baseline_computer.get_baseline(service, "throughput")
@@ -1672,76 +1798,53 @@ class AnomalyDetector:
         except Exception:
             return set()
 
-    def _detect_exception_issues(self, service: str) -> List[Dict]:
-        """Detect exception-related root causes: surges and new exception types."""
+    def _detect_exception_issues(self, service: str,
+                                    prefetched_exc: Optional[Dict] = None,
+                                    all_suppressions: Optional[Dict] = None) -> List[Dict]:
+        """Detect exception-related root causes using pre-fetched bulk data."""
         anomalies = []
-        suppressed = self._get_suppressed_types(service, 'exception_type')
+        if prefetched_exc is None:
+            prefetched_exc = {'count': 0, 'types': []}
+        suppressed = self._get_suppressed_from_cache(
+            service, 'exception_type', all_suppressions or {})
 
         # Check exception rate surge
         baseline = self.baseline_computer.get_baseline(service, "exception_rate")
         if baseline:
-            not_in_clause = ""
-            if suppressed:
-                escaped = "', '".join(suppressed)
-                not_in_clause = f"AND exception_type NOT IN ('{escaped}') "
-            sql = f"""
-                SELECT COUNT(*) as exception_count
-                FROM span_events_otel_analytic
-                WHERE service_name = '{service}'
-                AND exception_type IS NOT NULL AND exception_type != ''
-                {not_in_clause}AND timestamp > current_timestamp - interval '5' minute
-            """
-            results = self.executor.execute(sql)
+            current_count = prefetched_exc.get('count', 0)
+            current_hourly_rate = current_count * 12
 
-            if results:
-                # Normalize to hourly rate for comparison (5 min -> 1 hour = multiply by 12)
-                current_count = int(results[0].get("exception_count", 0))
-                current_hourly_rate = current_count * 12
+            min_count = 3
+            min_rate_multiplier = 2.0
+            if (baseline["stddev"] > 0 and current_count >= min_count
+                    and current_hourly_rate > baseline["mean"] * min_rate_multiplier):
+                z_score = (current_hourly_rate - baseline["mean"]) / baseline["stddev"]
+                threshold = self.threshold_manager.get_threshold("exception_surge")
 
-                # Require minimum 3 exceptions in 5 min to avoid noise from single events
-                # and hourly rate must be at least 2x baseline mean
-                min_count = 3
-                min_rate_multiplier = 2.0
-                if (baseline["stddev"] > 0 and current_count >= min_count
-                        and current_hourly_rate > baseline["mean"] * min_rate_multiplier):
-                    z_score = (current_hourly_rate - baseline["mean"]) / baseline["stddev"]
-                    threshold = self.threshold_manager.get_threshold("exception_surge")
+                if z_score > threshold:
+                    severity = Severity.WARNING if z_score < threshold * 1.5 else Severity.CRITICAL
 
-                    if z_score > threshold:
-                        severity = Severity.WARNING if z_score < threshold * 1.5 else Severity.CRITICAL
+                    self._store_anomaly_score(
+                        service, "exception_rate", current_hourly_rate,
+                        baseline["mean"], baseline["mean"], baseline["stddev"],
+                        z_score, True, "zscore"
+                    )
 
-                        self._store_anomaly_score(
-                            service, "exception_rate", current_hourly_rate,
-                            baseline["mean"], baseline["mean"], baseline["stddev"],
-                            z_score, True, "zscore"
-                        )
-
-                        anomalies.append({
-                            "service": service,
-                            "metric_type": "exception_rate",
-                            "alert_type": AlertType.EXCEPTION_SURGE,
-                            "severity": severity,
-                            "current_value": current_hourly_rate,
-                            "baseline_value": baseline["mean"],
-                            "z_score": z_score,
-                            "message": f"Exception surge: {current_count} exceptions in 5 min (~{current_hourly_rate:.0f}/hour, baseline: {baseline['mean']:.0f}/hour)"
-                        })
+                    anomalies.append({
+                        "service": service,
+                        "metric_type": "exception_rate",
+                        "alert_type": AlertType.EXCEPTION_SURGE,
+                        "severity": severity,
+                        "current_value": current_hourly_rate,
+                        "baseline_value": baseline["mean"],
+                        "z_score": z_score,
+                        "message": f"Exception surge: {current_count} exceptions in 5 min (~{current_hourly_rate:.0f}/hour, baseline: {baseline['mean']:.0f}/hour)"
+                    })
 
         # Check for new/unknown exception types
         known_types = self.baseline_computer.get_known_exception_types(service)
-        if known_types:  # Only check if we have baseline exception types
-            sql = f"""
-                SELECT DISTINCT exception_type, COUNT(*) as count
-                FROM span_events_otel_analytic
-                WHERE service_name = '{service}'
-                AND exception_type IS NOT NULL AND exception_type != ''
-                AND timestamp > current_timestamp - interval '15' minute
-                GROUP BY exception_type
-                HAVING COUNT(*) >= 2
-            """
-            results = self.executor.execute(sql)
-
-            for row in results:
+        if known_types:
+            for row in prefetched_exc.get('types', []):
                 exc_type = row["exception_type"]
                 exc_count = row["count"]
 
@@ -1749,7 +1852,6 @@ class AnomalyDetector:
                     continue
 
                 if exc_type not in known_types:
-                    # New exception type detected
                     anomalies.append({
                         "service": service,
                         "metric_type": f"new_exception:{exc_type[:50]}",

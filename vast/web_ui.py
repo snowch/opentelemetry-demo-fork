@@ -190,11 +190,11 @@ ENTITY_TYPES = {
     'host': {
         'display_name': 'Hosts',
         'name_field': 'host_name',
-        'traces_table': 'spans_otel_analytic',
-        'traces_time_field': 'timestamp',
+        'traces_table': 'traces_otel_analytic',
+        'traces_time_field': 'start_time',
         'traces_filter': "attributes_flat LIKE '%host.name={name}%'",
         'logs_filter': None,
-        'logs_join': "l.service_name IN (SELECT DISTINCT service_name FROM spans_otel_analytic WHERE attributes_flat LIKE '%host.name={name}%' AND timestamp > NOW() - INTERVAL {interval} AND service_name IS NOT NULL AND service_name != '')",
+        'logs_join': "l.service_name IN (SELECT DISTINCT service_name FROM traces_otel_analytic WHERE attributes_flat LIKE '%host.name={name}%' AND start_time > NOW() - INTERVAL {interval} AND service_name IS NOT NULL AND service_name != '')",
         'metrics_filter': "attributes_flat LIKE '%host.name={name}%'",
         'has_latency_charts': False,
         'has_error_charts': False,
@@ -489,12 +489,20 @@ def get_anthropic_client():
 # Chat Session Management
 # =============================================================================
 
-chat_sessions = {}
+chat_sessions = {}  # session_id -> (last_access_time, history)
+_SESSION_TTL = 3600  # 1 hour
 
 def get_or_create_session(session_id: str) -> List[Dict]:
+    now = time.time()
+    # Evict stale sessions
+    stale = [sid for sid, (ts, _) in chat_sessions.items() if now - ts > _SESSION_TTL]
+    for sid in stale:
+        del chat_sessions[sid]
     if session_id not in chat_sessions:
-        chat_sessions[session_id] = []
-    return chat_sessions[session_id]
+        chat_sessions[session_id] = (now, [])
+    else:
+        chat_sessions[session_id] = (now, chat_sessions[session_id][1])
+    return chat_sessions[session_id][1]
 
 
 # =============================================================================
@@ -917,7 +925,10 @@ def chat():
         )
 
         # Handle tool use loop
-        while response.stop_reason == "tool_use":
+        iteration = 0
+        max_iterations = 10  # Safety limit matching streaming endpoint
+        while response.stop_reason == "tool_use" and iteration < max_iterations:
+            iteration += 1
             tool_results = []
 
             for content_block in response.content:
@@ -1971,9 +1982,9 @@ def host_services(host_name):
             service_name,
             COUNT(*) as span_count,
             ROUND(100.0 * SUM(CASE WHEN status_code = 'ERROR' THEN 1 ELSE 0 END) / COUNT(*), 1) as error_pct
-        FROM spans_otel_analytic
+        FROM traces_otel_analytic
         WHERE attributes_flat LIKE '%host.name={host_name}%'
-          AND timestamp > NOW() - INTERVAL {interval}
+          AND start_time > NOW() - INTERVAL {interval}
           AND service_name IS NOT NULL AND service_name != '' AND service_name != 'unknown'
         GROUP BY service_name
         ORDER BY span_count DESC
@@ -2499,9 +2510,9 @@ def topology_graph(entity_name):
             # Fallback: discover services from spans
             live_svc = executor.execute_query(f"""
             SELECT DISTINCT service_name, COUNT(*) as cnt
-            FROM spans_otel_analytic
+            FROM traces_otel_analytic
             WHERE attributes_flat LIKE '%host.name={entity_name}%'
-              AND timestamp > NOW() - INTERVAL '1' HOUR
+              AND start_time > NOW() - INTERVAL '1' HOUR
               AND service_name IS NOT NULL AND service_name != ''
             GROUP BY service_name
             """)
