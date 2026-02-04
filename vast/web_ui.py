@@ -4493,6 +4493,7 @@ def get_alert_activity():
     WITH alert_events AS (
         -- Created events
         SELECT
+            alert_id,
             created_at as event_time,
             'created' as event_type,
             service_name,
@@ -4506,6 +4507,7 @@ def get_alert_activity():
 
         -- Resolved events (auto and manual)
         SELECT
+            alert_id,
             resolved_at as event_time,
             CASE WHEN auto_resolved = true THEN 'auto_resolved' ELSE 'resolved' END as event_type,
             service_name,
@@ -4517,6 +4519,7 @@ def get_alert_activity():
             AND resolved_at > NOW() - INTERVAL '{minutes}' MINUTE
     )
     SELECT
+        alert_id,
         event_time,
         event_type,
         service_name,

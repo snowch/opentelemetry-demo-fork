@@ -5963,6 +5963,8 @@
                     const timeAgo = formatTimeAgo(event.event_time);
                     const service = escapeHtml(event.service_name || 'unknown');
                     const alertType = (event.alert_type || '').replace(/_/g, ' ');
+                    const severity = event.severity || 'info';
+                    const alertId = event.alert_id ? escapeHtml(event.alert_id) : null;
 
                     let label;
                     if (eventType === 'created') {
@@ -5973,8 +5975,10 @@
                         label = 'resolved';
                     }
 
+                    const onclickAttr = alertId ? ` onclick="investigateAlert('${alertId}')"` : '';
+
                     html += `
-                        <div class="alert-item resolved" style="padding: 6px 12px;">
+                        <div class="alert-item alert-${severity} resolved" style="padding: 6px 12px;"${onclickAttr}>
                             <div class="alert-header">
                                 <span class="alert-type-badge badge-activity">${eventType}</span>
                                 <span class="alert-time">${timeAgo}</span>
