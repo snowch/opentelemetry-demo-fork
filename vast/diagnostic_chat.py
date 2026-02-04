@@ -92,6 +92,8 @@ Columns:
 - value_double (double) - The metric value
 - attributes_flat (varchar) - Comma-separated key=value pairs of attributes
 
+**IMPORTANT:** This table has NO `host_name` or `container_name` columns. Host and container names are embedded inside `attributes_flat` as key=value pairs (e.g., `host.name=abc123`, `container.name=kafka`). You MUST use `attributes_flat LIKE '%host.name=...%'` or `attributes_flat LIKE '%container.name=...%'` to filter by host or container. Do NOT use `host_name` or `container_name` as column names in queries against this table.
+
 ### 3. traces_otel_analytic
 Distributed trace spans showing request flow across services.
 Columns:
@@ -301,7 +303,7 @@ GROUP BY metric_name
 Metric names start with `system.`. The `attributes_flat` column contains `host.name=<hostname>`.
 
 Key metrics:
-- `system.cpu.utilization` — CPU utilization (0.0 to 1.0)
+- `system.cpu.utilization` — CPU utilization ratio (0.0 to 1.0), broken down by `state` in attributes_flat. States include `idle`, `user`, `system`, `iowait`, etc. To get actual CPU busy percentage, filter for `state=idle` and compute `(1 - value) * 100`, or filter for non-idle states (`user`, `system`) and sum them. **Do NOT report the idle value as CPU usage — 98% idle means only 2% busy.**
 - `system.memory.utilization` — Memory utilization (0.0 to 1.0)
 - `system.memory.limit` — Total memory in bytes
 - `system.filesystem.utilization` — Disk utilization (0.0 to 1.0)
@@ -312,12 +314,19 @@ Key metrics:
 
 Example queries:
 ```sql
--- Host CPU and memory utilization
-SELECT metric_name, ROUND(AVG(value_double) * 100, 2) as avg_pct, ROUND(MAX(value_double) * 100, 2) as max_pct
+-- Host CPU busy percentage (subtract idle from 100%)
+SELECT ROUND((1 - AVG(value_double)) * 100, 2) as avg_cpu_busy_pct,
+       ROUND((1 - MIN(value_double)) * 100, 2) as max_cpu_busy_pct
 FROM metrics_otel_analytic
-WHERE metric_name IN ('system.cpu.utilization', 'system.memory.utilization')
+WHERE metric_name = 'system.cpu.utilization'
+  AND attributes_flat LIKE '%state=idle%'
   AND timestamp > NOW() - INTERVAL '5' MINUTE
-GROUP BY metric_name
+
+-- Host memory utilization
+SELECT ROUND(AVG(value_double) * 100, 2) as avg_pct, ROUND(MAX(value_double) * 100, 2) as max_pct
+FROM metrics_otel_analytic
+WHERE metric_name = 'system.memory.utilization'
+  AND timestamp > NOW() - INTERVAL '5' MINUTE
 ```
 
 ```sql
