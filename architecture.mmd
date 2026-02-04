@@ -20,7 +20,6 @@ graph LR
         E1["kafka/traces<br/>OTLP JSON"]
         E2["kafka/metrics<br/>OTLP JSON"]
         E3["kafka/logs<br/>OTLP JSON"]
-        E4["otlphttp/prometheus"]
     end
 
     subgraph Kafka["VAST Kafka<br/>:9092"]
@@ -68,7 +67,7 @@ graph LR
     R1 & R2 & R3 & R4 & R5 & R6 & R7 & R8 & R9 & R10 --> Collector
 
     %% Collector to Exporters
-    Collector --> E1 & E2 & E3 & E4
+    Collector --> E1 & E2 & E3
 
     %% Exporters to Kafka
     E1 --> T1
@@ -99,9 +98,6 @@ graph LR
     OA <-->|Investigation| LLM
     OP <-->|Alert Analysis| LLM
 
-    %% Prometheus
-    E4 --> Prometheus["Prometheus<br/>:9090"]
-
     %% Styling
     classDef receiver fill:#4a9eff,stroke:#2670c2,color:#fff
     classDef collector fill:#ff9f43,stroke:#cc7a2e,color:#fff
@@ -115,11 +111,11 @@ graph LR
 
     class R1,R2,R3,R4,R5,R6,R7,R8,R9,R10 receiver
     class Collector collector
-    class E1,E2,E3,E4 exporter
+    class E1,E2,E3 exporter
     class T1,T2,T3 kafka
     class DB1,DB2,DB3,DB4,DB5,DB6,DB7,DB8,DB9,DB10,DB11 vastdb
     class TQ trino
     class OA,OAG,OT,OP obs
     class LLM llm
     class MS service
-    class Prometheus trino
+
