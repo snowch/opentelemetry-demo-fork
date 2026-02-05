@@ -3076,6 +3076,39 @@
             word-break: break-all;
         }
 
+        /* Log detail modal */
+        .log-detail-modal {
+            max-width: 900px;
+        }
+        .log-detail-meta {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .log-detail-meta span { color: var(--text-primary); }
+        .log-detail-body {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            max-height: 70vh;
+            overflow: auto;
+            font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--text-primary);
+        }
+        .log-detail-body .json-key { color: #7dd3fc; }
+        .log-detail-body .json-string { color: #86efac; }
+        .log-detail-body .json-number { color: #fbbf24; }
+        .log-detail-body .json-bool { color: #c084fc; }
+        .log-detail-body .json-null { color: var(--text-muted); }
+
         .tab-controls {
             display: flex;
             justify-content: space-between;
@@ -4668,6 +4701,17 @@
         </div>
     </div>
 
+    <!-- Log Detail Modal -->
+    <div class="modal-overlay" id="log-detail-modal" onclick="if(event.target===this)closeLogDetail()">
+        <div class="modal log-detail-modal">
+            <div class="modal-header">
+                <h2>Log Entry</h2>
+                <button class="modal-close" onclick="closeLogDetail()">&times;</button>
+            </div>
+            <div class="modal-body" id="log-detail-content"></div>
+        </div>
+    </div>
+
     <!-- Chart Zoom Modal -->
     <div class="chart-zoom-overlay" id="chart-zoom-overlay" onclick="closeChartZoom()">
         <div class="chart-zoom-modal" onclick="event.stopPropagation()">
@@ -5529,6 +5573,64 @@
         }
         function _escapeHtmlStr(s) {
             return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        function syntaxHighlightJson(json) {
+            return json.replace(/("(?:\\.|[^"\\])*")\s*:/g, '<span class="json-key">$1</span>:')
+                       .replace(/:\s*("(?:\\.|[^"\\])*")/g, ': <span class="json-string">$1</span>')
+                       .replace(/:\s*(-?\d+\.?\d*(?:[eE][+-]?\d+)?)/g, ': <span class="json-number">$1</span>')
+                       .replace(/:\s*(true|false)/g, ': <span class="json-bool">$1</span>')
+                       .replace(/:\s*(null)/g, ': <span class="json-null">$1</span>');
+        }
+
+        // Recursively unwrap string values that are themselves valid JSON
+        function deepParseJson(obj) {
+            if (typeof obj === 'string') {
+                const trimmed = obj.trim();
+                if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+                    (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+                    try { return deepParseJson(JSON.parse(trimmed)); } catch { /* not JSON */ }
+                }
+                return obj;
+            }
+            if (Array.isArray(obj)) return obj.map(deepParseJson);
+            if (obj && typeof obj === 'object') {
+                const out = {};
+                for (const [k, v] of Object.entries(obj)) out[k] = deepParseJson(v);
+                return out;
+            }
+            return obj;
+        }
+
+        function showLogDetail(rawBody, timestamp, severity, traceId, spanId, serviceName) {
+            const modal = document.getElementById('log-detail-modal');
+            const content = document.getElementById('log-detail-content');
+            const time = timestamp ? new Date(timestamp).toLocaleString() : '-';
+            const sev = (severity || 'INFO').toUpperCase();
+
+            let metaHtml = `<div class="log-detail-meta">`;
+            metaHtml += `<div>Time: <span>${escapeHtml(time)}</span></div>`;
+            metaHtml += `<div>Severity: <span>${escapeHtml(sev)}</span></div>`;
+            if (serviceName) metaHtml += `<div>Service: <span>${escapeHtml(serviceName)}</span></div>`;
+            if (traceId) metaHtml += `<div>Trace: <span>${escapeHtml(traceId)}</span></div>`;
+            if (spanId) metaHtml += `<div>Span: <span>${escapeHtml(spanId)}</span></div>`;
+            metaHtml += `</div>`;
+
+            let bodyHtml;
+            try {
+                const parsed = deepParseJson(JSON.parse(rawBody));
+                const pretty = JSON.stringify(parsed, null, 2);
+                bodyHtml = syntaxHighlightJson(escapeHtml(pretty));
+            } catch {
+                bodyHtml = escapeHtml(rawBody || '-');
+            }
+
+            content.innerHTML = metaHtml + `<div class="log-detail-body">${bodyHtml}</div>`;
+            modal.classList.add('active');
+        }
+
+        function closeLogDetail() {
+            document.getElementById('log-detail-modal').classList.remove('active');
         }
 
         async function clearChat() {
@@ -7856,23 +7958,26 @@ Can you help me understand this issue further or suggest next steps?`;
 
                 if (data.logs && data.logs.length > 0) {
                     if (countBadge) countBadge.textContent = data.logs.length;
-                    tbody.innerHTML = data.logs.map(log => {
+                    // Store log entries so onclick can reference by index
+                    window._logEntries = data.logs;
+                    tbody.innerHTML = data.logs.map((log, idx) => {
                         const time = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '-';
                         const severity = (log.severity_text || 'INFO').toUpperCase();
                         const severityClass = severity === 'ERROR' ? 'severity-error' :
                                              severity === 'WARN' || severity === 'WARNING' ? 'severity-warn' :
                                              severity === 'DEBUG' ? 'severity-debug' : 'severity-info';
                         const isError = severity === 'ERROR';
+                        const clickHandler = `onclick="event.stopPropagation();var l=window._logEntries[${idx}];showLogDetail(l.body,l.timestamp,l.severity_text,l.trace_id,l.span_id,l.service_name)"`;
                         if (showService) {
                             return `<tr class="${isError ? 'error-row' : ''}"><td>${time}</td>
                                 <td title="${escapeHtml(log.service_name || '')}">${escapeHtml(log.service_name || '-')}</td>
                                 <td class="${severityClass}">${severity}</td>
-                                <td class="log-body" title="${escapeHtml(log.body || '')}">${escapeHtml(log.body || '-')}</td>
+                                <td class="log-body" ${clickHandler} title="Click to expand">${escapeHtml(log.body || '-')}</td>
                                 <td title="${log.trace_id || ''}">${log.trace_id || '-'}</td></tr>`;
                         } else {
                             return `<tr class="${isError ? 'error-row' : ''}"><td>${time}</td>
                                 <td class="${severityClass}">${severity}</td>
-                                <td class="log-body" title="${escapeHtml(log.body || '')}">${escapeHtml(log.body || '-')}</td>
+                                <td class="log-body" ${clickHandler} title="Click to expand">${escapeHtml(log.body || '-')}</td>
                                 <td title="${log.trace_id || ''}">${log.trace_id || '-'}</td></tr>`;
                         }
                     }).join('');
@@ -10744,6 +10849,7 @@ Can you help me understand this issue further or suggest next steps?`;
                 closeHelpModal();
                 closeAlertModal();
                 closeJobModal();
+                closeLogDetail();
             }
         });
     </script>

@@ -1,6 +1,17 @@
 -- Copyright The OpenTelemetry Authors
 -- SPDX-License-Identifier: Apache-2.0
 
+-- Enable pg_stat_statements for top-query monitoring
+-- (created in both the app DB and the default "postgres" DB so the
+--  OTel collector can query it regardless of which DB it connects to)
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+\connect postgres
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+\connect otel
+
+-- Grant pg_monitor to the monitoring user for query-sample collection
+GRANT pg_monitor TO root;
+
 CREATE USER otelu WITH PASSWORD 'otelp';
 
 -- Accounting Service: create a schema

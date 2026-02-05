@@ -49,6 +49,22 @@ receivers:
         enabled: true
       postgresql.index.size:
         enabled: true
+      postgresql.database.locks:
+        enabled: true
+      postgresql.sequential_scans:
+        enabled: true
+      postgresql.temp_files:
+        enabled: true
+    events:
+      db.server.query_sample:
+        enabled: true
+      db.server.top_query:
+        enabled: true
+    query_sample_collection:
+      max_rows_per_query: 100
+    top_query_collection:
+      max_rows_per_query: 100
+      top_n_query: 100
     tls:
       insecure: true
   redis:
@@ -233,6 +249,12 @@ processors:
       - key: db.system
         value: postgresql
         action: upsert
+  # Tag postgresql receiver logs with service.name so they appear in the DB logs tab
+  resource/postgres-logs:
+    attributes:
+      - key: service.name
+        value: postgresql
+        action: upsert
   # Add host.name to metrics that don't have it (like postgresql, redis)
   resource/add-host:
     attributes:
@@ -292,6 +314,10 @@ service:
     logs:
       receivers: [otlp]
       processors: [resourcedetection, memory_limiter, batch]
+      exporters: [debug, kafka/logs]
+    logs/postgres:
+      receivers: [postgresql]
+      processors: [resource/postgres-logs, resource/add-host, memory_limiter, batch]
       exporters: [debug, kafka/logs]
     logs/containers:
       receivers: [filelog/docker]
